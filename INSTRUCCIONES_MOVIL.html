@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PII-LCC // Guía de Enlace e Instalación Móvil</title>
+  <style>
+    body {
+      background-color: #050505;
+      color: #e0e0e0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      padding: 24px;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      border: 1px solid #10b981;
+      padding: 30px;
+      background-color: #0a0a0a;
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.1);
+      border-radius: 8px;
+    }
+    h1, h2, h3 {
+      color: #10b981;
+      text-transform: uppercase;
+      border-bottom: 1px solid #10b98133;
+      padding-bottom: 8px;
+      letter-spacing: 1px;
+    }
+    h1 {
+      font-size: 24px;
+      margin-top: 0;
+      text-align: center;
+      border-bottom: 2px solid #10b981;
+    }
+    .badge {
+      background-color: #10b98122;
+      color: #10b981;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      border: 1px solid #10b98144;
+      display: inline-block;
+      margin-bottom: 15px;
+    }
+    .step {
+      margin-bottom: 25px;
+    }
+    .step-title {
+      font-weight: bold;
+      color: #ffffff;
+      margin-bottom: 10px;
+    }
+    .code-box {
+      background-color: #111;
+      border-left: 3px solid #3b82f6;
+      padding: 12px;
+      overflow-x: auto;
+      margin: 10px 0;
+      font-size: 13px;
+    }
+    ul {
+      padding-left: 20px;
+    }
+    li {
+      margin-bottom: 8px;
+    }
+    .alert-box {
+      border: 1px dashed #eab308;
+      background-color: #eab3080c;
+      color: #facc15;
+      padding: 15px;
+      border-radius: 4px;
+      margin: 20px 0;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 40px;
+      font-size: 11px;
+      color: #555;
+      border-top: 1px solid #222;
+      padding-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>PII-LCC // MANUAL DE ENLACE MÓVIL Y TABLETS</h1>
+    <div style="text-align: center;">
+      <span class="badge">SISTEMA AUTÓNOMO DE OPERACIONES CAD-C2</span>
+    </div>
+
+    <p>La Plataforma Integrada de Inteligencia Militar (PII-LCC) ha sido optimizada para operar de manera completamente autónoma en dispositivos móviles y tablets (Android, iOS y iPadOS), permitiendo el intercambio de datos en tiempo real sin dependencia de internet, utilizando redes inalámbricas locales.</p>
+
+    <h2>1. Instalación en Celulares y Tablets (PWA)</h2>
+    <p>Para instalar la plataforma como una aplicación independiente en su dispositivo móvil:</p>
+    
+    <div class="step">
+      <div class="step-title">📱 Paso A: Acceso a la Red Local</div>
+      <p>Conecte su tablet o celular a la misma red Wi-Fi o red de campaña donde se encuentra alojada la plataforma, o cree un Punto de Acceso (Hotspot Wi-Fi) directo desde uno de los dispositivos tácticos.</p>
+    </div>
+
+    <div class="step">
+      <div class="step-title">🌐 Paso B: Abrir el Enlace de Campaña</div>
+      <p>Abra el navegador web (Google Chrome en Android, o Safari en iOS/iPadOS) e ingrese la IP local y puerto del terminal emisor:</p>
+      <div class="code-box">http://[IP-DEL-TERMINAL]:3000</div>
+    </div>
+
+    <div class="step">
+      <div class="step-title">📥 Paso C: Adición a la Pantalla de Inicio (Instalación)</div>
+      <ul>
+        <li><strong>En Android (Chrome):</strong> Pulse el menú de tres puntos en la esquina superior derecha y seleccione <strong>"Instalar aplicación"</strong> o <strong>"Añadir a la pantalla de inicio"</strong>.</li>
+        <li><strong>En iOS/iPadOS (Safari):</strong> Pulse el botón de <strong>"Compartir"</strong> (icono de cuadrado con flecha hacia arriba) y seleccione <strong>"Añadir a la pantalla de inicio"</strong>.</li>
+      </ul>
+      <p>La plataforma se instalará instantáneamente como una aplicación independiente (PWA) con el icono oficial de radar táctico PII-LCC, lista para funcionar offline.</p>
+    </div>
+
+    <h2>2. Trabajo de Sincronización entre Celulares y Tablets</h2>
+    <p>Para coordinar y compartir datos de inteligencia de frontera de forma directa (Peer-to-Peer):</p>
+    
+    <div class="step">
+      <div class="step-title">🔗 Sincronización Automática por Red Local</div>
+      <p>Cuando múltiples tablets o celulares acceden al mismo nodo de red táctica de la PII-LCC, el sistema detecta de forma autónoma la presencia de otros dispositivos en el área e inicia la sincronización mediante WebSockets locales. Los datos de alertas S-2, inteligencia de fusión y órdenes se unificarán en tiempo real.</p>
+    </div>
+
+    <div class="step">
+      <div class="step-title">⚡ Enlace WebRTC Directo P2P (Sin Router Central)</div>
+      <p>A través de la pestaña de <strong>Topología de Red P2P</strong>, la plataforma permite negociar enlaces WebRTC en caliente. Una vez establecido el enlace, las tablets y celulares transmiten información crítica de forma directa (punto a punto) incluso si el servidor central o el router intermedio pierden conexión.</p>
+    </div>
+
+    <div class="alert-box">
+      <strong>⚠️ ATENCIÓN OPERADORES DE TERRENO:</strong><br>
+      Para garantizar el funcionamiento sin cobertura de red externa, la plataforma utiliza "Service Workers" que guardan los componentes lógicos en la memoria segura del dispositivo móvil. Toda base de datos local se conserva de manera persistente en el navegador web (IndexedDB/LocalStorage) y se exporta automáticamente en el momento del reencuentro de redes tácticas.
+    </div>
+
+    <div class="footer">
+      PII-LCC v2.4 // ESCUELA DE COMANDO Y ESTADO MAYOR // CONFIDENCIAL MILITAR
+    </div>
+  </div>
+</body>
+</html>

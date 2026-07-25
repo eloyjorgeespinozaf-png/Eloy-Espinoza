@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="112" fill="#050505" stroke="#10b981" stroke-width="8"/>
+  
+  <!-- Concentric Radar Rings -->
+  <circle cx="256" cy="256" r="200" fill="none" stroke="#10b981" stroke-width="2" stroke-opacity="0.2"/>
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#10b981" stroke-width="2" stroke-opacity="0.4"/>
+  <circle cx="256" cy="256" r="100" fill="none" stroke="#10b981" stroke-width="2" stroke-opacity="0.6"/>
+  
+  <!-- Radar Crosshairs -->
+  <line x1="256" y1="36" x2="256" y2="476" stroke="#10b981" stroke-width="2" stroke-opacity="0.3"/>
+  <line x1="36" y1="256" x2="476" y2="256" stroke="#10b981" stroke-width="2" stroke-opacity="0.3"/>
+  
+  <!-- Outer Shield Emblem -->
+  <path d="M256,70 L390,120 L390,260 C390,360 256,430 256,430 C256,430 122,360 122,260 L122,120 Z" 
+        fill="none" stroke="#10b981" stroke-width="12" stroke-linejoin="round"/>
+  
+  <!-- Inner Radar Sweep Wedge -->
+  <path d="M256,256 L356,156 A141,141 0 0,0 256,115 Z" fill="#10b981" fill-opacity="0.15"/>
+  
+  <!-- Active Node Dots -->
+  <circle cx="256" cy="256" r="12" fill="#10b981"/>
+  <circle cx="330" cy="190" r="8" fill="#10b981">
+    <animate attributeName="opacity" values="1;0.2;1" dur="2s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="180" cy="320" r="6" fill="#10b981" opacity="0.8">
+    <animate attributeName="opacity" values="0.2;1;0.2" dur="3s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="310" cy="310" r="7" fill="#3b82f6">
+    <animate attributeName="opacity" values="0.8;0.3;0.8" dur="2.5s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Typography representation -->
+  <text x="256" y="470" font-family="monospace" font-size="28" font-weight="bold" fill="#10b981" text-anchor="middle" letter-spacing="4">PII-LCC</text>
+</svg>

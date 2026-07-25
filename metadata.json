@@ -1,0 +1,6 @@
+{
+  "name": "Plataforma Integrada de Inteligencia para la LCC",
+  "description": "Plataforma táctica e integrada de inteligencia militar para el control de acceso, fusión de datos (IMINT/HUMINT) y flujo de operaciones automatizado.",
+  "requestFramePermissions": ["camera", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

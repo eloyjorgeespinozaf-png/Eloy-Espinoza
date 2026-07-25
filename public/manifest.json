@@ -1,0 +1,19 @@
+{
+  "short_name": "PII-LCC",
+  "name": "Plataforma Integrada de Inteligencia Militar PII-LCC",
+  "description": "Terminal Autónomo de Inteligencia Táctica para la Línea de Control Clandestino",
+  "icons": [
+    {
+      "src": "/tactical-icon.svg",
+      "sizes": "192x192 512x512 1024x1024",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#050505",
+  "theme_color": "#10b981",
+  "display": "standalone",
+  "orientation": "any",
+  "categories": ["utilities", "security"]
+}
