@@ -23,6 +23,7 @@ import SystemArchitectureDiagram from './components/SystemArchitectureDiagram';
 import TacticalP2PMesh from './components/TacticalP2PMesh';
 import OfficialCrest from './components/OfficialCrest';
 import PIILCCLogo from './components/PIILCCLogo';
+import HeaderTopRightLogo from './components/HeaderTopRightLogo';
 import ErrorBoundary from './components/ErrorBoundary';
 import CodeViewer from './components/CodeViewer';
 
@@ -939,6 +940,11 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
               <span>{systemTime || 'CONECTANDO BALIZAS...'}</span>
               <RefreshCw className={`w-3 h-3 text-zinc-600 group-hover:text-zinc-400 transition-all ${isUpdatingTime ? 'animate-spin' : ''}`} />
             </button>
+
+            <div className="h-8 w-px bg-[#1a1a1a]"></div>
+
+            {/* Top Right Transparent Image */}
+            <HeaderTopRightLogo size={56} />
           </div>
 
         </div>

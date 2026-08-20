@@ -662,7 +662,7 @@ export default function InteractiveChartCreator({
       ctx.lineWidth = 1;
       
       const legX = width - paddingRight - 150;
-      const legY = 22;
+      const legY = 88;
       const legW = 145;
       const legH = 22 + (tacticalUnits.length * 15);
 

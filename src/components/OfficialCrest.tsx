@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 
 interface OfficialCrestProps {
   className?: string;
@@ -11,6 +11,42 @@ interface OfficialCrestProps {
 }
 
 export default function OfficialCrest({ className = '', size = 180 }: OfficialCrestProps) {
+  const [srcIndex, setSrcIndex] = useState(0);
+  const [hasError, setHasError] = useState(false);
+
+  const sources = [
+    'https://lh3.googleusercontent.com/d/1YsoUOljlTIBhNg3KVTgIYUX4Fp3a6yur',
+    'https://drive.google.com/thumbnail?id=1YsoUOljlTIBhNg3KVTgIYUX4Fp3a6yur&sz=w1000',
+    'https://drive.google.com/uc?export=view&id=1YsoUOljlTIBhNg3KVTgIYUX4Fp3a6yur'
+  ];
+
+  const handleImgError = () => {
+    if (srcIndex < sources.length - 1) {
+      setSrcIndex(prev => prev + 1);
+    } else {
+      setHasError(true);
+    }
+  };
+
+  if (!hasError) {
+    return (
+      <div 
+        className={`relative select-none flex items-center justify-center shrink-0 ${className}`} 
+        style={{ width: size, height: size }}
+        id="official-crest-container"
+      >
+        <img
+          src={sources[srcIndex]}
+          onError={handleImgError}
+          alt="Escudo Oficial PII-LCC"
+          style={{ width: size, height: size }}
+          className="object-contain filter drop-shadow-[0_10px_25px_rgba(0,0,0,0.85)] hover:scale-105 transition-transform duration-200"
+          referrerPolicy="no-referrer"
+        />
+      </div>
+    );
+  }
+
   return (
     <div 
       className={`relative select-none flex items-center justify-center ${className}`} 
