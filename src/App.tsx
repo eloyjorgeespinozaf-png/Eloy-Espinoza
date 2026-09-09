@@ -26,11 +26,19 @@ import PIILCCLogo from './components/PIILCCLogo';
 import HeaderTopRightLogo from './components/HeaderTopRightLogo';
 import ErrorBoundary from './components/ErrorBoundary';
 import CodeViewer from './components/CodeViewer';
+import { MilitaryLoginView } from './components/MilitaryLoginView';
+import { GamerFontSelector } from './components/GamerFontSelector';
+import { useGamingFont } from './utils/fontTheme';
+import { FullDashboardBackground, FullDashboardBackgroundControl, useFullDashboardBackground } from './components/FullDashboardBackground';
 
-import { Shield, Radio, Zap, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download } from 'lucide-react';
+import { Shield, Radio, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2 } from 'lucide-react';
 import { useAuth, PRESET_USERS } from './context/AuthContext';
+import { safeStorage } from './utils/storage';
+import { playSyntheticBeep, playChime } from './utils/audio';
 
 export default function App() {
+  const { fontPreset } = useGamingFont();
+  const fullBgState = useFullDashboardBackground();
   const {
     user,
     isAuthenticated,
@@ -53,17 +61,18 @@ export default function App() {
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
 
   const [isInstalledDevice, setIsInstalledDevice] = useState<boolean>(() => {
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
-    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const hasTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-    const saved = localStorage.getItem('pii_lcc_installed_mode');
+    const isStandalone = typeof window !== 'undefined' && Boolean(
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)')?.matches) || (window.navigator as any)?.standalone
+    );
+    const isMobileDevice = typeof navigator !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const saved = safeStorage.getItem('pii_lcc_installed_mode');
     if (saved !== null) return saved === 'true';
-    return isStandalone || isMobileDevice || hasTouch || true;
+    return isStandalone || isMobileDevice;
   });
 
   const toggleInstalledDevice = (val: boolean) => {
     setIsInstalledDevice(val);
-    localStorage.setItem('pii_lcc_installed_mode', val ? 'true' : 'false');
+    safeStorage.setItem('pii_lcc_installed_mode', val ? 'true' : 'false');
   };
 
   const [validatedReportAlert, setValidatedReportAlert] = useState<ActionableIntel | null>(null);
@@ -80,28 +89,10 @@ export default function App() {
   // Function to play crisp military confirmation sound upon report validation
   const playValidationSound = () => {
     try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      
-      const playBeep = (freq: number, startTime: number, duration: number, type: 'sine' | 'triangle' = 'sine') => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, startTime);
-        gain.gain.setValueAtTime(0.06, startTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(startTime);
-        osc.stop(startTime + duration);
-      };
-      
-      // Beautiful crisp 4-tone ascending military arpeggio
-      playBeep(523.25, ctx.currentTime, 0.15); // C5
-      playBeep(659.25, ctx.currentTime + 0.10, 0.15); // E5
-      playBeep(783.99, ctx.currentTime + 0.20, 0.20); // G5
-      playBeep(1046.50, ctx.currentTime + 0.30, 0.35, 'triangle'); // C6 (crisp peak)
+      playSyntheticBeep(523.25, 0.12, 'sine', 0.05);
+      setTimeout(() => playSyntheticBeep(659.25, 0.12, 'sine', 0.05), 80);
+      setTimeout(() => playSyntheticBeep(783.99, 0.15, 'sine', 0.05), 160);
+      setTimeout(() => playSyntheticBeep(1046.50, 0.25, 'triangle', 0.06), 240);
     } catch (e) {
       console.warn('[PII-LCC Audio] Validation sound blocked or failed:', e);
     }
@@ -110,34 +101,7 @@ export default function App() {
   // Function to play warning chime on new alert
   const playNotificationChime = () => {
     try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      
-      // Cyber-tactical dual frequency rise pulse
-      const osc1 = ctx.createOscillator();
-      const gain1 = ctx.createGain();
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(800, ctx.currentTime);
-      gain1.gain.setValueAtTime(0.08, ctx.currentTime);
-      gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
-      osc1.connect(gain1);
-      gain1.connect(ctx.destination);
-      osc1.start();
-      osc1.stop(ctx.currentTime + 0.18);
-
-      setTimeout(() => {
-        const osc2 = ctx.createOscillator();
-        const gain2 = ctx.createGain();
-        osc2.type = 'sine';
-        osc2.frequency.setValueAtTime(1100, ctx.currentTime);
-        gain2.gain.setValueAtTime(0.08, ctx.currentTime);
-        gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
-        osc2.connect(gain2);
-        gain2.connect(ctx.destination);
-        osc2.start();
-        osc2.stop(ctx.currentTime + 0.25);
-      }, 100);
+      playChime(800, 1100, 0.2);
     } catch (e) {
       console.warn('[PII-LCC Audio] Tone restricted or failed:', e);
     }
@@ -174,30 +138,7 @@ export default function App() {
   }, [rawAlerts, notificationsSoundEnabled]);
 
   // Safe localStorage helper to prevent DOMException/SecurityError in private browsing or iframe environments
-  const safeLocalStorage = {
-    getItem: (key: string): string | null => {
-      try {
-        return localStorage.getItem(key);
-      } catch (e) {
-        console.warn('localStorage.getItem is restricted or unavailable:', e);
-        return null;
-      }
-    },
-    setItem: (key: string, value: string) => {
-      try {
-        localStorage.setItem(key, value);
-      } catch (e) {
-        console.warn('localStorage.setItem is restricted or unavailable:', e);
-      }
-    },
-    removeItem: (key: string) => {
-      try {
-        localStorage.removeItem(key);
-      } catch (e) {
-        console.warn('localStorage.removeItem is restricted or unavailable:', e);
-      }
-    }
-  };
+  const safeLocalStorage = safeStorage;
 
   // Automatic OTA update tracking
   const APP_VERSION = 'v2.4.0-CAD';
@@ -231,7 +172,9 @@ export default function App() {
         setTimeout(() => {
           safeLocalStorage.setItem('PII_LCC_JUST_UPDATED', 'true');
           safeLocalStorage.setItem('PII_LCC_UPDATED_VERSION', nextVersion);
-          window.location.reload();
+          setAppVersion(nextVersion);
+          setUpdateInProgress(false);
+          setJustUpdatedToast(true);
         }, 1200);
       } else {
         setUpdateProgress(progress);
@@ -290,9 +233,15 @@ export default function App() {
     }
 
     if (serverVersion && serverVersion !== appVersion) {
-      triggerAutoUpdate(serverVersion, changelog || 'Ajuste doctrinal automático detectado al sincronizar terminal militar.');
+      setAppVersion(serverVersion);
+      safeLocalStorage.setItem('PII_LCC_UPDATED_VERSION', serverVersion);
     }
-  }, [appVersion]);
+  }, []);
+
+  const handleStateSyncRef = useRef(handleStateSync);
+  useEffect(() => {
+    handleStateSyncRef.current = handleStateSync;
+  }, [handleStateSync]);
 
   // Safe helper to send messages via WebSocket or fallback HTTP POST
   const sendWsMessage = useCallback(async (type: string, payload: any) => {
@@ -312,7 +261,7 @@ export default function App() {
         });
         if (response.ok) {
           const state = await response.json();
-          handleStateSync(state);
+          handleStateSyncRef.current(state);
         } else {
           console.error('[PII-LCC Network] HTTP Sync Fallback failed:', response.statusText);
         }
@@ -320,14 +269,16 @@ export default function App() {
         console.error('[PII-LCC Network] Error during HTTP Sync Fallback:', err);
       }
     }
-  }, [handleStateSync]);
+  }, []);
 
   // Real-time synchronization connection hook
   useEffect(() => {
     let socket: WebSocket | null = null;
-    let reconnectTimeout: any;
+    let reconnectTimeout: any = null;
+    let isCleanedUp = false;
 
     const connect = () => {
+      if (isCleanedUp) return;
       try {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws-sync`;
@@ -351,37 +302,44 @@ export default function App() {
             }
 
             if (type === 'INIT' || type === 'STATE_UPDATE' || type === 'SYSTEM_UPGRADE_ALERT') {
-              handleStateSync(payload);
+              handleStateSyncRef.current(payload);
             }
-
-
           } catch (err) {
             console.error('[PII-LCC Network] Error parsing incoming sync package:', err);
           }
         };
 
         socket.onclose = () => {
+          if (isCleanedUp) return;
+          if (reconnectTimeout) clearTimeout(reconnectTimeout);
           console.warn('[PII-LCC Network] Connection interrupted. Re-establishing secure link in 3s...');
           reconnectTimeout = setTimeout(connect, 3000);
         };
 
         socket.onerror = (err) => {
           console.warn('[PII-LCC Network] WebSocket link unreachable. Operating in secure HTTP Sync Fallback mode.', err);
-          if (socket) socket.close();
         };
       } catch (wsErr) {
         console.error('[PII-LCC Network] Could not initialize WebSocket constructor on this device:', wsErr);
-        reconnectTimeout = setTimeout(connect, 5000);
+        if (!isCleanedUp) {
+          if (reconnectTimeout) clearTimeout(reconnectTimeout);
+          reconnectTimeout = setTimeout(connect, 5000);
+        }
       }
     };
 
     connect();
 
     return () => {
-      if (socket) socket.close();
+      isCleanedUp = true;
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (socket) {
+        socket.onclose = null;
+        socket.onerror = null;
+        socket.close();
+      }
     };
-  }, [handleStateSync]);
+  }, []);
 
   // HTTP fallback polling loop
   useEffect(() => {
@@ -399,7 +357,7 @@ export default function App() {
           });
           if (response.ok) {
             const state = await response.json();
-            handleStateSync(state);
+            handleStateSyncRef.current(state);
           }
         } catch (err) {
           console.warn('[PII-LCC Network] Error polling central state:', err);
@@ -413,7 +371,7 @@ export default function App() {
     return () => {
       clearInterval(pollInterval);
     };
-  }, [handleStateSync]);
+  }, []);
 
   // Synchronize locally generated audit logs with other network nodes
   useEffect(() => {
@@ -431,10 +389,42 @@ export default function App() {
   // Current active role equals user's role if logged in, or selectedLoginRole otherwise
   const currentRole = isAuthenticated && user ? user.role : selectedLoginRole;
 
-  // Real-time UTC system clock simulation
+  // Real-time UTC system clock & Local Time Detection
   const [systemTime, setSystemTime] = useState<string>('');
+  const [localTime, setLocalTime] = useState<string>('');
+  const [localDateStr, setLocalDateStr] = useState<string>('');
+  const [localTimezone, setLocalTimezone] = useState<string>('');
+  const [isLocalNight, setIsLocalNight] = useState<boolean>(false);
+  const [localHourNumber, setLocalHourNumber] = useState<number>(new Date().getHours());
   const [timeOffset, setTimeOffset] = useState<number>(0);
   const [isUpdatingTime, setIsUpdatingTime] = useState<boolean>(false);
+
+  // Night Mode Settings: 'AUTO' (detected from local time 19:00 - 06:00), 'NIGHT' (forced high-contrast field mode), 'STANDARD' (dark mode)
+  const [nightModeSetting, setNightModeSetting] = useState<'AUTO' | 'NIGHT' | 'STANDARD'>(() => {
+    const saved = safeLocalStorage.getItem('PII_LCC_NIGHT_MODE');
+    if (saved === 'AUTO' || saved === 'NIGHT' || saved === 'STANDARD') return saved;
+    return 'AUTO';
+  });
+
+  const [nightVisionFilter, setNightVisionFilter] = useState<'STEALTH_CONTRAST' | 'NVG_PHOSPHOR' | 'RED_COMBAT'>(() => {
+    const saved = safeLocalStorage.getItem('PII_LCC_NVG_FILTER');
+    if (saved === 'STEALTH_CONTRAST' || saved === 'NVG_PHOSPHOR' || saved === 'RED_COMBAT') return saved;
+    return 'STEALTH_CONTRAST';
+  });
+
+  const [showNightSettings, setShowNightSettings] = useState<boolean>(false);
+
+  const setAndSaveNightMode = (mode: 'AUTO' | 'NIGHT' | 'STANDARD') => {
+    setNightModeSetting(mode);
+    safeLocalStorage.setItem('PII_LCC_NIGHT_MODE', mode);
+  };
+
+  const setAndSaveNvgFilter = (filter: 'STEALTH_CONTRAST' | 'NVG_PHOSPHOR' | 'RED_COMBAT') => {
+    setNightVisionFilter(filter);
+    safeLocalStorage.setItem('PII_LCC_NVG_FILTER', filter);
+  };
+
+  const isNightModeActive = nightModeSetting === 'NIGHT' || (nightModeSetting === 'AUTO' && isLocalNight);
 
   const fetchActualTime = async () => {
     setIsUpdatingTime(true);
@@ -465,8 +455,41 @@ export default function App() {
   useEffect(() => {
     const updateTime = () => {
       const now = new Date(Date.now() + timeOffset);
+      
+      // UTC Military ISO Time
       setSystemTime(now.toISOString().replace('T', ' ').substring(0, 19) + ' UTC');
+      
+      // Local Time 24h format
+      const hrs = now.getHours();
+      const mins = String(now.getMinutes()).padStart(2, '0');
+      const secs = String(now.getSeconds()).padStart(2, '0');
+      setLocalTime(`${String(hrs).padStart(2, '0')}:${mins}:${secs}`);
+      setLocalHourNumber(hrs);
+      
+      // Local Date
+      const day = String(now.getDate()).padStart(2, '0');
+      const months = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+      const month = months[now.getMonth()];
+      const year = now.getFullYear();
+      setLocalDateStr(`${day} ${month} ${year}`);
+
+      // Detect local night: active from 19:00 (7 PM) to 06:00 (6 AM)
+      const isNight = hrs >= 19 || hrs < 6;
+      setIsLocalNight(isNight);
+
+      // Detect Timezone
+      try {
+        const offsetMin = -now.getTimezoneOffset();
+        const offsetHrs = Math.floor(Math.abs(offsetMin) / 60);
+        const offsetM = Math.abs(offsetMin) % 60;
+        const sign = offsetMin >= 0 ? '+' : '-';
+        const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone || 'LOCAL';
+        setLocalTimezone(`UTC${sign}${String(offsetHrs).padStart(2, '0')}:${String(offsetM).padStart(2, '0')} (${tzName})`);
+      } catch (e) {
+        setLocalTimezone('HORA LOCAL');
+      }
     };
+
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
@@ -663,19 +686,7 @@ export default function App() {
   };
 
   const handleSetRoleAttempt = (role: MilitaryRole) => {
-    if (isAuthenticated && user) {
-      if (role !== user.role) {
-        if (isInstalledDevice) {
-          // Auto-authenticate into the new role on installed or mobile devices
-          login(role);
-        } else {
-          // Triggers the security warning, logged intrusion, and alert tone
-          validateBackendPermission(role, 'Visualizar Departamento Restringido', '19°13\'10"S 68°35\'50"W');
-        }
-      }
-    } else {
-      setSelectedLoginRole(role);
-    }
+    login(role);
   };
 
   const downloadJSONDatabase = () => {
@@ -707,6 +718,7 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 
     // Log to audit log
     const latestLog: AuditLogEntry = {
@@ -850,6 +862,7 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 
     // Log to audit log
     const latestLog: AuditLogEntry = {
@@ -908,40 +921,286 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
     sendWsMessage('LOG_AUDIT_ACTION', { logEntry: latestLog });
   };
 
+  // If operator has not authenticated into an organ terminal, display military login interface
+  if (!isAuthenticated) {
+    return (
+      <MilitaryLoginView 
+        onLoginSuccess={(role) => {
+          handleSetRoleAttempt(role);
+        }} 
+      />
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#050505] text-[#e0e0e0] font-sans selection:bg-[#3b82f6]/30 selection:text-white relative overflow-x-hidden">
-      
+    <div className={`min-h-screen font-sans selection:bg-[#3b82f6]/30 selection:text-white relative overflow-x-hidden transition-colors duration-300 ${
+      isNightModeActive 
+        ? 'bg-[#000000] text-[#f4f4f5] tactical-night-mode tactical-high-contrast' 
+        : 'bg-[#050505] text-[#e0e0e0]'
+    } ${
+      isNightModeActive && nightVisionFilter === 'NVG_PHOSPHOR' ? 'nvg-phosphor-mode' : ''
+    } ${
+      isNightModeActive && nightVisionFilter === 'RED_COMBAT' ? 'red-combat-mode' : ''
+    }`}>
+
+      {/* Full Dashboard Background: CEO-LCC MÓDULO 3: INTERFAZ DE MANDO (DASHBOARD 2) at 80% contrast */}
+      <FullDashboardBackground 
+        settings={fullBgState.settings} 
+        imageSrc={fullBgState.activeImageSrc} 
+      />
+
       {/* Tactical Grid Overlay Background */}
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.006)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.006)_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
+      <div className={`absolute inset-0 pointer-events-none transition-opacity duration-300 ${
+        isNightModeActive 
+          ? 'bg-[linear-gradient(rgba(255,255,255,0.003)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.003)_1px,transparent_1px)] bg-[size:32px_32px] opacity-40' 
+          : 'bg-[linear-gradient(rgba(255,255,255,0.006)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.006)_1px,transparent_1px)] bg-[size:32px_32px]'
+      }`} />
 
       {/* Top Banner HUD Header */}
-      <header className="h-16 border-b border-[#1a1a1a] bg-[#0a0a0a] flex items-center sticky top-0 z-50 shrink-0">
+      <header className={`h-16 border-b flex items-center sticky top-0 z-50 shrink-0 transition-colors duration-300 ${
+        isNightModeActive ? 'border-zinc-900 bg-[#000000]' : 'border-[#1a1a1a] bg-[#0a0a0a]'
+      }`}>
         <div className="w-full max-w-7xl mx-auto px-4 md:px-6 flex items-center justify-between">
           
           {/* Logo & Title */}
           <PIILCCLogo variant="header" size={48} />
 
-          {/* System UTC Time Clock & Operation Status */}
-          <div className="flex items-center gap-6">
-            <div className="hidden md:flex flex-col items-end">
-              <span className="text-[10px] text-[#666] uppercase leading-none">Estado de Operación</span>
-              <span className="text-[11px] text-[#10b981] font-mono mt-1">● SISTEMAS NOMINALES</span>
+          {/* Time, Night Mode & Status HUD Controls */}
+          <div className="flex items-center gap-3 md:gap-5">
+            
+            {/* Operation Status */}
+            <div className="hidden lg:flex flex-col items-end">
+              <span className="text-[9px] text-[#666] uppercase leading-none">Estado de Operación</span>
+              <span className={`text-[11px] font-mono mt-1 flex items-center gap-1.5 ${
+                isNightModeActive ? 'text-emerald-400 font-bold' : 'text-[#10b981]'
+              }`}>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block" />
+                <span>SISTEMAS NOMINALES</span>
+              </span>
             </div>
             
-            <div className="hidden md:block h-8 w-px bg-[#1a1a1a]"></div>
+            <div className="hidden lg:block h-8 w-px bg-zinc-800/80"></div>
 
-            <button
-              onClick={fetchActualTime}
-              disabled={isUpdatingTime}
-              className="flex items-center gap-2 text-slate-400 font-mono text-xs bg-black/45 hover:bg-zinc-900 border border-[#1a1a1a] hover:border-zinc-700 px-3 py-1.5 rounded transition-all active:scale-95 cursor-pointer select-none group outline-none"
-              title="Actualizar con la hora real de red"
-            >
-              <Clock className={`w-3.5 h-3.5 text-[#3b82f6] ${isUpdatingTime ? 'animate-spin text-emerald-400' : 'group-hover:text-emerald-400'}`} />
-              <span>{systemTime || 'CONECTANDO BALIZAS...'}</span>
-              <RefreshCw className={`w-3 h-3 text-zinc-600 group-hover:text-zinc-400 transition-all ${isUpdatingTime ? 'animate-spin' : ''}`} />
-            </button>
+            {/* Tactical Local Clock & UTC Detection Widget */}
+            <div className="flex items-center gap-2 bg-black/60 border border-zinc-800/90 hover:border-zinc-700 px-3 py-1.5 rounded-lg transition-all">
+              <div className="flex flex-col text-left font-mono">
+                <div className="flex items-center gap-1.5 text-[10px] leading-none">
+                  {isLocalNight ? (
+                    <span className="flex items-center gap-1 text-amber-400 font-bold" title="Hora nocturna detectada localmente (19:00 - 06:00)">
+                      <Moon className="w-3 h-3 text-amber-400 fill-amber-400/20" />
+                      <span>NOCHE LOCAL</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-amber-300 font-bold" title="Hora diurna detectada localmente">
+                      <Sun className="w-3 h-3 text-amber-400" />
+                      <span>DÍA LOCAL</span>
+                    </span>
+                  )}
+                  <span className="text-zinc-600">|</span>
+                  <span className="text-emerald-400 font-bold text-xs tracking-wider">
+                    {localTime || '--:--:--'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[9px] text-zinc-500 mt-1 leading-none">
+                  <span className="text-zinc-400">{systemTime.split(' ')[1] || '--:--:--'} UTC</span>
+                  <span className="text-zinc-600 font-sans hidden sm:inline">• {localDateStr}</span>
+                </div>
+              </div>
 
-            <div className="h-8 w-px bg-[#1a1a1a]"></div>
+              <button
+                onClick={fetchActualTime}
+                disabled={isUpdatingTime}
+                className="ml-1 p-1 text-zinc-500 hover:text-emerald-400 transition-colors rounded hover:bg-zinc-800/60 cursor-pointer"
+                title="Sincronizar balizas de tiempo con el servidor"
+              >
+                <RefreshCw className={`w-3 h-3 ${isUpdatingTime ? 'animate-spin text-emerald-400' : ''}`} />
+              </button>
+            </div>
+
+            {/* Full Dashboard Background (War Room 80%) Control */}
+            <FullDashboardBackgroundControl 
+              settings={fullBgState.settings}
+              updateSettings={fullBgState.updateSettings}
+              uploadDashboardImage={fullBgState.uploadDashboardImage}
+              resetToDefault={fullBgState.resetToDefault}
+            />
+
+            {/* Videogame HUD Font Style Switcher */}
+            <GamerFontSelector />
+
+            {/* Tactical Night Mode (Alto Contraste) Switcher */}
+            <div className="relative">
+              <button
+                onClick={() => setShowNightSettings(!showNightSettings)}
+                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border font-mono text-xs transition-all cursor-pointer ${
+                  isNightModeActive
+                    ? 'bg-amber-950/25 border-amber-600/50 text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.15)]'
+                    : 'bg-zinc-950/70 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                }`}
+                title="Ajustar Modo Nocturno de Alto Contraste y Reducción de Brillo"
+              >
+                {isNightModeActive ? (
+                  <>
+                    <Moon className="w-3.5 h-3.5 text-amber-400 fill-amber-400/30 animate-pulse" />
+                    <div className="flex flex-col text-left leading-none">
+                      <span className="text-[10px] font-bold text-amber-300">MODO NOCTURNO</span>
+                      <span className="text-[8px] text-amber-400/80 uppercase">
+                        {nightModeSetting === 'AUTO' ? 'AUTO (HORA LOCAL)' : 'FORZADO CAMPO'}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <Sun className="w-3.5 h-3.5 text-zinc-400" />
+                    <div className="flex flex-col text-left leading-none">
+                      <span className="text-[10px] font-bold text-zinc-300">MODO ESTÁNDAR</span>
+                      <span className="text-[8px] text-zinc-500 uppercase">
+                        {nightModeSetting === 'AUTO' ? 'AUTO (DÍA)' : 'ESTÁNDAR'}
+                      </span>
+                    </div>
+                  </>
+                )}
+                <Sliders className="w-3 h-3 text-zinc-500 ml-0.5" />
+              </button>
+
+              {/* Night Mode Dropdown / Settings Panel */}
+              {showNightSettings && (
+                <div className="absolute right-0 top-11 mt-1 w-72 bg-black border border-zinc-800 rounded-xl shadow-2xl p-3.5 z-50 font-mono text-left space-y-3">
+                  <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                    <div className="flex items-center gap-1.5 text-amber-400 font-bold text-xs">
+                      <Moon className="w-3.5 h-3.5" />
+                      <span className="uppercase tracking-wider text-[10px]">Modo Nocturno de Campo</span>
+                    </div>
+                    <span className="text-[9px] bg-zinc-900 text-zinc-400 px-1.5 py-0.5 rounded border border-zinc-800">
+                      CAD-C2
+                    </span>
+                  </div>
+
+                  <p className="text-[10px] text-zinc-400 font-sans leading-relaxed">
+                    Reduce el brillo y destello en la pantalla, maximizando el contraste para preservar la visión nocturna en operaciones de campo.
+                  </p>
+
+                  <div className="space-y-1">
+                    <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider block mb-1">
+                      Comportamiento de Activación:
+                    </span>
+                    
+                    {/* AUTO option */}
+                    <button
+                      onClick={() => setAndSaveNightMode('AUTO')}
+                      className={`w-full flex items-center justify-between p-2 rounded-lg text-xs transition-all cursor-pointer ${
+                        nightModeSetting === 'AUTO'
+                          ? 'bg-amber-950/30 text-amber-300 border border-amber-700/50'
+                          : 'bg-zinc-950 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 border border-zinc-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-3.5 h-3.5 text-amber-400" />
+                        <div className="text-left">
+                          <span className="font-bold block text-[11px]">Automático por Hora Local</span>
+                          <span className="text-[9px] text-zinc-500 font-sans block">
+                            Activo 19:00 a 06:00 (Hora local: {localTime})
+                          </span>
+                        </div>
+                      </div>
+                      {nightModeSetting === 'AUTO' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                    </button>
+
+                    {/* NIGHT forced option */}
+                    <button
+                      onClick={() => setAndSaveNightMode('NIGHT')}
+                      className={`w-full flex items-center justify-between p-2 rounded-lg text-xs transition-all cursor-pointer ${
+                        nightModeSetting === 'NIGHT'
+                          ? 'bg-amber-950/30 text-amber-300 border border-amber-700/50'
+                          : 'bg-zinc-950 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 border border-zinc-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Moon className="w-3.5 h-3.5 text-amber-400" />
+                        <div className="text-left">
+                          <span className="font-bold block text-[11px]">Modo Nocturno Forzado</span>
+                          <span className="text-[9px] text-zinc-500 font-sans block">
+                            Siempre activo (Anti-destello total)
+                          </span>
+                        </div>
+                      </div>
+                      {nightModeSetting === 'NIGHT' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                    </button>
+
+                    {/* STANDARD option */}
+                    <button
+                      onClick={() => setAndSaveNightMode('STANDARD')}
+                      className={`w-full flex items-center justify-between p-2 rounded-lg text-xs transition-all cursor-pointer ${
+                        nightModeSetting === 'STANDARD'
+                          ? 'bg-zinc-900 text-zinc-200 border border-zinc-700'
+                          : 'bg-zinc-950 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200 border border-zinc-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Sun className="w-3.5 h-3.5 text-zinc-400" />
+                        <div className="text-left">
+                          <span className="font-bold block text-[11px]">Modo Estándar</span>
+                          <span className="text-[9px] text-zinc-500 font-sans block">
+                            Tema oscuro táctico convencional
+                          </span>
+                        </div>
+                      </div>
+                      {nightModeSetting === 'STANDARD' && <Check className="w-3.5 h-3.5 text-zinc-300" />}
+                    </button>
+                  </div>
+
+                  {/* Night Vision Spectrum Filter Options (when night mode is active) */}
+                  {isNightModeActive && (
+                    <div className="pt-2 border-t border-zinc-900 space-y-1.5">
+                      <span className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider block">
+                        Filtro Óptico de Espectro Táctico:
+                      </span>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <button
+                          onClick={() => setAndSaveNvgFilter('STEALTH_CONTRAST')}
+                          className={`p-1.5 rounded text-[9px] text-center border font-bold transition-all cursor-pointer ${
+                            nightVisionFilter === 'STEALTH_CONTRAST'
+                              ? 'bg-zinc-800 text-white border-zinc-600 shadow-sm'
+                              : 'bg-zinc-950 text-zinc-500 hover:text-zinc-300 border-zinc-900'
+                          }`}
+                        >
+                          🌑 Sigilo
+                        </button>
+                        <button
+                          onClick={() => setAndSaveNvgFilter('NVG_PHOSPHOR')}
+                          className={`p-1.5 rounded text-[9px] text-center border font-bold transition-all cursor-pointer ${
+                            nightVisionFilter === 'NVG_PHOSPHOR'
+                              ? 'bg-emerald-950/60 text-emerald-300 border-emerald-600 shadow-sm'
+                              : 'bg-zinc-950 text-zinc-500 hover:text-zinc-300 border-zinc-900'
+                          }`}
+                        >
+                          🟢 NVG Verde
+                        </button>
+                        <button
+                          onClick={() => setAndSaveNvgFilter('RED_COMBAT')}
+                          className={`p-1.5 rounded text-[9px] text-center border font-bold transition-all cursor-pointer ${
+                            nightVisionFilter === 'RED_COMBAT'
+                              ? 'bg-red-950/60 text-red-300 border-red-600 shadow-sm'
+                              : 'bg-zinc-950 text-zinc-500 hover:text-zinc-300 border-zinc-900'
+                          }`}
+                        >
+                          🔴 Luz Roja
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => setShowNightSettings(false)}
+                    className="w-full py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 rounded text-[10px] font-bold uppercase transition-all cursor-pointer text-center"
+                  >
+                    Cerrar Ajustes
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="h-8 w-px bg-zinc-800/80"></div>
 
             {/* Top Right Transparent Image */}
             <HeaderTopRightLogo size={56} />
@@ -949,6 +1208,32 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
 
         </div>
       </header>
+
+      {/* Tactical Night Field Mode HUD Indicator Ribbon */}
+      {isNightModeActive && (
+        <div className="bg-black border-b border-amber-900/40 px-4 py-1.5 font-mono text-[10px] flex items-center justify-between text-amber-300 shadow-[inset_0_1px_0_rgba(245,158,11,0.1)] animate-fade-in">
+          <div className="w-full max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping inline-block" />
+              <span className="font-bold tracking-wider text-amber-200">
+                [MODO NOCTURNO TÁCTICO DE ALTO CONTRASTE ACTIVO]
+              </span>
+              <span className="text-zinc-600 hidden md:inline">|</span>
+              <span className="text-zinc-400 hidden md:inline">
+                Hora local: <strong className="text-white font-mono">{localTime}</strong> ({localTimezone})
+              </span>
+            </div>
+            <div className="flex items-center gap-2.5 text-[9px]">
+              <span className="bg-amber-950/40 text-amber-400 border border-amber-800/40 px-2 py-0.5 rounded font-bold">
+                LUMINISCENCIA: -85% ANTI-DESTELLO
+              </span>
+              <span className="bg-zinc-900 text-zinc-300 border border-zinc-800 px-2 py-0.5 rounded font-bold">
+                ESPECTRO: {nightVisionFilter === 'STEALTH_CONTRAST' ? 'SIGILO NEGRO PURO' : nightVisionFilter === 'NVG_PHOSPHOR' ? 'NVG FÓSFORO VERDE' : 'LUZ ROJA DE COMBATE'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* System Workspace Header Bar (Role Selector & Profile Details) */}
       <div className="bg-[#080808] border-b border-[#1a1a1a]">
@@ -959,6 +1244,7 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
             <div className={`p-2.5 rounded ${
               currentRole === 'ROL_CEO' ? 'bg-[#3b82f6]/10 text-[#3b82f6] border border-[#3b82f6]/20' :
               currentRole === 'ROL_FUSION' ? 'bg-[#f97316]/10 text-[#f97316] border border-[#f97316]/20' :
+              currentRole === 'ROL_BUSQUEDA' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' :
               'bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20'
             }`}>
               <UserIcon className="w-4 h-4" />
@@ -966,14 +1252,16 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
             <div className="text-left font-mono flex-1">
               <span className="text-[9px] text-[#666] uppercase block leading-none">Operador Militar Activo:</span>
               <span className="text-xs font-bold text-white block mt-0.5">
-                {currentRole === 'ROL_CEO' && 'GRAL. E. MARTÍNEZ'}
-                {currentRole === 'ROL_FUSION' && 'TTE. CNEL. S. ROJAS'}
-                {currentRole === 'ROL_PATRULLA' && 'EQUIPOS DE BÚSQUEDA S-2'}
+                {currentRole === 'ROL_CEO' && 'GRAL. E. MARTÍNEZ (CEO)'}
+                {currentRole === 'ROL_FUSION' && 'TTE. CNEL. S. ROJAS (CFI)'}
+                {currentRole === 'ROL_BUSQUEDA' && 'MY. R. VARGAS (S-2)'}
+                {(currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && 'CB1. F. VALENZUELA (PATRULLA)'}
               </span>
               <span className="text-[9px] text-slate-500 flex items-center gap-1 mt-0.5">
-                ROL: {currentRole === 'ROL_CEO' && 'COMANDO ESTRATÉGICO (ROL_CEO)'}
-                {currentRole === 'ROL_FUSION' && 'ANALISTA DE FUSIÓN (ROL_FUSION)'}
-                {currentRole === 'ROL_PATRULLA' && 'ÓRGANO DE BÚSQUEDA (ROL_PATRULLA)'}
+                {currentRole === 'ROL_CEO' && '3. CEO-LCC MANDO'}
+                {currentRole === 'ROL_FUSION' && '2. CFI DE BRIGADA'}
+                {currentRole === 'ROL_BUSQUEDA' && '1. ÓRGANOS DE BÚSQUEDA'}
+                {(currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && '4. UNIDADES DE TERRENO'}
               </span>
             </div>
             {isAuthenticated && (
@@ -1065,63 +1353,64 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                   onClick={() => {
                     logout();
                   }}
-                  className="flex items-center justify-center p-2 rounded bg-red-950/20 text-red-400 hover:bg-red-900/30 hover:text-red-300 border border-red-900/30 transition-colors cursor-pointer"
-                  title="Cerrar Sesión Segura (CAD-C2)"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded bg-red-950/20 text-red-400 hover:bg-red-900/30 hover:text-red-300 border border-red-900/30 transition-colors cursor-pointer text-xs font-mono font-bold"
+                  title="Cerrar Sesión Segura y Salir al Terminal de Acceso (CAD-C2)"
                 >
                   <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Cerrar Sesión</span>
                 </button>
               </div>
             )}
           </div>
 
-          {/* Core Navigation Tabs (Side-bar style converted into elegant, tactile buttons with strict role division) */}
+          {/* Core Navigation Tabs (4 Órganos de la Doctrina Militar) */}
           <div className="flex bg-[#0a0a0a] border border-[#1a1a1a] p-1 rounded-lg self-start md:self-auto w-full md:w-auto overflow-x-auto gap-1">
             <button
-              onClick={() => handleSetRoleAttempt('ROL_CEO')}
-              className={`flex-1 md:flex-none px-4 py-2.5 rounded text-xs font-mono font-bold uppercase transition-all flex items-center justify-center gap-2 ${
-                currentRole === 'ROL_CEO'
-                  ? 'bg-[#3b82f6]/10 border-l-2 border-[#3b82f6] text-[#3b82f6]'
+              onClick={() => handleSetRoleAttempt('ROL_BUSQUEDA')}
+              className={`flex-1 md:flex-none px-3 py-2.5 rounded text-xs font-mono font-bold uppercase transition-all flex items-center justify-center gap-2 ${
+                currentRole === 'ROL_BUSQUEDA'
+                  ? 'bg-yellow-500/10 border-l-2 border-yellow-500 text-yellow-400'
                   : 'text-[#444] hover:text-[#666] bg-[#0c0c0c]/50'
               }`}
             >
-              {currentRole === 'ROL_CEO' ? (
-                <Zap className="w-3.5 h-3.5" />
-              ) : (
-                <Lock className="w-3.5 h-3.5 text-zinc-700" />
-              )}
-              <span className={currentRole === 'ROL_CEO' ? 'text-white' : 'text-zinc-600'}>3. Mando (CEO-LCC)</span>
+              <Radio className={`w-3.5 h-3.5 ${currentRole === 'ROL_BUSQUEDA' ? 'animate-pulse text-yellow-400' : 'text-zinc-600'}`} />
+              <span className={currentRole === 'ROL_BUSQUEDA' ? 'text-white' : 'text-zinc-600'}>1. Búsqueda</span>
             </button>
 
             <button
               onClick={() => handleSetRoleAttempt('ROL_FUSION')}
-              className={`flex-1 md:flex-none px-4 py-2.5 rounded text-xs font-mono font-bold uppercase transition-all flex items-center justify-center gap-2 ${
+              className={`flex-1 md:flex-none px-3 py-2.5 rounded text-xs font-mono font-bold uppercase transition-all flex items-center justify-center gap-2 ${
                 currentRole === 'ROL_FUSION'
                   ? 'bg-[#f97316]/10 border-l-2 border-[#f97316] text-[#f97316]'
                   : 'text-[#444] hover:text-[#666] bg-[#0c0c0c]/50'
               }`}
             >
-              {currentRole === 'ROL_FUSION' ? (
-                <Shield className="w-3.5 h-3.5" />
-              ) : (
-                <Lock className="w-3.5 h-3.5 text-zinc-700" />
-              )}
+              <Shield className={`w-3.5 h-3.5 ${currentRole === 'ROL_FUSION' ? 'text-[#f97316]' : 'text-zinc-600'}`} />
               <span className={currentRole === 'ROL_FUSION' ? 'text-white' : 'text-zinc-600'}>2. Fusión (CFI)</span>
             </button>
 
             <button
-              onClick={() => handleSetRoleAttempt('ROL_PATRULLA')}
-              className={`flex-1 md:flex-none px-4 py-2.5 rounded text-xs font-mono font-bold uppercase transition-all flex items-center justify-center gap-2 ${
-                currentRole === 'ROL_PATRULLA'
-                  ? 'bg-[#10b981]/10 border-l-2 border-[#10b981] text-[#10b981]'
+              onClick={() => handleSetRoleAttempt('ROL_CEO')}
+              className={`flex-1 md:flex-none px-3 py-2.5 rounded text-xs font-mono font-bold uppercase transition-all flex items-center justify-center gap-2 ${
+                currentRole === 'ROL_CEO'
+                  ? 'bg-[#3b82f6]/10 border-l-2 border-[#3b82f6] text-[#3b82f6]'
                   : 'text-[#444] hover:text-[#666] bg-[#0c0c0c]/50'
               }`}
             >
-              {currentRole === 'ROL_PATRULLA' ? (
-                <Radio className="w-3.5 h-3.5 animate-pulse" />
-              ) : (
-                <Lock className="w-3.5 h-3.5 text-zinc-700" />
-              )}
-              <span className={currentRole === 'ROL_PATRULLA' ? 'text-white' : 'text-zinc-600'}>1. Búsqueda (S-2)</span>
+              <Zap className={`w-3.5 h-3.5 ${currentRole === 'ROL_CEO' ? 'text-[#3b82f6]' : 'text-zinc-600'}`} />
+              <span className={currentRole === 'ROL_CEO' ? 'text-white' : 'text-zinc-600'}>3. Mando (CEO)</span>
+            </button>
+
+            <button
+              onClick={() => handleSetRoleAttempt('ROL_TERRENO')}
+              className={`flex-1 md:flex-none px-3 py-2.5 rounded text-xs font-mono font-bold uppercase transition-all flex items-center justify-center gap-2 ${
+                currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA'
+                  ? 'bg-emerald-500/10 border-l-2 border-emerald-500 text-emerald-400'
+                  : 'text-[#444] hover:text-[#666] bg-[#0c0c0c]/50'
+              }`}
+            >
+              <Navigation className={`w-3.5 h-3.5 ${currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA' ? 'text-emerald-400' : 'text-zinc-600'}`} />
+              <span className={currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA' ? 'text-white' : 'text-zinc-600'}>4. Terreno</span>
             </button>
           </div>
 
@@ -1140,215 +1429,7 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
           </div>
         )}
 
-        {!isAuthenticated ? (
-          <div className="max-w-3xl mx-auto bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-6 md:p-8 shadow-2xl relative overflow-hidden animate-fade-in">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#10b981] via-[#f97316] to-[#3b82f6]" />
-            
-            <div className="text-center space-y-4 mb-8 flex flex-col items-center">
-              <div className="space-y-1">
-                <h2 className="text-md md:text-lg font-bold font-mono text-zinc-400 tracking-tight uppercase">
-                  SISTEMA DE CONTROL DE ACCESO DOCTRINAL (CAD-C2)
-                </h2>
-                <p className="text-[9px] text-zinc-500 font-mono tracking-widest uppercase">
-                  CLASIFICACIÓN: DEFENSA NACIONAL // RESERVADO COMPARTIMENTADO
-                </p>
-              </div>
 
-              {/* PIILCC Centerpiece Logo */}
-              <PIILCCLogo variant="centerpiece" size={170} />
-
-              <div className="max-w-md mx-auto pt-2 border-t border-[#1a1a1a]">
-                <p className="text-xs text-zinc-400 leading-relaxed font-sans">
-                  Para cumplir con la jerarquía militar y evitar el flujo libre de información, debe firmar digitalmente y autenticarse en uno de los tres departamentos definidos en la doctrina de la plataforma.
-                </p>
-              </div>
-            </div>
-
-            {/* PII-LCC Installed Device Status Indicator */}
-            <div className="max-w-xl mx-auto mb-8 p-3.5 rounded-lg border border-[#10b981]/20 bg-[#10b981]/5 flex flex-col sm:flex-row items-center justify-between gap-4 text-left font-mono">
-              <div className="flex items-center gap-3">
-                <div className="relative shrink-0">
-                  <Shield className="w-5 h-5 text-[#10b981]" />
-                  <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#10b981] rounded-full animate-ping" />
-                  <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-[#10b981] rounded-full" />
-                </div>
-                <div>
-                  <div className="text-[10px] font-black uppercase text-[#10b981] flex items-center gap-1.5 flex-wrap">
-                    <span>📱 Terminal de Operaciones PII-LCC Instalado</span>
-                    <span className="text-[8px] bg-[#10b981]/20 text-[#10b981] px-1 py-0.2 rounded font-mono">ENLACE AUTORIZADO</span>
-                  </div>
-                  <p className="text-[10px] text-zinc-400 mt-0.5 leading-snug">
-                    Este dispositivo cuenta con el paquete táctico de la PII-LCC instalado. Se autoriza el acceso y la conmutación instantánea a los niveles 2 (Fusión) y 3 (Mando).
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => toggleInstalledDevice(!isInstalledDevice)}
-                className={`px-3 py-1.5 rounded text-[10px] uppercase font-bold tracking-wider transition-all shrink-0 cursor-pointer border ${
-                  isInstalledDevice 
-                    ? 'bg-[#10b981]/15 text-[#10b981] border-[#10b981]/30 hover:bg-[#10b981]/20' 
-                    : 'bg-zinc-900 text-zinc-500 border-zinc-800 hover:text-zinc-300'
-                }`}
-              >
-                {isInstalledDevice ? 'Desactivar Filtro' : 'Forzar Enlace'}
-              </button>
-            </div>
-
-             {/* Role Selection Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-              {/* Role 1: ROL_PATRULLA */}
-              <div 
-                onClick={() => {
-                  setSelectedLoginRole('ROL_PATRULLA');
-                }}
-                className={`p-4 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between ${
-                  selectedLoginRole === 'ROL_PATRULLA'
-                    ? 'bg-[#10b981]/5 border-[#10b981] shadow-lg shadow-[#10b981]/5 ring-1 ring-[#10b981]/20'
-                    : 'bg-zinc-950/60 border-zinc-900 hover:border-zinc-800 hover:bg-zinc-900/20'
-                }`}
-              >
-                <div>
-                  <span className={`text-[9px] font-mono font-black px-1.5 py-0.5 rounded ${
-                    selectedLoginRole === 'ROL_PATRULLA' ? 'bg-[#10b981]/20 text-[#10b981]' : 'bg-zinc-800 text-zinc-400'
-                  }`}>
-                    NIVEL 1 - S-2
-                  </span>
-                  <h4 className="text-sm font-bold text-white font-mono mt-4 flex items-center gap-1.5">
-                    <Radio className="w-4 h-4 text-[#10b981]" />
-                    BÚSQUEDA S-2 (ROL_PATRULLA)
-                  </h4>
-                  <p className="text-[10px] text-zinc-500 font-mono mt-0.5">Órgano de Captura</p>
-                  <p className="text-[11px] text-zinc-400 font-sans mt-3 leading-relaxed">
-                    Captura telemetría bruta y registros primarios. No se permite análisis táctico ni valoración.
-                  </p>
-                </div>
-                <div className="mt-4 pt-2 border-t border-zinc-900/40 text-[9px] font-mono text-[#10b981]">
-                  OPERADOR: CABO VALENZUELA
-                </div>
-              </div>
-
-              {/* Role 2: ROL_FUSION */}
-              <div 
-                onClick={() => {
-                  setSelectedLoginRole('ROL_FUSION');
-                }}
-                className={`p-4 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between ${
-                  selectedLoginRole === 'ROL_FUSION'
-                    ? 'bg-[#f97316]/5 border-[#f97316] shadow-lg shadow-[#f97316]/5 ring-1 ring-[#f97316]/20'
-                    : 'bg-zinc-950/60 border-zinc-900 hover:border-zinc-800 hover:bg-zinc-900/20'
-                }`}
-              >
-                <div>
-                  <span className={`text-[9px] font-mono font-black px-1.5 py-0.5 rounded ${
-                    selectedLoginRole === 'ROL_FUSION' ? 'bg-[#f97316]/20 text-[#f97316]' : 'bg-zinc-800 text-zinc-400'
-                  }`}>
-                    NIVEL 2 - CFI
-                  </span>
-                  <h4 className="text-sm font-bold text-white font-mono mt-4 flex items-center gap-1.5">
-                    <Shield className="w-4 h-4 text-[#f97316]" />
-                    FUSIÓN CFI (ROL_FUSION)
-                  </h4>
-                  <p className="text-[10px] text-zinc-500 font-mono mt-0.5">Sala de Situación</p>
-                  <p className="text-[11px] text-zinc-400 font-sans mt-3 leading-relaxed">
-                    Valora e integra datos. Contrasta rutas históricas y promueve reportes a inteligencia.
-                  </p>
-                </div>
-                <div className="mt-4 pt-2 border-t border-zinc-900/40 text-[9px] font-mono text-[#f97316]">
-                  OPERADOR: TTE. CNEL. ROJAS
-                </div>
-              </div>
-
-              {/* Role 3: ROL_CEO */}
-              <div 
-                onClick={() => {
-                  setSelectedLoginRole('ROL_CEO');
-                }}
-                className={`p-4 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between ${
-                  selectedLoginRole === 'ROL_CEO'
-                    ? 'bg-[#3b82f6]/5 border-[#3b82f6] shadow-lg shadow-[#3b82f6]/5 ring-1 ring-[#3b82f6]/20'
-                    : 'bg-zinc-950/60 border-zinc-900 hover:border-zinc-800 hover:bg-zinc-900/20'
-                }`}
-              >
-                <div>
-                  <span className={`text-[9px] font-mono font-black px-1.5 py-0.5 rounded ${
-                    selectedLoginRole === 'ROL_CEO' ? 'bg-[#3b82f6]/20 text-[#3b82f6]' : 'bg-zinc-800 text-zinc-400'
-                  }`}>
-                    NIVEL 3 - LCC
-                  </span>
-                  <h4 className="text-sm font-bold text-white font-mono mt-4 flex items-center gap-1.5">
-                    <Zap className="w-4 h-4 text-[#3b82f6]" />
-                    MANDO CEO-LCC (ROL_CEO)
-                  </h4>
-                  <p className="text-[10px] text-zinc-500 font-mono mt-0.5">Comando y Control</p>
-                  <p className="text-[11px] text-zinc-400 font-sans mt-3 leading-relaxed">
-                    Visualiza inteligencia aprobada. Emite órdenes de operaciones automatizadas (OOA).
-                  </p>
-                </div>
-                <div className="mt-4 pt-2 border-t border-zinc-900/40 text-[9px] font-mono text-[#3b82f6]">
-                  OPERADOR: GRAL. MARTÍNEZ
-                </div>
-              </div>
-            </div>
-
-            {/* Cryptographic Key Signature Form */}
-            <form 
-              onSubmit={(e) => {
-                e.preventDefault();
-                login(selectedLoginRole);
-              }} 
-              className="bg-zinc-950 p-4 rounded-xl border border-zinc-900 space-y-4 max-w-xl mx-auto"
-            >
-              <div className="text-left">
-                <label className="block text-[10px] font-mono text-[#666] uppercase mb-1 font-bold">
-                  Firma Criptográfica Digital de Seguridad (Auto-Asignada)
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    readOnly
-                    value={displayedSignature}
-                    className={`w-full bg-zinc-900 border rounded px-3 py-2 text-xs font-mono focus:outline-none transition-all duration-300 ${
-                      selectedLoginRole === 'ROL_PATRULLA' ? 'text-[#10b981] border-[#10b981]/20 shadow-[0_0_10px_rgba(16,185,129,0.03)]' :
-                      selectedLoginRole === 'ROL_FUSION' ? 'text-[#f97316] border-[#f97316]/20 shadow-[0_0_10px_rgba(249,115,22,0.03)]' :
-                      'text-[#3b82f6] border-[#3b82f6]/20 shadow-[0_0_10px_rgba(59,130,246,0.03)]'
-                    }`}
-                  />
-                  <Key className={`w-3.5 h-3.5 absolute right-3 top-2.5 transition-colors duration-300 ${
-                    selectedLoginRole === 'ROL_PATRULLA' ? 'text-[#10b981]/60' :
-                    selectedLoginRole === 'ROL_FUSION' ? 'text-[#f97316]/60' :
-                    'text-[#3b82f6]/60'
-                  }`} />
-                </div>
-              </div>
-
-              <div className="text-left">
-                <label className="block text-[10px] font-mono text-[#666] uppercase mb-1 font-bold">
-                  PIN de Autorización Táctica
-                </label>
-                <input
-                  type="password"
-                  required
-                  placeholder="••••••••"
-                  defaultValue="123456"
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-zinc-700"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className={`w-full py-2.5 px-4 rounded font-mono font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-[0.99] cursor-pointer text-white shadow-md ${
-                  selectedLoginRole === 'ROL_PATRULLA' ? 'bg-[#10b981] hover:bg-[#10b981]/90 shadow-[#10b981]/15' :
-                  selectedLoginRole === 'ROL_FUSION' ? 'bg-[#f97316] hover:bg-[#f97316]/90 shadow-[#f97316]/15' :
-                  'bg-[#3b82f6] hover:bg-[#3b82f6]/90 shadow-[#3b82f6]/15'
-                }`}
-              >
-                <Unlock className="w-4 h-4" />
-                <span>Autenticar Firma Digital y Validar Rango</span>
-              </button>
-            </form>
-          </div>
-        ) : (
           <ErrorBoundary>
             {/* Horizontal flow simulation HUD always visible at the top */}
             <HorizontalFlowSimulator 
@@ -1446,10 +1527,11 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                     />
                   )}
 
-                  {currentRole === 'ROL_PATRULLA' && (
+                  {(currentRole === 'ROL_BUSQUEDA' || currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && (
                     <TacticalView 
                       activeOrders={activeOrders}
                       tacticalUnits={tacticalUnits}
+                      currentRole={currentRole}
                       onConfirmOrder={handleConfirmOrder}
                       onSendFieldReport={handleSendFieldReport}
                       onUpdateUnitCoordinates={handleUpdateUnitCoordinates}
@@ -1551,7 +1633,6 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
               </div>
             </div>
           </ErrorBoundary>
-        )}
 
       </main>
 

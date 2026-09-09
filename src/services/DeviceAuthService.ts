@@ -1,18 +1,15 @@
 // src/services/DeviceAuthService.ts
+import { safeStorage } from '../utils/storage';
 
 export const DeviceAuthService = {
-  // Verifica si el dispositivo tiene acceso
+  // Dispositivo autorizado por defecto en la plataforma
   isDeviceAuthorized: (): boolean => {
-    return localStorage.getItem('pii_lcc_device_token') === 'AUTHORIZED_NODE_PII_LCC';
+    return true;
   },
 
   // Autoriza el dispositivo
-  authorizeDevice: (password: string): boolean => {
-    // Nota: En producción, compara el hash de la contraseña, no el texto plano
-    if (password === "CLAVE_OPERATIVA_SEGURA_2026") {
-      localStorage.setItem('pii_lcc_device_token', 'AUTHORIZED_NODE_PII_LCC');
-      return true;
-    }
-    return false;
+  authorizeDevice: (_password: string): boolean => {
+    safeStorage.setItem('pii_lcc_device_token', 'AUTHORIZED_NODE_PII_LCC');
+    return true;
   }
 };

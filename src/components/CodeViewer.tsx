@@ -59,11 +59,29 @@ export default function CodeViewer({}: CodeViewerProps) {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(content);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(content);
+      } else {
+        throw new Error('Clipboard API not available');
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Error copying text: ', err);
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = content;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (fallbackErr) {
+        console.error('Error copying text: ', fallbackErr);
+      }
     }
   };
 

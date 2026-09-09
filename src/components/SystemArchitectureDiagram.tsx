@@ -51,6 +51,7 @@ export default function SystemArchitectureDiagram({
   const [simulatingCycle, setSimulatingCycle] = useState(false);
   const [currentCycleStep, setCurrentCycleStep] = useState<number>(-1);
   const [cycleLog, setCycleLog] = useState<string[]>([]);
+  const [upgradeNotice, setUpgradeNotice] = useState<string | null>(null);
 
   // Simulation Steps
   // 0: Fuentes capture data
@@ -700,8 +701,11 @@ export default function SystemArchitectureDiagram({
                   nextVersion,
                   changelog: `Optimización del núcleo de fusión CFI. Se corrigieron retardos en cálculos geográficos con Hitos Fronterizos y se integró encriptación cuántica de baja firma en los enlaces LoRaWAN de los geófonos en terreno. Operación totalmente automatizada.`
                 });
+                setUpgradeNotice(`Despliegue de actualización a ${nextVersion} iniciado.`);
+                setTimeout(() => setUpgradeNotice(null), 5000);
               } else {
-                alert('El canal de WebSocket no está inicializado o está desconectado.');
+                setUpgradeNotice('El canal de enlace no está inicializado o está en modo local.');
+                setTimeout(() => setUpgradeNotice(null), 5000);
               }
             }}
             className="w-full py-3 px-4 rounded bg-[#3b82f6]/10 hover:bg-[#3b82f6]/20 border border-[#3b82f6]/40 text-[#3b82f6] font-mono font-bold text-xs uppercase tracking-wider transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer flex items-center justify-center gap-2"
@@ -709,6 +713,12 @@ export default function SystemArchitectureDiagram({
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Desplegar Mejoras ({appVersion === 'v2.4.0-CAD' ? 'v2.5.0-CAD' : 'v2.4.0-CAD'})</span>
           </button>
+
+          {upgradeNotice && (
+            <div className="mt-3 p-2 rounded bg-blue-950/40 border border-blue-500/30 text-[11px] font-mono text-blue-300 text-center animate-fade-in">
+              {upgradeNotice}
+            </div>
+          )}
         </div>
       </div>
 

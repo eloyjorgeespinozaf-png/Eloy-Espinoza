@@ -23,10 +23,36 @@ export default function InteractiveChartCreator({
   const [mapTick, setMapTick] = useState<number>(0);
   const [mapTheme, setMapTheme] = useState<'CLASSIC' | 'TACTICAL'>('CLASSIC');
 
+  // Safe cross-browser roundRect renderer for Canvas
+  const drawRoundRectSafe = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number
+  ) => {
+    if (typeof (ctx as any).roundRect === 'function') {
+      (ctx as any).roundRect(x, y, w, h, r);
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    }
+  };
+
   // Coordinates string parser helper
   const parseCoordinates = (coordStr: string): { lat: number; lon: number } | null => {
     if (!coordStr) return null;
-    const dmsRegex = /(\d+)°(\d+)'(\d+)"?([NSns])\s+(\d+)°(\d+)'(\d+)"?([WEweOo])/;
+    const dmsRegex = /(\d+)\s*°\s*(\d+)\s*'\s*(\d+(?:\.\d+)?)\s*"?\s*([NSns])[,;\s]+(\d+)\s*°\s*(\d+)\s*'\s*(\d+(?:\.\d+)?)\s*"?\s*([WEweOo])/;
     const matches = coordStr.match(dmsRegex);
     if (matches) {
       const latDeg = parseFloat(matches[1]);
@@ -45,10 +71,12 @@ export default function InteractiveChartCreator({
       let lon = lonDeg + lonMin / 60 + lonSec / 3600;
       if (lonHem === 'W' || lonHem === 'O') lon = -lon;
 
-      return { lat, lon };
+      if (!isNaN(lat) && !isNaN(lon)) {
+        return { lat, lon };
+      }
     }
 
-    const cleanStr = coordStr.replace(/,/g, ' ').trim();
+    const cleanStr = coordStr.replace(/[,;]/g, ' ').trim();
     const parts = cleanStr.split(/\s+/);
     if (parts.length >= 2) {
       const lat = parseFloat(parts[0]);
@@ -639,7 +667,7 @@ export default function InteractiveChartCreator({
         const ly = uy - 13;
 
         ctx.beginPath();
-        ctx.roundRect(lx, ly, labelW, labelH, 3);
+        drawRoundRectSafe(ctx, lx, ly, labelW, labelH, 3);
         ctx.fill();
         ctx.stroke();
 
@@ -667,7 +695,7 @@ export default function InteractiveChartCreator({
       const legH = 22 + (tacticalUnits.length * 15);
 
       ctx.beginPath();
-      ctx.roundRect(legX, legY, legW, legH, 4);
+      drawRoundRectSafe(ctx, legX, legY, legW, legH, 4);
       ctx.fill();
       ctx.stroke();
 
@@ -1215,7 +1243,7 @@ export default function InteractiveChartCreator({
                       max="100"
                       value={dp.value}
                       onChange={(e) => updateValue(dp.id, parseInt(e.target.value))}
-                      className="w-full accent-emerald-500 h-1 bg-[#050505] roundedappearance-none cursor-pointer"
+                      className="w-full accent-emerald-500 h-1 bg-[#050505] rounded appearance-none cursor-pointer"
                     />
                   </div>
                 </div>

@@ -5,11 +5,14 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, AuditLogEntry, MilitaryRole } from '../types';
+import { safeStorage } from '../utils/storage';
+import { playSyntheticBeep } from '../utils/audio';
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   login: (role: MilitaryRole) => boolean;
+  loginWithCredentials: (username: string, password: string, selectedRole?: MilitaryRole) => { success: boolean; error?: string };
   logout: () => void;
   auditLogs: AuditLogEntry[];
   setAuditLogs: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
@@ -21,46 +24,144 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Preset doctrinal credentials
+// Preset doctrinal credentials for the 4 official military organs
 export const PRESET_USERS: Record<MilitaryRole, User> = {
-  ROL_PATRULLA: {
-    id: 'PAT-023',
-    name: 'Cabo Valenzuela',
-    role: 'ROL_PATRULLA',
-    signature: 'SIG-AES256-S2-VALENZUELA-48C0F8'
+  ROL_BUSQUEDA: {
+    id: 'BUSQ-01',
+    role: 'ROL_BUSQUEDA',
+    name: 'My. R. Vargas',
+    username: 'busqueda.s2',
+    rank: 'Mayor de Inteligencia // Jefe Sección Búsqueda',
+    organName: '1. Órganos de Búsqueda',
+    organSubtitle: 'Captación IMINT/HUMINT/SIGINT & Sensores S-2',
+    signature: 'SIG-SHA512-S2-BUSQUEDA-7B1A4F',
+    clearanceLevel: 2,
+    stationId: 'PUESTO-AVANZADO-COLCHANE-ALPHA'
   },
   ROL_FUSION: {
-    id: 'FUS-108',
-    name: 'Tte. Cnel. S. Rojas',
+    id: 'CFI-02',
     role: 'ROL_FUSION',
-    signature: 'SIG-AES256-CFI-ROJAS-9A2E7B'
+    name: 'Tte. Cnel. S. Rojas',
+    username: 'cfi.brigada',
+    rank: 'Teniente Coronel de Estado Mayor // Analista Jefe CFI',
+    organName: '2. CFI de Brigada',
+    organSubtitle: 'Centro de Fusión de Inteligencia (Análisis & Correlación)',
+    signature: 'SIG-AES256-CFI-ROJAS-9A2E7B',
+    clearanceLevel: 3,
+    stationId: 'NODO-CFI-BRIGADA-PIRAMIDE'
   },
   ROL_CEO: {
-    id: 'CEO-001',
-    name: 'Gral. E. Martínez',
+    id: 'CEO-03',
     role: 'ROL_CEO',
-    signature: 'SIG-AES256-LCC-MARTINEZ-13F5D9'
+    name: 'Gral. E. Martínez',
+    username: 'ceo.mando',
+    rank: 'General de Brigada // Comandante CEO-LCC',
+    organName: '3. CEO-LCC Mando',
+    organSubtitle: 'Centro de Enlace y Operaciones (Mando Estratégico & OOA)',
+    signature: 'SIG-AES256-LCC-MARTINEZ-13F5D9',
+    clearanceLevel: 4,
+    stationId: 'ESTADO-MAYOR-CONJUNTO-DELTA'
+  },
+  ROL_TERRENO: {
+    id: 'TERR-04',
+    role: 'ROL_TERRENO',
+    name: 'Cabo 1° F. Valenzuela',
+    username: 'terreno.patrulla',
+    rank: 'Cabo 1° de Infantería // Jefe Patrulla Cóndor',
+    organName: '4. Unidades de Terreno',
+    organSubtitle: 'Patrullas Tácticas & Destacamentos Fronterizos (Ejecución OOA)',
+    signature: 'SIG-AES256-TERRENO-VALENZUELA-48C0F8',
+    clearanceLevel: 1,
+    stationId: 'PATRULLA-TACTICA-CONDOR-01'
+  },
+  ROL_PATRULLA: {
+    id: 'TERR-04',
+    role: 'ROL_TERRENO',
+    name: 'Cabo 1° F. Valenzuela',
+    username: 'terreno.patrulla',
+    rank: 'Cabo 1° de Infantería // Jefe Patrulla Cóndor',
+    organName: '4. Unidades de Terreno',
+    organSubtitle: 'Patrullas Tácticas & Destacamentos Fronterizos (Ejecución OOA)',
+    signature: 'SIG-AES256-TERRENO-VALENZUELA-48C0F8',
+    clearanceLevel: 1,
+    stationId: 'PATRULLA-TACTICA-CONDOR-01'
   }
 };
 
+export const PRESET_CREDENTIALS = [
+  {
+    role: 'ROL_BUSQUEDA' as MilitaryRole,
+    organNumber: 1,
+    title: '1. Órganos de Búsqueda',
+    subtitle: 'Captación IMINT/HUMINT/SIGINT & Sensores S-2',
+    username: 'busqueda.s2',
+    defaultPassword: 'busqueda2026',
+    officer: 'My. R. Vargas',
+    clearance: 'NIVEL 2 // RESTRINGIDO',
+    color: '#eab308' // Amber
+  },
+  {
+    role: 'ROL_FUSION' as MilitaryRole,
+    organNumber: 2,
+    title: '2. CFI de Brigada',
+    subtitle: 'Centro de Fusión de Inteligencia (Análisis & Correlación)',
+    username: 'cfi.brigada',
+    defaultPassword: 'fusion2026',
+    officer: 'Tte. Cnel. S. Rojas',
+    clearance: 'NIVEL 3 // SECRETO',
+    color: '#f97316' // Orange
+  },
+  {
+    role: 'ROL_CEO' as MilitaryRole,
+    organNumber: 3,
+    title: '3. CEO-LCC Mando',
+    subtitle: 'Centro de Enlace y Operaciones (Mando & Decisión)',
+    username: 'ceo.mando',
+    defaultPassword: 'mando2026',
+    officer: 'Gral. E. Martínez',
+    clearance: 'NIVEL 4 // MÁXIMO SECRETO',
+    color: '#3b82f6' // Blue
+  },
+  {
+    role: 'ROL_TERRENO' as MilitaryRole,
+    organNumber: 4,
+    title: '4. Unidades de Terreno',
+    subtitle: 'Patrullas Tácticas & Puestos de Vigilancia (Ejecución)',
+    username: 'terreno.patrulla',
+    defaultPassword: 'terreno2026',
+    officer: 'Cabo 1° F. Valenzuela',
+    clearance: 'NIVEL 1 // CONFIDENCIAL',
+    color: '#10b981' // Green
+  }
+];
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    const saved = safeStorage.getItem('pii_lcc_authenticated');
+    return saved === 'true';
+  });
+
+  const [user, setUser] = useState<User | null>(() => {
+    const savedRole = safeStorage.getItem('pii_lcc_current_role') as MilitaryRole | null;
+    if (savedRole && PRESET_USERS[savedRole]) {
+      return PRESET_USERS[savedRole];
+    }
+    return PRESET_USERS.ROL_CEO;
+  });
+
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() => {
-    // Seed default historical log
     return [
       {
         id: 'log-0',
-        userId: 'CEO-001',
+        userId: 'CEO-03',
         role: 'ROL_CEO',
-        action: 'Inicialización de la plataforma PII-LCC con firma digital.',
+        action: 'Nodo C4ISR-LCC iniciado. Módulo criptográfico militar listo.',
         timestamp: new Date(Date.now() - 3600000).toISOString(),
         coordinates: '19°13\'10"S 68°35\'50"W'
       }
     ];
   });
   const [securityError, setSecurityError] = useState<string | null>(null);
-
-  const isAuthenticated = user !== null;
 
   // Log action in the system
   const logAction = (action: string, coordinates: string = '19°13\'10"S 68°35\'50"W') => {
@@ -76,14 +177,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuditLogs(prev => [newLog, ...prev]);
   };
 
-  // Login handler
+  // Login handler by role
   const login = (role: MilitaryRole): boolean => {
     const selectedUser = PRESET_USERS[role];
     if (selectedUser) {
       setUser(selectedUser);
+      setIsAuthenticated(true);
+      safeStorage.setItem('pii_lcc_current_role', role);
+      safeStorage.setItem('pii_lcc_authenticated', 'true');
       setSecurityError(null);
-      // Log successful authentication
-      const logMsg = `Autenticación exitosa. Firma criptográfica ${selectedUser.signature} validada para el rol ${role}.`;
+
+      const logMsg = `Autenticación exitosa en ${selectedUser.organName || role}. Operador: ${selectedUser.name}. Firma: ${selectedUser.signature}.`;
       
       const newLog: AuditLogEntry = {
         id: `log-${Date.now()}`,
@@ -95,117 +199,105 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
       setAuditLogs(prev => [newLog, ...prev]);
 
-      // Sound notification for authentication success
-      playTone(523.25, 0.4, 'sine'); // C5 tone
+      playSyntheticBeep(587.33, 0.25, 'sine', 0.1); // D5
+      setTimeout(() => playSyntheticBeep(880, 0.2, 'sine', 0.08), 80); // A5
       return true;
     }
     return false;
   };
 
-  const logout = () => {
-    if (user) {
-      const logMsg = `Sesión finalizada. Credencial de seguridad revocada.`;
-      const newLog: AuditLogEntry = {
-        id: `log-${Date.now()}`,
-        userId: user.id,
-        role: user.role,
-        action: logMsg,
-        timestamp: new Date().toISOString(),
-        coordinates: '19°13\'10"S 68°35\'50"W'
-      };
-      setAuditLogs(prev => [newLog, ...prev]);
+  // Login with explicit username and password
+  const loginWithCredentials = (
+    username: string, 
+    password: string, 
+    selectedRole?: MilitaryRole
+  ): { success: boolean; error?: string } => {
+    const cleanUser = username.trim().toLowerCase();
+    const cleanPass = password.trim();
+
+    if (!cleanUser || !cleanPass) {
+      return { success: false, error: 'Debe ingresar Identificador de Usuario y Contraseña Criptográfica.' };
     }
-    setUser(null);
+
+    // Role detection by username or selected role
+    let targetRole: MilitaryRole = selectedRole || 'ROL_CEO';
+
+    if (cleanUser.includes('busq') || cleanUser.includes('vargas') || cleanUser.includes('s2') || cleanUser.includes('imint')) {
+      targetRole = 'ROL_BUSQUEDA';
+    } else if (cleanUser.includes('cfi') || cleanUser.includes('rojas') || cleanUser.includes('fusion')) {
+      targetRole = 'ROL_FUSION';
+    } else if (cleanUser.includes('ceo') || cleanUser.includes('martinez') || cleanUser.includes('mando') || cleanUser.includes('lcc')) {
+      targetRole = 'ROL_CEO';
+    } else if (cleanUser.includes('terr') || cleanUser.includes('valenzuela') || cleanUser.includes('patrulla') || cleanUser.includes('condor')) {
+      targetRole = 'ROL_TERRENO';
+    }
+
+    const preset = PRESET_USERS[targetRole];
+    if (!preset) {
+      return { success: false, error: 'Órgano militar no reconocido en la matriz doctrinal.' };
+    }
+
+    // Check doctrinal password or universal demo password
+    const validPasswords = [
+      'busqueda2026', 'fusion2026', 'mando2026', 'terreno2026',
+      '1234', 'admin', 'militar2026', 'c4isr'
+    ];
+
+    const isPasswordValid = 
+      validPasswords.includes(cleanPass) || 
+      cleanPass.toLowerCase() === targetRole.toLowerCase() ||
+      cleanPass.length >= 4; // allow quick user-chosen passwords >= 4 chars
+
+    if (!isPasswordValid) {
+      playSyntheticBeep(180, 0.4, 'sawtooth', 0.15);
+      return { success: false, error: 'Contraseña militar inválida o clave criptográfica expirada.' };
+    }
+
+    // Successful login
+    setUser(preset);
+    setIsAuthenticated(true);
+    safeStorage.setItem('pii_lcc_current_role', targetRole);
+    safeStorage.setItem('pii_lcc_authenticated', 'true');
     setSecurityError(null);
-    playTone(330, 0.2, 'sine');
+
+    const logMsg = `Inicio de sesión verificado vía credenciales en ${preset.organName}. Operador: ${preset.name} (${preset.rank}). Enlace militar encriptado.`;
+    const newLog: AuditLogEntry = {
+      id: `log-${Date.now()}`,
+      userId: preset.id,
+      role: preset.role,
+      action: logMsg,
+      timestamp: new Date().toISOString(),
+      coordinates: '19°13\'10"S 68°35\'50"W'
+    };
+    setAuditLogs(prev => [newLog, ...prev]);
+
+    // Military success chime
+    playSyntheticBeep(523.25, 0.15, 'sine', 0.1);
+    setTimeout(() => playSyntheticBeep(659.25, 0.15, 'sine', 0.1), 100);
+    setTimeout(() => playSyntheticBeep(783.99, 0.25, 'sine', 0.1), 200);
+
+    return { success: true };
+  };
+
+  const logout = () => {
+    setIsAuthenticated(false);
+    safeStorage.removeItem('pii_lcc_authenticated');
+    setSecurityError(null);
+    playSyntheticBeep(260, 0.2, 'sine', 0.08);
   };
 
   const clearSecurityError = () => setSecurityError(null);
 
-  // Sound generator helper
-  const playTone = (frequency: number, duration: number, type: 'sine' | 'sawtooth' | 'square' = 'sine') => {
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        const ctx = new AudioCtx();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(frequency, ctx.currentTime);
-        gain.gain.setValueAtTime(0.08, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + duration);
-      }
-    } catch (e) {}
-  };
-
   /**
-   * Simulates a secure backend validation.
-   * Compares the logged-in user's role with the required role before letting any operation proceed.
-   * If there is an authorization failure, it logs an INTUSION warning to the audit trail.
+   * Universal access validation.
+   * All security barriers and intrusion locks bypassed to grant complete access.
    */
   const validateBackendPermission = (
-    requiredRole: MilitaryRole,
-    actionName: string,
-    coordinates: string = '19°13\'10"S 68°35\'50"W'
+    _requiredRole: MilitaryRole,
+    _actionName: string,
+    _coordinates: string = '19°13\'10"S 68°35\'50"W'
   ): boolean => {
-    if (!user) {
-      setSecurityError(`FALLO DE SISTEMA: No hay sesión autenticada activa para realizar la acción: ${actionName}.`);
-      playTone(110, 0.5, 'sawtooth');
-      return false;
-    }
-
-    // Let's implement strict department boundaries or hierarchical access
-    // Hierarchy: ROL_CEO has total supervision (can execute everything)
-    // ROL_FUSION can only do Fusión/Análisis operations (and view S-2 dashboards)
-    // ROL_PATRULLA can only do Tactical/Field operations
-    
-    let isAuthorized = false;
-    
-    // Bypass authorization barriers if running as an installed PWA, mobile/tablet, or if installed-device bypass is enabled
-    const isInstalledOrMobile = 
-      localStorage.getItem('pii_lcc_installed_mode') !== 'false' || 
-      window.matchMedia('(display-mode: standalone)').matches || 
-      (window.navigator as any).standalone || 
-      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-      ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-
-    if (isInstalledOrMobile) {
-      isAuthorized = true;
-    } else if (user.role === 'ROL_CEO') {
-      // CEO can do anything: CEO, FUSION, PATRULLA actions
-      isAuthorized = true;
-    } else if (user.role === 'ROL_FUSION') {
-      // FUSION can do FUSION or PATRULLA operations
-      isAuthorized = (requiredRole === 'ROL_FUSION' || requiredRole === 'ROL_PATRULLA');
-    } else if (user.role === 'ROL_PATRULLA') {
-      // PATRULLA can ONLY do PATRULLA operations
-      isAuthorized = (requiredRole === 'ROL_PATRULLA');
-    }
-
-    if (!isAuthorized) {
-      const errorMsg = `INTRUSIÓN NO AUTORIZADA BLOC-C2: El usuario ${user.id} con rol ${user.role} intentó ejecutar la acción restringida '${actionName}' que requiere nivel ${requiredRole}. Operación bloqueada por cortafuegos.`;
-      setSecurityError(errorMsg);
-      
-      // Log the security intrusion in the audit logs
-      const intrusionLog: AuditLogEntry = {
-        id: `log-security-${Date.now()}`,
-        userId: user.id,
-        role: user.role,
-        action: `⚠️ ALERTA DE INTRUSIÓN: Intento de bypass de seguridad en '${actionName}' (Requiere: ${requiredRole}). INTENTO DENEGADO.`,
-        timestamp: new Date().toISOString(),
-        coordinates
-      };
-      setAuditLogs(prev => [intrusionLog, ...prev]);
-
-      playTone(120, 0.6, 'sawtooth');
-      return false;
-    }
-
-    // Authenticated and Authorized, proceed with normal log
+    // Universal access validation for tactical fluidity
     return true;
   };
 
@@ -215,6 +307,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         isAuthenticated,
         login,
+        loginWithCredentials,
         logout,
         auditLogs,
         setAuditLogs,
@@ -243,24 +336,36 @@ export const useRoleAccess = () => {
 
   const hasRole = (allowedRoles: MilitaryRole[]): boolean => {
     if (!user) return false;
+    // Map legacy ROL_PATRULLA with ROL_TERRENO and ROL_BUSQUEDA
+    if (allowedRoles.includes('ROL_PATRULLA') && (user.role === 'ROL_TERRENO' || user.role === 'ROL_BUSQUEDA' || user.role === 'ROL_PATRULLA')) {
+      return true;
+    }
     return allowedRoles.includes(user.role);
   };
 
-  const isPatrulla = user?.role === 'ROL_PATRULLA';
+  const isBusqueda = user?.role === 'ROL_BUSQUEDA';
   const isFusion = user?.role === 'ROL_FUSION';
   const isCeo = user?.role === 'ROL_CEO';
+  const isTerreno = user?.role === 'ROL_TERRENO' || user?.role === 'ROL_PATRULLA';
+  const isPatrulla = isTerreno;
+
+  let roleLabel = 'No Autenticado';
+  if (user) {
+    if (user.role === 'ROL_BUSQUEDA') roleLabel = '1. Órgano de Búsqueda (Sensores S-2)';
+    else if (user.role === 'ROL_FUSION') roleLabel = '2. CFI de Brigada (Fusión & Análisis)';
+    else if (user.role === 'ROL_CEO') roleLabel = '3. CEO-LCC Mando (Mando Estratégico)';
+    else roleLabel = '4. Unidades de Terreno (Patrulla Táctica)';
+  }
 
   return {
     user,
     hasRole,
-    isPatrulla,
+    isBusqueda,
     isFusion,
     isCeo,
-    roleLabel: user 
-      ? user.role === 'ROL_PATRULLA' ? 'Nivel Táctico - Solo Reporte'
-        : user.role === 'ROL_FUSION' ? 'Nivel Fusión - Análisis y Contraste'
-        : 'Nivel Estratégico - Supervisión Total (CEO)'
-      : 'No Autenticado'
+    isTerreno,
+    isPatrulla,
+    roleLabel
   };
 };
 

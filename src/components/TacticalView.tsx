@@ -4,12 +4,14 @@
  */
 
 import React, { useState } from 'react';
-import { AutomatedOrder, RawAlert, TacticalUnit } from '../types';
-import { AlertCircle, Shield, Navigation, Send, Radio, Check, Volume2, VolumeX, Eye, Info, Camera, Upload, RefreshCw, Trash2, Video, VideoOff } from 'lucide-react';
+import { AutomatedOrder, MilitaryRole, RawAlert, TacticalUnit } from '../types';
+import { AlertCircle, Shield, Navigation, Send, Radio, Check, Volume2, VolumeX, Eye, Info, Camera, Upload, RefreshCw, Trash2, Video, VideoOff, Crosshair } from 'lucide-react';
+import { playSyntheticBeep } from '../utils/audio';
 
 interface TacticalViewProps {
   activeOrders?: AutomatedOrder[];
   tacticalUnits?: TacticalUnit[];
+  currentRole?: MilitaryRole;
   onConfirmOrder: (id: string, newStatus: 'RECEIVED' | 'IN_PROGRESS' | 'COMPLETED') => void;
   onSendFieldReport: (report: RawAlert) => void;
   onUpdateUnitCoordinates: (unitName: string, newCoords: string) => void;
@@ -18,6 +20,7 @@ interface TacticalViewProps {
 export default function TacticalView({
   activeOrders = [],
   tacticalUnits = [],
+  currentRole,
   onConfirmOrder,
   onSendFieldReport,
   onUpdateUnitCoordinates
@@ -76,7 +79,7 @@ export default function TacticalView({
   // Coordinates string parser helper
   const parseCoordinates = (coordStr: string): { lat: number; lon: number } | null => {
     if (!coordStr) return null;
-    const dmsRegex = /(\d+)°(\d+)'(\d+)"?([NSns])\s+(\d+)°(\d+)'(\d+)"?([WEweOo])/;
+    const dmsRegex = /(\d+)\s*°\s*(\d+)\s*'\s*(\d+(?:\.\d+)?)\s*"?\s*([NSns])[,;\s]+(\d+)\s*°\s*(\d+)\s*'\s*(\d+(?:\.\d+)?)\s*"?\s*([WEweOo])/;
     const matches = coordStr.match(dmsRegex);
     if (matches) {
       const latDeg = parseFloat(matches[1]);
@@ -95,10 +98,12 @@ export default function TacticalView({
       let lon = lonDeg + lonMin / 60 + lonSec / 3600;
       if (lonHem === 'W' || lonHem === 'O') lon = -lon;
 
-      return { lat, lon };
+      if (!isNaN(lat) && !isNaN(lon)) {
+        return { lat, lon };
+      }
     }
 
-    const cleanStr = coordStr.replace(/,/g, ' ').trim();
+    const cleanStr = coordStr.replace(/[,;]/g, ' ').trim();
     const parts = cleanStr.split(/\s+/);
     if (parts.length >= 2) {
       const lat = parseFloat(parts[0]);
@@ -109,6 +114,13 @@ export default function TacticalView({
   };
 
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
+
+  // Reliably assign camera stream to video element whenever it changes
+  React.useEffect(() => {
+    if (videoRef.current && cameraStream) {
+      videoRef.current.srcObject = cameraStream;
+    }
+  }, [cameraStream, cameraActive]);
 
   // Clean up watchers and camera stream on unmount
   React.useEffect(() => {
@@ -502,7 +514,7 @@ export default function TacticalView({
 
   const processAndResizeFile = (file: File) => {
     if (file.size > 15 * 1024 * 1024) { // 15MB limit
-      alert("El archivo es demasiado grande. El límite de transmisión doctrinal es de 15MB.");
+      setSuccessBanner("El archivo es demasiado grande. El límite de transmisión doctrinal es de 15MB.");
       return;
     }
 
@@ -575,31 +587,10 @@ export default function TacticalView({
     }
   };
 
-  // Play a tactical high-frequency synthetic tone (synthesized on-the-fly)
+  // Play a tactical high-frequency synthetic tone
   const playTacticalBeep = (freq = 880, duration = 0.15) => {
     if (!soundEnabled) return;
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, ctx.currentTime);
-      
-      // Cyber decay envelope
-      gain.gain.setValueAtTime(0.12, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      
-      osc.start();
-      osc.stop(ctx.currentTime + duration);
-    } catch (e) {
-      // Gracefully catch if browser blocks audio autoplay before user interaction
-    }
+    playSyntheticBeep(freq, duration, 'sine', 0.1);
   };
 
   // Filter orders assigned specifically to the selected patrol
@@ -661,6 +652,43 @@ export default function TacticalView({
 
   return (
     <div className="space-y-6">
+      {/* Doctrinal Organ Banner */}
+      {currentRole === 'ROL_BUSQUEDA' && (
+        <div className="p-3.5 rounded-xl bg-yellow-950/30 border border-yellow-500/50 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+          <div className="flex items-center gap-2.5 text-yellow-300">
+            <Radio className="w-4 h-4 text-yellow-400 animate-pulse" />
+            <span className="font-bold uppercase tracking-wider">
+              1. ÓRGANOS DE BÚSQUEDA // SECCIÓN S-2
+            </span>
+            <span className="text-[#65552a]">|</span>
+            <span className="text-yellow-400/80 text-[11px]">
+              Captación de Sensores Ópticos/Térmicos, VANTs y Reportes IMINT/HUMINT/SIGINT hacia la Central de Fusión (CFI).
+            </span>
+          </div>
+          <span className="text-[10px] bg-yellow-900/40 text-yellow-300 px-2 py-0.5 rounded border border-yellow-700/50">
+            ORDEN #1 // INGRESO DE DATOS CRUDOS
+          </span>
+        </div>
+      )}
+
+      {(currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && (
+        <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/50 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+          <div className="flex items-center gap-2.5 text-emerald-300">
+            <Navigation className="w-4 h-4 text-emerald-400 animate-pulse" />
+            <span className="font-bold uppercase tracking-wider">
+              4. UNIDADES DE TERRENO // PATRULLAS TÁCTICAS
+            </span>
+            <span className="text-[#204a32]">|</span>
+            <span className="text-emerald-400/80 text-[11px]">
+              Recepción Satelital de OOA, Intercepción de Contrabandistas y Confirmación de Misiones Cumplidas.
+            </span>
+          </div>
+          <span className="text-[10px] bg-emerald-900/40 text-emerald-300 px-2 py-0.5 rounded border border-emerald-700/50">
+            ORDEN #4 // EJECUCIÓN TÁCTICA
+          </span>
+        </div>
+      )}
+
       {/* Alert Banner instead of window.alert */}
       {successBanner && (
         <div className="bg-[#10b981]/10 border border-[#10b981]/40 text-[#10b981] p-3 rounded-lg text-xs font-mono text-left animate-fade-in flex items-center justify-between">

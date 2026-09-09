@@ -17,6 +17,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { User, RawAlert } from '../types';
+import { playSyntheticBeep } from '../utils/audio';
 
 interface TacticalP2PMeshProps {
   user: User | null;
@@ -72,21 +73,7 @@ export default function TacticalP2PMesh({ user, sendWsMessage, rawAlerts, onAddP
 
   // Safe Audio Beep Helper
   const playMeshBeep = (freq: number, dur: number) => {
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        const ctx = new AudioCtx();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.frequency.setValueAtTime(freq, ctx.currentTime);
-        gain.gain.setValueAtTime(0.04, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + dur);
-      }
-    } catch (e) {}
+    playSyntheticBeep(freq, dur, 'sine', 0.05);
   };
 
   // Send a message over WebRTC direct channel, with seamless fallback to WebSocket Relay Tunnel

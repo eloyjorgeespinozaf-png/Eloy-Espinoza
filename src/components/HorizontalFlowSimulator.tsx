@@ -35,11 +35,11 @@ export default function HorizontalFlowSimulator({
       id: 'TACTICAL_INPUT',
       title: '1. Órganos de Búsqueda',
       subtitle: 'Captación de Datos Crudos',
-      role: 'ROL_PATRULLA' as const,
+      role: 'ROL_BUSQUEDA' as const,
       icon: <Radio className="w-4 h-4" />,
       metric: `${pendingAlertsCount} Alertas`,
       description: 'Drones, informantes y patrullas envían reportes IMINT/HUMINT/SIGINT no validados desde la frontera.',
-      color: 'border-orange-500 text-orange-400 bg-orange-500/5',
+      color: 'border-yellow-500 text-yellow-400 bg-yellow-500/5',
       badge: 'PROCESAMIENTO'
     },
     {
@@ -68,7 +68,7 @@ export default function HorizontalFlowSimulator({
       id: 'TACTICAL_EXECUTION',
       title: '4. Unidades de Terreno',
       subtitle: 'Ejecución e Intercepción',
-      role: 'ROL_PATRULLA' as const,
+      role: 'ROL_TERRENO' as const,
       icon: <Navigation className="w-4 h-4" />,
       metric: `${completedMissionsCount} Cumplidas`,
       description: 'Patrullas reciben la OOA directo en terminales satelitales, interceptan contrabandistas y confirman el cierre.',
@@ -101,10 +101,8 @@ export default function HorizontalFlowSimulator({
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 relative">
         {flowNodes.map((node, idx) => {
           const isRoleActive = 
-            (node.role === 'ROL_PATRULLA' && currentRole === 'ROL_PATRULLA' && idx === 0) ||
-            (node.role === 'ROL_PATRULLA' && currentRole === 'ROL_PATRULLA' && idx === 3) ||
-            (node.role === 'ROL_FUSION' && currentRole === 'ROL_FUSION') ||
-            (node.role === 'ROL_CEO' && currentRole === 'ROL_CEO');
+            node.role === currentRole ||
+            (node.role === 'ROL_TERRENO' && currentRole === 'ROL_PATRULLA');
             
           return (
             <div key={node.id} className="relative flex flex-col">

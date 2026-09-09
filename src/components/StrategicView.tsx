@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { AutomatedOrder, Clan, ActionableIntel, TacticalUnit } from '../types';
-import { Shield, Zap, TrendingUp, AlertTriangle, Play, MapPin, Send, Eye, RefreshCw, Layers, CheckCircle } from 'lucide-react';
+import { Shield, Zap, TrendingUp, AlertTriangle, Play, MapPin, Send, Eye, RefreshCw, Layers, CheckCircle, Radio } from 'lucide-react';
 
 interface StrategicViewProps {
   activeOrders: AutomatedOrder[];
@@ -21,8 +21,8 @@ interface StrategicViewProps {
 function parseCoordinates(coordStr: string): { lat: number; lon: number } | null {
   if (!coordStr) return null;
   
-  // Matches e.g. 19°13'10"S 68°35'50"W
-  const dmsRegex = /(\d+)°(\d+)'(\d+)"?([NSns])\s+(\d+)°(\d+)'(\d+)"?([WEweOo])/;
+  // Matches e.g. 19°13'10"S 68°35'50"W or 19°13'10.5"S, 68°35'50.2"W
+  const dmsRegex = /(\d+)\s*°\s*(\d+)\s*'\s*(\d+(?:\.\d+)?)\s*"?\s*([NSns])[,;\s]+(\d+)\s*°\s*(\d+)\s*'\s*(\d+(?:\.\d+)?)\s*"?\s*([WEweOo])/;
   const matches = coordStr.match(dmsRegex);
   if (matches) {
     const latDeg = parseFloat(matches[1]);
@@ -41,11 +41,13 @@ function parseCoordinates(coordStr: string): { lat: number; lon: number } | null
     let lon = lonDeg + lonMin / 60 + lonSec / 3600;
     if (lonHem === 'W' || lonHem === 'O') lon = -lon;
 
-    return { lat, lon };
+    if (!isNaN(lat) && !isNaN(lon)) {
+      return { lat, lon };
+    }
   }
 
   // Matches decimal: e.g. "-19.2194 -68.5972" or "-19.2194, -68.5972"
-  const cleanStr = coordStr.replace(/,/g, ' ').trim();
+  const cleanStr = coordStr.replace(/[,;]/g, ' ').trim();
   const parts = cleanStr.split(/\s+/);
   if (parts.length >= 2) {
     const lat = parseFloat(parts[0]);
@@ -158,10 +160,40 @@ export default function StrategicView({
 
   return (
     <div className="space-y-6">
+      {/* Tactical Sub-Header matching CEO-LCC War Room Dashboard */}
+      <div className="bg-[#0a0a0a]/80 backdrop-blur-md border border-cyan-900/40 rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-lg relative overflow-hidden">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-cyan-950/70 border border-cyan-700/60 rounded-lg text-cyan-400">
+            <Radio className="w-5 h-5 animate-pulse" />
+          </div>
+          <div className="text-left">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-cyan-950/80 border border-cyan-800/60 text-cyan-300 rounded">
+                MÓDULO 3
+              </span>
+              <h2 className="text-sm md:text-base font-heading font-black text-white uppercase tracking-wider">
+                INTERFAZ DE MANDO // CEO-LCC
+              </h2>
+            </div>
+            <p className="text-[11px] text-zinc-400 font-mono mt-0.5">
+              Comando Estratégico Operacional de Lucha Contra el Contrabando — C4ISR
+            </p>
+          </div>
+        </div>
+
+        {/* High Value Target Alert Callout */}
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-rose-950/50 border border-rose-600/50 rounded-lg text-rose-300 text-xs font-mono">
+          <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+          <span className="font-bold text-[10px] md:text-xs">
+            ALERTA DE INTELIGENCIA: BLANCO DE ALTO VALOR
+          </span>
+        </div>
+      </div>
+
       {/* KPI Tiles row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* KPI 1 */}
-        <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-4 flex items-center gap-4 shadow-md">
+        <div className="bg-[#0a0a0a]/85 backdrop-blur-md border border-[#1e293b]/70 hover:border-cyan-800/60 rounded-xl p-4 flex items-center gap-4 shadow-md transition-all">
           <div className="p-3 bg-[#3b82f6]/10 text-[#3b82f6] rounded">
             <Shield className="w-6 h-6" />
           </div>
@@ -175,7 +207,7 @@ export default function StrategicView({
         </div>
 
         {/* KPI 2 */}
-        <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-4 flex items-center gap-4 shadow-md">
+        <div className="bg-[#0a0a0a]/85 backdrop-blur-md border border-[#1e293b]/70 hover:border-cyan-800/60 rounded-xl p-4 flex items-center gap-4 shadow-md transition-all">
           <div className="p-3 bg-[#10b981]/10 text-[#10b981] rounded">
             <Zap className="w-6 h-6 animate-pulse" />
           </div>
@@ -191,7 +223,7 @@ export default function StrategicView({
         </div>
 
         {/* KPI 3 */}
-        <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-4 flex items-center gap-4 shadow-md">
+        <div className="bg-[#0a0a0a]/85 backdrop-blur-md border border-[#1e293b]/70 hover:border-cyan-800/60 rounded-xl p-4 flex items-center gap-4 shadow-md transition-all">
           <div className="p-3 bg-[#f97316]/10 text-[#f97316] rounded">
             <AlertTriangle className="w-6 h-6 text-[#f97316]" />
           </div>
@@ -205,7 +237,7 @@ export default function StrategicView({
         </div>
 
         {/* KPI 4 */}
-        <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-4 flex items-center gap-4 shadow-md">
+        <div className="bg-[#0a0a0a]/85 backdrop-blur-md border border-[#1e293b]/70 hover:border-cyan-800/60 rounded-xl p-4 flex items-center gap-4 shadow-md transition-all">
           <div className="p-3 bg-purple-500/10 text-purple-400 rounded">
             <TrendingUp className="w-6 h-6" />
           </div>
@@ -221,7 +253,7 @@ export default function StrategicView({
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Vector Tactical Map */}
-        <div className="lg:col-span-7 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg flex flex-col justify-between">
+        <div className="lg:col-span-7 bg-[#0a0a0a]/85 backdrop-blur-md border border-[#1e293b]/70 rounded-xl p-5 shadow-lg flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3 mb-4">
               <div className="flex items-center gap-2">
@@ -375,7 +407,7 @@ export default function StrategicView({
         {/* Right Column: Automated Operations Hub (OOA) */}
         <div className="lg:col-span-5 flex flex-col gap-6">
           {/* Form: Emit Automated Operations Order (OOA) */}
-          <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg relative overflow-hidden">
+          <div className="bg-[#0a0a0a]/85 backdrop-blur-md border border-[#1e293b]/70 rounded-xl p-5 shadow-lg relative overflow-hidden">
             <div className="absolute top-0 left-0 w-2 h-full bg-[#3b82f6]" />
             
             <h3 className="text-sm font-mono font-bold text-white border-b border-[#1a1a1a] pb-3 mb-4 flex items-center gap-2">
@@ -492,7 +524,7 @@ export default function StrategicView({
           </div>
 
           {/* List of Active OOAs with Cancel options */}
-          <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg flex-1">
+          <div className="bg-[#0a0a0a]/85 backdrop-blur-md border border-[#1e293b]/70 rounded-xl p-5 shadow-lg flex-1">
             <h3 className="text-sm font-mono font-bold text-white border-b border-[#1a1a1a] pb-3 mb-4 flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <Layers className="w-4 h-4 text-[#3b82f6]" />

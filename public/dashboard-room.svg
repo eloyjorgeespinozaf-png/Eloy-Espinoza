@@ -1,0 +1,296 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="100%" height="100%">
+  <defs>
+    <!-- Background Glows and Gradients -->
+    <linearGradient id="wall-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#141c24"/>
+      <stop offset="30%" stop-color="#0a1016"/>
+      <stop offset="70%" stop-color="#06090d"/>
+      <stop offset="100%" stop-color="#030508"/>
+    </linearGradient>
+
+    <!-- Ceiling / Lighting Volumetric Rays -->
+    <linearGradient id="light-ray" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#5ca0d3" stop-opacity="0.25"/>
+      <stop offset="40%" stop-color="#38749e" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Curved Holo Screen Backdrop -->
+    <linearGradient id="holo-screen" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#09202f" stop-opacity="0.6"/>
+      <stop offset="50%" stop-color="#0d3148" stop-opacity="0.75"/>
+      <stop offset="100%" stop-color="#09202f" stop-opacity="0.6"/>
+    </linearGradient>
+
+    <!-- Glowing Lines -->
+    <filter id="glow-cyan" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="glow-red" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="glow-amber" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Deep Command Room Wall Background -->
+  <rect width="1920" height="1080" fill="url(#wall-grad)"/>
+
+  <!-- Volumetric Ceiling Lights from Above -->
+  <polygon points="600,0 1320,0 1600,700 320,700" fill="url(#light-ray)"/>
+  <polygon points="850,0 1070,0 1200,600 720,600" fill="url(#light-ray)" opacity="0.6"/>
+
+  <!-- ========================================== -->
+  <!-- MAIN CURVED HOLOGRAPHIC DISPLAY SCREEN     -->
+  <!-- ========================================== -->
+  <g id="holo-curved-screen">
+    <!-- Screen Frame Curved Outline -->
+    <path d="M 60,80 Q 960,30 1860,80 L 1860,780 Q 960,830 60,780 Z" 
+          fill="url(#holo-screen)" stroke="#1a4f70" stroke-width="3" opacity="0.95"/>
+    <path d="M 65,85 Q 960,35 1855,85 L 1855,775 Q 960,825 65,775 Z" 
+          fill="none" stroke="#389edb" stroke-width="1" opacity="0.4"/>
+
+    <!-- Screen Grid Overlay -->
+    <g opacity="0.15" stroke="#389edb" stroke-width="0.8">
+      <line x1="60" y1="200" x2="1860" y2="200"/>
+      <line x1="60" y1="400" x2="1860" y2="400"/>
+      <line x1="60" y1="600" x2="1860" y2="600"/>
+      <line x1="400" y1="80" x2="400" y2="780"/>
+      <line x1="800" y1="80" x2="800" y2="780"/>
+      <line x1="1200" y1="80" x2="1200" y2="780"/>
+      <line x1="1600" y1="80" x2="1600" y2="780"/>
+    </g>
+
+    <!-- Top Left Title Banner -->
+    <g transform="translate(100, 110)">
+      <text font-family="'Inter', system-ui, sans-serif" font-size="34" font-weight="900" fill="#ffffff" letter-spacing="1">
+        MÓDULO 3: INTERFAZ DE MANDO (DASHBOARD)
+      </text>
+      <text y="35" font-family="'Inter', system-ui, sans-serif" font-size="20" font-weight="500" fill="#7fa6c2" letter-spacing="0.5">
+        CEO-LCC (Comando Estratégico Operacional de Lucha Contra el Contrabando)
+      </text>
+    </g>
+
+    <!-- Left HUD Panel: ESTADO DE UNIDADES -->
+    <g transform="translate(100, 200)">
+      <rect width="280" height="150" rx="4" fill="#0c1a24" stroke="#215274" stroke-width="1.5" opacity="0.8"/>
+      <text x="16" y="28" font-family="monospace" font-size="13" font-weight="bold" fill="#7ba5c4" letter-spacing="1">
+        ESTADO DE UNIDADES
+      </text>
+      <!-- Bars -->
+      <text x="16" y="58" font-family="monospace" font-size="11" fill="#88a8c2">RCS</text>
+      <rect x="55" y="48" width="160" height="8" rx="2" fill="#15364c"/>
+      <rect x="55" y="48" width="130" height="8" rx="2" fill="#389edb"/>
+      <text x="230" y="56" font-family="monospace" font-size="11" fill="#ffffff">8</text>
+
+      <text x="16" y="88" font-family="monospace" font-size="11" fill="#88a8c2">GEC</text>
+      <rect x="55" y="78" width="160" height="8" rx="2" fill="#15364c"/>
+      <rect x="55" y="78" width="90" height="8" rx="2" fill="#389edb"/>
+      <text x="230" y="86" font-family="monospace" font-size="11" fill="#ffffff">3</text>
+
+      <text x="16" y="118" font-family="monospace" font-size="11" fill="#88a8c2">RER</text>
+      <rect x="55" y="108" width="160" height="8" rx="2" fill="#15364c"/>
+      <rect x="55" y="108" width="150" height="8" rx="2" fill="#389edb"/>
+      <text x="230" y="116" font-family="monospace" font-size="11" fill="#ffffff">0</text>
+    </g>
+
+    <!-- Left HUD Panel: RECURSOS AÉREOS/TERRESTRES -->
+    <g transform="translate(100, 380)">
+      <rect width="280" height="130" rx="4" fill="#0c1a24" stroke="#215274" stroke-width="1.5" opacity="0.8"/>
+      <text x="16" y="28" font-family="monospace" font-size="12" font-weight="bold" fill="#7ba5c4" letter-spacing="0.5">
+        RECURSOS AÉREOS/TERRESTRES
+      </text>
+      <text x="16" y="44" font-family="monospace" font-size="10" fill="#587d99">
+        ASIGNADOS (CON ÍCONOS DE DRONES Y CAMIONES)
+      </text>
+      <!-- Tactical Icons in row -->
+      <g transform="translate(20, 65)" stroke="#389edb" stroke-width="2" fill="none">
+        <!-- Drone 1 -->
+        <circle cx="20" cy="20" r="8"/>
+        <line x1="8" y1="8" x2="32" y2="32"/>
+        <line x1="32" y1="8" x2="8" y2="32"/>
+        <!-- Jet / Plane -->
+        <path d="M 65,30 L 75,10 L 85,30 L 75,25 Z"/>
+        <!-- Truck -->
+        <rect x="115" y="12" width="28" height="18" rx="2"/>
+        <circle cx="122" cy="32" r="4" fill="#389edb"/>
+        <circle cx="136" cy="32" r="4" fill="#389edb"/>
+      </g>
+    </g>
+
+    <!-- Left HUD Panel: ACCIONES RECOMENDADAS -->
+    <g transform="translate(100, 530)">
+      <rect width="280" height="180" rx="4" fill="#0c1a24" stroke="#215274" stroke-width="1.5" opacity="0.8"/>
+      <text x="16" y="28" font-family="monospace" font-size="12" font-weight="bold" fill="#7ba5c4">
+        ACCIONES RECOMENDADAS
+      </text>
+      <text x="16" y="44" font-family="monospace" font-size="10" fill="#587d99">
+        (INTERDICCIÓN INMEDIATA)
+      </text>
+      <!-- Drone Video Feed Window -->
+      <rect x="16" y="60" width="248" height="105" rx="3" fill="#09141d" stroke="#1d4866" stroke-width="1"/>
+      <circle cx="140" cy="112" r="16" stroke="#389edb" stroke-width="1.5" fill="none" opacity="0.6"/>
+      <path d="M 125,97 L 155,127 M 155,97 L 125,127" stroke="#389edb" stroke-width="1.5" opacity="0.6"/>
+      <text x="24" y="155" font-family="monospace" font-size="9" fill="#389edb" opacity="0.8">LIVE DRONE-OPTICS 4K</text>
+    </g>
+
+    <!-- ========================================== -->
+    <!-- CENTER: 3D VOLUMETRIC TERRAIN BLOCK        -->
+    <!-- ========================================== -->
+    <g id="terrain-3d" transform="translate(420, 240)">
+      <!-- 3D Relief Base Slices -->
+      <polygon points="120,440 680,440 760,350 40,350" fill="#2d3b2a" stroke="#1e291c" stroke-width="2"/>
+      <polygon points="120,440 680,440 680,470 120,470" fill="#1b1d16"/>
+      <polygon points="40,350 120,440 120,470 40,380" fill="#262a20"/>
+
+      <!-- Terrain Elevation Surface -->
+      <path d="M 40,350 Q 200,180 380,240 T 760,350 L 680,440 Q 400,430 120,440 Z" 
+            fill="#3e4a32" opacity="0.9"/>
+
+      <!-- Mountain Peaks & Valleys -->
+      <path d="M 160,280 L 260,120 L 340,240 L 440,90 L 520,220 L 640,160 L 720,330" 
+            stroke="#5c7a52" stroke-width="4" fill="none"/>
+      <polygon points="260,120 280,160 240,160" fill="#e2eddf" opacity="0.7"/>
+      <polygon points="440,90 465,140 415,140" fill="#e2eddf" opacity="0.8"/>
+
+      <!-- Crosshairs & Red Target Zone -->
+      <g transform="translate(380, 220)" filter="url(#glow-red)">
+        <circle cx="0" cy="0" r="46" stroke="#f43f5e" stroke-width="3" fill="none"/>
+        <circle cx="0" cy="0" r="28" stroke="#f43f5e" stroke-width="2" stroke-dasharray="8 4" fill="none"/>
+        <circle cx="0" cy="0" r="8" fill="#f43f5e"/>
+        <line x1="-60" y1="0" x2="60" y2="0" stroke="#f43f5e" stroke-width="2"/>
+        <line x1="0" y1="-60" x2="0" y2="60" stroke="#f43f5e" stroke-width="2"/>
+
+        <!-- Intelligence Alert Box -->
+        <g transform="translate(-160, -110)">
+          <rect width="280" height="50" rx="3" fill="#1c070c" stroke="#f43f5e" stroke-width="1.8"/>
+          <text x="14" y="22" font-family="sans-serif" font-size="11" font-weight="bold" fill="#fda4af">
+            ALERTA DE INTELIGENCIA:
+          </text>
+          <text x="14" y="38" font-family="sans-serif" font-size="11" font-weight="900" fill="#ffffff">
+            BLANCO DE ALTO VALOR IDENTIFICADO
+          </text>
+        </g>
+      </g>
+
+      <!-- Connection Ray to Network -->
+      <line x1="380" y1="220" x2="720" y2="120" stroke="#f59e0b" stroke-width="2.5" stroke-dasharray="6 3" filter="url(#glow-amber)"/>
+      <line x1="380" y1="220" x2="660" y2="280" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 3" filter="url(#glow-amber)"/>
+    </g>
+
+    <!-- ========================================== -->
+    <!-- RIGHT: CLAN SÁNCHEZ LOGISTICS NETWORK      -->
+    <!-- ========================================== -->
+    <g id="clan-network" transform="translate(1180, 160)" filter="url(#glow-amber)">
+      <text x="80" y="30" font-family="sans-serif" font-size="15" font-weight="bold" fill="#fcd34d">
+        Estructura Logística Clan Sánchez
+      </text>
+
+      <!-- Network Constellation Lines -->
+      <g stroke="#d97706" stroke-width="1.8" opacity="0.8">
+        <line x1="160" y1="70" x2="120" y2="140"/>
+        <line x1="160" y1="70" x2="260" y2="130"/>
+        <line x1="120" y1="140" x2="60" y2="200"/>
+        <line x1="120" y1="140" x2="180" y2="210"/>
+        <line x1="260" y1="130" x2="280" y2="220"/>
+        <line x1="180" y1="210" x2="280" y2="220"/>
+        <line x1="60" y1="200" x2="160" y2="300"/>
+        <line x1="180" y1="210" x2="160" y2="300"/>
+        <line x1="280" y1="220" x2="260" y2="310"/>
+      </g>
+
+      <!-- Nodes -->
+      <g fill="#f59e0b" stroke="#ffffff" stroke-width="1.5">
+        <circle cx="160" cy="70" r="7"/>
+        <circle cx="120" cy="140" r="6"/>
+        <circle cx="260" cy="130" r="6"/>
+        <circle cx="60" cy="200" r="6"/>
+        <circle cx="180" cy="210" r="6"/>
+        <circle cx="280" cy="220" r="6"/>
+        <circle cx="160" cy="300" r="6"/>
+        <circle cx="260" cy="310" r="6"/>
+      </g>
+
+      <!-- Node Labels -->
+      <g font-family="monospace" font-size="10" font-weight="bold" fill="#fef3c7">
+        <text x="175" y="74">JEFE DE CÉLULA</text>
+        <text x="135" y="144">JEFE DE CÉLULA</text>
+        <text x="275" y="134">FINANZAS</text>
+        <text x="10" y="230">TRANSPORTE</text>
+        <text x="295" y="224">PUNTO DE ACOPIO</text>
+        <text x="130" y="325">FINANZAS</text>
+        <text x="275" y="315">SEGURIDAD</text>
+      </g>
+
+      <!-- Target Profile Box (ROL: JEFE DE TRANSPORTE) -->
+      <g transform="translate(10, 360)">
+        <rect width="130" height="110" rx="3" fill="#121e17" stroke="#f59e0b" stroke-width="1.5"/>
+        <text x="8" y="18" font-family="sans-serif" font-size="9" font-weight="bold" fill="#fcd34d">
+          ROL: JEFE DE TRANSPORTE
+        </text>
+        <rect x="25" y="28" width="55" height="65" rx="2" fill="#243329" stroke="#3d5644" stroke-width="1"/>
+        <!-- Face Silhouette -->
+        <circle cx="52" cy="52" r="14" fill="#a3b899"/>
+        <path d="M 36,86 C 36,70 68,70 68,86 Z" fill="#a3b899"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- ========================================== -->
+  <!-- FOREGROUND: OPERATORS & CONTROL CONSOLE    -->
+  <!-- ========================================== -->
+  <g id="foreground-console">
+    <!-- Command Console Desk -->
+    <polygon points="560,780 1920,680 1920,1080 500,1080" fill="#18232c" stroke="#2a4254" stroke-width="2"/>
+    <polygon points="580,795 1900,700 1780,950 520,950" fill="#0d141b"/>
+
+    <!-- Illuminated Console Touch Interface -->
+    <g transform="translate(860, 770)" filter="url(#glow-cyan)">
+      <!-- Left HUD dial -->
+      <circle cx="160" cy="80" r="50" stroke="#389edb" stroke-width="2" fill="#07131b" opacity="0.8"/>
+      <circle cx="160" cy="80" r="38" stroke="#389edb" stroke-width="1.5" stroke-dasharray="6 3" fill="none"/>
+      <text x="135" y="115" font-family="monospace" font-size="10" fill="#7ba5c4">CEO-LCC</text>
+
+      <!-- Center Touchpad Target Screen -->
+      <rect x="260" y="30" width="180" height="100" rx="4" fill="#081520" stroke="#389edb" stroke-width="1.5"/>
+      <circle cx="350" cy="80" r="30" stroke="#f43f5e" stroke-width="1.8" fill="none"/>
+      <circle cx="350" cy="80" r="16" stroke="#f43f5e" stroke-width="1.2" stroke-dasharray="4 2" fill="none"/>
+    </g>
+
+    <!-- Officer 1 Silhouette (Female Operator in Military Camo / Beret) -->
+    <g transform="translate(1120, 520)">
+      <!-- Head / Hair -->
+      <circle cx="150" cy="120" r="38" fill="#1b2229"/>
+      <!-- Beret / Headset -->
+      <path d="M 130,95 C 130,70 175,70 185,90 Z" fill="#2d3f32"/>
+      <path d="M 120,130 Q 110,150 140,165" stroke="#389edb" stroke-width="3" fill="none"/>
+      <!-- Uniform Torso & Arms reaching console -->
+      <path d="M 90,260 L 130,170 Q 150,160 170,170 L 210,260 L 200,420 L 70,420 Z" fill="#3c4d3f"/>
+      <path d="M 70,300 L 0,380 L 30,400 L 110,340 Z" fill="#495d4d"/>
+      <circle cx="190" cy="230" r="12" fill="#d4af37"/> <!-- Shoulder patch -->
+    </g>
+
+    <!-- Officer 2 Silhouette (Right Operator) -->
+    <g transform="translate(1560, 560)">
+      <circle cx="120" cy="110" r="36" fill="#171d22"/>
+      <path d="M 70,220 L 105,155 Q 120,145 135,155 L 170,220 L 180,400 L 60,400 Z" fill="#354438"/>
+      <!-- Hands on interface -->
+      <rect x="130" y="240" width="80" height="50" rx="4" fill="#0c1822" stroke="#255172" stroke-width="1.5"/>
+    </g>
+  </g>
+</svg>

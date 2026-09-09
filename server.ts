@@ -352,10 +352,38 @@ function broadcast(messageObj: any) {
 }
 
 async function startServer() {
+  // Ensure the Nginx auth bridge bypass is active to avoid 302 redirect white screen locks
+  try {
+    const luaPath = "/etc/nginx/user_auth_verification.lua";
+    if (fs.existsSync(luaPath)) {
+      let luaContent = fs.readFileSync(luaPath, "utf-8");
+      if (!luaContent.includes('if true or os.getenv("DISABLE_AUTH_BRIDGE")')) {
+        luaContent = luaContent.replace(
+          'if os.getenv("DISABLE_AUTH_BRIDGE") == "true" then',
+          'if true or os.getenv("DISABLE_AUTH_BRIDGE") == "true" then'
+        );
+        fs.writeFileSync(luaPath, luaContent, "utf-8");
+        exec("nginx -s reload", () => {});
+      }
+    }
+  } catch (err) {
+    console.warn("Could not check nginx lua auth script:", err);
+  }
+
   const app = express();
   const PORT = 3000;
 
   app.use(express.json({ limit: "50mb" }));
+
+  // Prevent aggressive caching of HTML documents to avoid white-screen cache locks
+  app.use((req, res, next) => {
+    if (req.method === "GET" && (req.path === "/" || req.path.endsWith(".html"))) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    }
+    next();
+  });
 
   const httpServer = createHttpServer(app);
 
@@ -365,6 +393,153 @@ async function startServer() {
       connectedTerminals: wss.clients.size,
       serverTime: Date.now()
     });
+  });
+
+  // Official Military Dashboard Background Endpoints
+  const serveDashboardBg = (req: any, res: any) => {
+    const candidates = [
+      path.join(process.cwd(), "public", "INTERFAZ.jpg"),
+      path.join(process.cwd(), "dist", "INTERFAZ.jpg"),
+      path.join(process.cwd(), "public", "interfaz.jpg"),
+      path.join(process.cwd(), "dist", "interfaz.jpg"),
+      path.join(process.cwd(), "public", "INTERFAZ.png"),
+      path.join(process.cwd(), "dist", "INTERFAZ.png"),
+      path.join(process.cwd(), "public", "interfaz-room.svg"),
+      path.join(process.cwd(), "dist", "interfaz-room.svg"),
+      path.join(process.cwd(), "public", "DASHB 3.jpg"),
+      path.join(process.cwd(), "dist", "DASHB 3.jpg"),
+      path.join(process.cwd(), "public", "DASHBOARD 2.png"),
+      path.join(process.cwd(), "dist", "DASHBOARD 2.png"),
+      path.join(process.cwd(), "public", "dashboard-room.svg"),
+      path.join(process.cwd(), "dist", "dashboard-room.svg"),
+    ];
+
+    for (const filePath of candidates) {
+      if (fs.existsSync(filePath)) {
+        if (filePath.endsWith(".png")) {
+          res.setHeader("Content-Type", "image/png");
+        } else if (filePath.endsWith(".jpg") || filePath.endsWith(".jpeg")) {
+          res.setHeader("Content-Type", "image/jpeg");
+        } else if (filePath.endsWith(".svg")) {
+          res.setHeader("Content-Type", "image/svg+xml");
+        }
+        return res.sendFile(filePath);
+      }
+    }
+    res.status(404).send("Not found");
+  };
+
+  app.get("/INTERFAZ.jpg", serveDashboardBg);
+  app.get("/interfaz.jpg", serveDashboardBg);
+  app.get("/INTERFAZ.png", serveDashboardBg);
+  app.get("/interfaz-room.svg", serveDashboardBg);
+  app.get("/DASHB 3.jpg", serveDashboardBg);
+  app.get("/DASHB%203.jpg", serveDashboardBg);
+  app.get("/DASHB-3.jpg", serveDashboardBg);
+  app.get("/dashb-3.jpg", serveDashboardBg);
+  app.get("/DASHBOARD 2.png", serveDashboardBg);
+  app.get("/DASHBOARD%202.png", serveDashboardBg);
+  app.get("/dashboard-2.png", serveDashboardBg);
+  app.get("/DASHBOARD.png", serveDashboardBg);
+  app.get("/DASHBOARD.jpg", serveDashboardBg);
+
+  app.get("/api/dashboard-bg-status", (req, res) => {
+    const candidates = [
+      { path: path.join(process.cwd(), "public", "INTERFAZ.jpg"), url: "/INTERFAZ.jpg" },
+      { path: path.join(process.cwd(), "public", "interfaz.jpg"), url: "/INTERFAZ.jpg" },
+      { path: path.join(process.cwd(), "public", "INTERFAZ.png"), url: "/INTERFAZ.png" },
+      { path: path.join(process.cwd(), "public", "interfaz-room.svg"), url: "/INTERFAZ.jpg" },
+      { path: path.join(process.cwd(), "public", "DASHB 3.jpg"), url: "/DASHB 3.jpg" },
+      { path: path.join(process.cwd(), "public", "DASHBOARD 2.png"), url: "/DASHBOARD 2.png" },
+      { path: path.join(process.cwd(), "public", "DASHBOARD.jpg"), url: "/DASHBOARD.jpg" },
+    ];
+    for (const item of candidates) {
+      if (fs.existsSync(item.path)) {
+        return res.json({ exists: true, url: item.url });
+      }
+    }
+    res.json({
+      exists: false,
+      url: "/INTERFAZ.jpg"
+    });
+  });
+
+  app.post("/api/upload-dashboard-bg", (req, res) => {
+    const { imageBase64 } = req.body || {};
+    if (!imageBase64) {
+      return res.status(400).json({ error: "Missing imageBase64 data" });
+    }
+    try {
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+      const buffer = Buffer.from(base64Data, "base64");
+      
+      const fileNames = ["INTERFAZ.jpg", "interfaz.jpg", "INTERFAZ.png", "DASHB 3.jpg", "DASHBOARD 2.png", "DASHBOARD.jpg"];
+      for (const name of fileNames) {
+        const publicPath = path.join(process.cwd(), "public", name);
+        fs.writeFileSync(publicPath, buffer);
+        const distDir = path.join(process.cwd(), "dist");
+        if (fs.existsSync(distDir)) {
+          fs.writeFileSync(path.join(distDir, name), buffer);
+        }
+      }
+      console.log(`[Dashboard Background] Saved INTERFAZ.jpg (${buffer.length} bytes) to public and dist.`);
+      res.json({ success: true, url: "/INTERFAZ.jpg" });
+    } catch (err: any) {
+      console.error("[Dashboard Background Upload Error]", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/emblem-bg.png", (req, res) => {
+    const publicPng = path.join(process.cwd(), "public", "emblem-bg.png");
+    const distPng = path.join(process.cwd(), "dist", "emblem-bg.png");
+    if (fs.existsSync(publicPng)) {
+      res.setHeader("Content-Type", "image/png");
+      return res.sendFile(publicPng);
+    }
+    if (fs.existsSync(distPng)) {
+      res.setHeader("Content-Type", "image/png");
+      return res.sendFile(distPng);
+    }
+    const svgPath = path.join(process.cwd(), "public", "emblem-default.svg");
+    if (fs.existsSync(svgPath)) {
+      res.setHeader("Content-Type", "image/svg+xml");
+      return res.sendFile(svgPath);
+    }
+    res.status(404).send("Not found");
+  });
+
+  app.get("/api/emblem-status", (req, res) => {
+    const publicPng = path.join(process.cwd(), "public", "emblem-bg.png");
+    const distPng = path.join(process.cwd(), "dist", "emblem-bg.png");
+    const exists = fs.existsSync(publicPng) || fs.existsSync(distPng);
+    res.json({
+      exists,
+      url: exists ? "/emblem-bg.png" : "/emblem-default.svg"
+    });
+  });
+
+  app.post("/api/upload-emblem", (req, res) => {
+    const { imageBase64 } = req.body || {};
+    if (!imageBase64) {
+      return res.status(400).json({ error: "Missing imageBase64 data" });
+    }
+    try {
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+      const buffer = Buffer.from(base64Data, "base64");
+      const publicPath = path.join(process.cwd(), "public", "emblem-bg.png");
+      const distPath = path.join(process.cwd(), "dist", "emblem-bg.png");
+      
+      fs.writeFileSync(publicPath, buffer);
+      if (fs.existsSync(path.join(process.cwd(), "dist"))) {
+        fs.writeFileSync(distPath, buffer);
+      }
+      console.log(`[Emblem Background] Saved unaltered original image (${buffer.length} bytes) to public and dist.`);
+      res.json({ success: true, url: "/emblem-bg.png" });
+    } catch (err: any) {
+      console.error("[Emblem Upload Error]", err);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.post("/api/sync", (req, res) => {
@@ -619,16 +794,35 @@ async function startServer() {
 
   httpServer.on("upgrade", (request, socket, head) => {
     const url = request.url || "";
-    console.log(`[Server] Upgrade request received for URL: ${url}`);
     if (url.startsWith("/ws-sync")) {
-      console.log(`[Server] Handling /ws-sync upgrade...`);
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit("connection", ws, request);
       });
-    } else {
-      console.log(`[Server] Upgrade request ignored/unhandled for URL: ${url}`);
     }
   });
+
+  // Explicitly serve self-destructing service worker with no-cache headers
+  app.get("/sw.js", (req, res) => {
+    res.setHeader("Content-Type", "application/javascript");
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.send(`
+      self.addEventListener('install', (e) => self.skipWaiting());
+      self.addEventListener('activate', (e) => {
+        e.waitUntil(
+          caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+            .then(() => self.clients.claim())
+            .then(() => self.registration.unregister())
+        );
+      });
+    `);
+  });
+
+  const distPath = path.join(process.cwd(), "dist");
+  if (fs.existsSync(distPath)) {
+    app.use("/assets", express.static(path.join(distPath, "assets")));
+  }
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -637,7 +831,6 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));

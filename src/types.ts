@@ -3,19 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type MilitaryRole = 'ROL_PATRULLA' | 'ROL_FUSION' | 'ROL_CEO';
+export type MilitaryRole = 'ROL_BUSQUEDA' | 'ROL_FUSION' | 'ROL_CEO' | 'ROL_TERRENO' | 'ROL_PATRULLA';
 
 export interface User {
   id: string;
-  role: 'ROL_PATRULLA' | 'ROL_FUSION' | 'ROL_CEO';
+  role: MilitaryRole;
   name: string;
   signature: string;
+  username?: string;
+  rank?: string;
+  organName?: string;
+  organSubtitle?: string;
+  clearanceLevel?: number;
+  stationId?: string;
 }
 
 export interface AuditLogEntry {
   id: string;
   userId: string;
-  role: 'ROL_PATRULLA' | 'ROL_FUSION' | 'ROL_CEO';
+  role: MilitaryRole;
   action: string;
   timestamp: string;
   coordinates: string;
