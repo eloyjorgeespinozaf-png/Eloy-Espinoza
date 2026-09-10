@@ -1,94 +1,517 @@
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
+ * Taller de Fusión Analítica PII-LCC (Centro de Fusión de Inteligencia)
+ * Integra Alertas de Órganos de Búsqueda (S-2) con Expedientes Doctrinales (Ley 1053 / Art. 251 CPE)
+ * Implementa procesamiento e ingesta automática a Expedientes Operativos
  */
 
-import React, { useState } from 'react';
-import { RawAlert, Clan, ActionableIntel } from '../types';
-import { Database, Eye, Check, AlertTriangle, Plus, Shield, Search, TrendingUp, Users, Radio, Map } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { RawAlert, Clan, ActionableIntel, G2RegistryRecord } from '../types';
+import { initialG2Records } from '../utils/g2Records';
+import { G2DoctrinalViewer } from './fusion/G2DoctrinalViewer';
+import { SearchOrganAlertViewer } from './fusion/SearchOrganAlertViewer';
+import { NewG2RecordModal } from './fusion/NewG2RecordModal';
+import { TacticalPhotoViewerModal } from './fusion/TacticalPhotoViewerModal';
+import {
+  TrendingUp,
+  Database,
+  Eye,
+  Plus,
+  Radio,
+  FileText,
+  Layers,
+  MapPin,
+  CheckCircle,
+  AlertTriangle,
+  Sparkles,
+  Zap,
+  FolderOpen,
+  Send,
+  Activity,
+  ArrowRight,
+  ShieldAlert,
+  Clock,
+  ExternalLink,
+  Camera
+} from 'lucide-react';
 
 interface OperationalViewProps {
   rawAlerts: RawAlert[];
   clans: Clan[];
   actionableIntel: ActionableIntel[];
-  onPromoteToIntel: (intel: ActionableIntel, updatedReliability?: 'A' | 'B' | 'C' | 'D', updatedCertainty?: '1' | '2' | '3' | '4', routeId?: string) => void;
+  expedientes?: G2RegistryRecord[];
+  onAddExpediente?: (record: G2RegistryRecord) => void;
+  onPromoteToIntel: (
+    intel: ActionableIntel,
+    updatedReliability?: 'A' | 'B' | 'C' | 'D',
+    updatedCertainty?: '1' | '2' | '3' | '4',
+    routeId?: string
+  ) => void;
   onUpdateAlertStatus: (id: string, status: 'PROCESSED' | 'DISMISSED') => void;
+  onSimulateRawAlert?: (alert: RawAlert) => void;
 }
 
 export default function OperationalView({
   rawAlerts = [],
   clans = [],
   actionableIntel = [],
+  expedientes,
+  onAddExpediente,
   onPromoteToIntel,
-  onUpdateAlertStatus
+  onUpdateAlertStatus,
+  onSimulateRawAlert
 }: OperationalViewProps) {
-  const [selectedAlertId, setSelectedAlertId] = useState<string>('');
-  const [title, setTitle] = useState<string>('');
-  const [targetClan, setTargetClan] = useState<string>('');
-  const [recommendedAction, setRecommendedAction] = useState<string>('');
-  const [threatScore, setThreatScore] = useState<number>(75);
+  // Mode toggle: Expedientes vs Alertas S-2
+  const [activeFeedTab, setActiveFeedTab] = useState<'G2' | 'S2'>('G2');
+  const [alertFilterStatus, setAlertFilterStatus] = useState<'PENDING' | 'ALL' | 'PROCESSED'>('PENDING');
+  
+  // Expedientes repository state
+  const [g2Records, setG2Records] = useState<G2RegistryRecord[]>(() => {
+    return expedientes && expedientes.length > 0 ? expedientes : initialG2Records;
+  });
+
+  // Keep local records in sync if external prop updates
+  useEffect(() => {
+    if (expedientes && expedientes.length > 0) {
+      setG2Records(expedientes);
+    }
+  }, [expedientes]);
+
+  const [selectedRecordId, setSelectedRecordId] = useState<string>(() => {
+    return g2Records[0]?.id || '';
+  });
+  const [isNewRecordModalOpen, setIsNewRecordModalOpen] = useState(false);
+
+  // Notice banner for newly implemented Expediente
+  const [justImplementedExpediente, setJustImplementedExpediente] = useState<{ id: string; title: string } | null>(null);
+
+  // Selected item type
+  const isG2Selected = activeFeedTab === 'G2';
+  const selectedG2 = g2Records.find(r => r.id === selectedRecordId);
+  const selectedAlert = rawAlerts.find(a => a.id === selectedRecordId);
+
+  // Fusion form state
+  const [intelTitle, setIntelTitle] = useState<string>(
+    selectedG2 ? `Apreciación: ${selectedG2.id} - ${selectedG2.componenteRubro}` : ''
+  );
+  const [expedienteRubro, setExpedienteRubro] = useState<'ECONOMICO' | 'MILITAR' | 'POLITICO' | 'PSICOSOCIAL' | 'OTRO'>('ECONOMICO');
+  const [targetClan, setTargetClan] = useState<string>(clans[0]?.name || 'Clan Los Choneros de Frontera');
+  const [recommendedAction, setRecommendedAction] = useState<string>(
+    'Desplegar vigilancia SIGINT y contrainteligencia táctica sobre el vector identificado.'
+  );
+  const [threatScore, setThreatScore] = useState<number>(78);
   const [reliability, setReliability] = useState<'A' | 'B' | 'C' | 'D'>('B');
   const [certainty, setCertainty] = useState<'1' | '2' | '3' | '4'>('2');
   const [routeId, setRouteId] = useState<string>('Ruta Colchane');
+  const [selectedIdeas, setSelectedIdeas] = useState<string[]>([]);
+  const [filterRubro, setFilterRubro] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [selectedClanId, setSelectedClanId] = useState<string | null>(clans[0]?.id || null);
 
-  // When a raw alert is selected, auto-seed the intelligence generation workspace
-  const handleAlertSelect = (id: string) => {
-    setSelectedAlertId(id);
-    const alert = rawAlerts.find(a => a.id === id);
-    if (alert) {
-      setTitle(`Análisis CFI: Fusión ${alert.sourceType} en ${alert.coordinates}`);
-      setReliability(alert.reliability);
-      setCertainty(alert.certainty);
-      setRouteId(alert.clandestineRouteId || 'Ruta Colchane');
-      
-      // Try to find matching clan by route
-      const currentRoute = alert.clandestineRouteId || 'Ruta Colchane';
-      const matchedClan = clans.find(c => c.knownRoutes.includes(currentRoute));
-      setTargetClan(matchedClan ? matchedClan.name : clans[0]?.name || '');
-      
-      setRecommendedAction(`Desplegar fuerza operativa rápida sobre ${currentRoute} para neutralizar transporte furtivo.`);
-      
-      // Base score depending on reliability of source
-      let score = 50;
-      if (alert.reliability === 'A') score += 20;
-      if (alert.certainty === '1') score += 15;
-      setThreatScore(Math.min(100, score));
+  // Right column state
+  const [selectedClanId, setSelectedClanId] = useState<string | null>(clans[0]?.id || null);
+  const [rightTab, setRightTab] = useState<'CLANS' | 'VALIDATED'>('CLANS');
+  const [isCentralPhotoModalOpen, setIsCentralPhotoModalOpen] = useState<boolean>(false);
+
+  // Pending alerts from Search Organs
+  const pendingAlerts = rawAlerts.filter(a => a.status === 'PENDING');
+  const latestPendingAlert = pendingAlerts[0] || null;
+
+  // Next sequential Expediente ID
+  const nextExpedienteId = `REG-2026-${String(g2Records.length + 1).padStart(3, '0')}`;
+
+  // Handle selection of an Expediente record
+  const handleSelectG2 = (record: G2RegistryRecord) => {
+    setSelectedRecordId(record.id);
+    setActiveFeedTab('G2');
+    setIntelTitle(`Apreciación: ${record.id} [${record.componenteRubro}] - ${record.tipoRegistro}`);
+    
+    // Set reliability & certainty from record evaluation if available
+    if (record.evaluacion?.confiabilidad?.escala) {
+      setReliability((record.evaluacion.confiabilidad.escala.toUpperCase() as any) || 'A');
+    }
+    if (record.evaluacion?.exactitud?.escala) {
+      setCertainty((record.evaluacion.exactitud.escala as any) || '1');
+    }
+    
+    // Seed ideas fuerza
+    const ideas = record.evaluacion?.ideasFuerza || [];
+    setSelectedIdeas(ideas.slice(0, 3));
+
+    // Heuristics for routes and actions
+    if (record.especificoGrafico?.coordenadasCuadricula?.includes('CQ') || record.id === 'REG-2026-002') {
+      setRouteId('Salar de Coipasa');
+    } else if (record.id === 'REG-2026-003') {
+      setRouteId('Tambo Quemado');
+    } else if (record.id === 'REG-2026-004') {
+      setRouteId('Paso Pisiga');
+    } else {
+      setRouteId('Hito 14');
+    }
+
+    if (record.id === 'REG-2026-001') {
+      setRecommendedAction('Articular interoperabilidad doctrinal con unidades del CEO-LCC y Policía Boliviana (Ley 1053 / Art. 251 CPE) para cierre perimétrico y control territorial conjunto.');
+      setThreatScore(55);
+    } else if (record.id === 'REG-2026-002') {
+      setRecommendedAction('Desplegar Grupo de Reacción Inmediata para emboscada de interdicción en cuello de botella de Salar de Coipasa e interceptar caravana de camiones F-12.');
+      setThreatScore(88);
+    } else if (record.id === 'REG-2026-003') {
+      setRecommendedAction('Establecer puntos de bloqueo móviles en tramo Tambo Quemado - Charaña para comiso de cisternas y control de desvío de combustible con la ANH.');
+      setThreatScore(80);
+    } else if (record.id === 'REG-2026-004') {
+      setRecommendedAction('Inhabilitar mecánicamente huella clandestina en Hito 18 con zanjas antivehículo y remitir vehículos incautados al recinto de Aduana Pastocalle.');
+      setThreatScore(72);
+    } else {
+      setRecommendedAction(`Integrar reporte ${record.id} en matriz de correlación de operaciones contra el contrabando de la PII-LCC.`);
+      setThreatScore(70);
     }
   };
 
-  const handleCreateIntel = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedAlertId || !title) return;
-
-    const alertObj = rawAlerts.find(a => a.id === selectedAlertId);
-    if (!alertObj) return;
-
-    const newIntel: ActionableIntel = {
-      id: `intel-${Math.floor(100 + Math.random() * 900)}`,
-      rawAlertId: selectedAlertId,
-      title,
-      threatScore,
-      validatedBy: 'CFI Analista Tte. Coronel S. Rojas',
-      targetClan,
-      recommendedAction,
-      coordinates: alertObj.coordinates,
-      status: 'APPROVED', // Ready for CEO-LCC
-      timestamp: new Date().toISOString()
-    };
-
-    onPromoteToIntel(newIntel, reliability, certainty, routeId);
-
-    // Reset workspace
-    setSelectedAlertId('');
-    setTitle('');
-    setTargetClan('');
-    setRecommendedAction('');
-    setThreatScore(75);
+  // Extract key factual clauses from alert details
+  const extractAlertIdeas = (alert: RawAlert): string[] => {
+    const list: string[] = [];
+    list.push(`Sensor ${alert.sourceName} (${alert.sourceType}) en ${alert.coordinates}`);
+    if (alert.details) {
+      const parts = alert.details.split(/[.;\n]/).map(s => s.trim()).filter(s => s.length > 12);
+      if (parts.length > 0) {
+        parts.slice(0, 3).forEach(p => list.push(p));
+      } else {
+        list.push(alert.details);
+      }
+    }
+    return list;
   };
 
-  const filteredClans = clans.filter(clan => 
+  // Handle selection of a Raw Alert (S2)
+  const handleSelectAlert = (alert: RawAlert) => {
+    setSelectedRecordId(alert.id);
+    setActiveFeedTab('S2');
+    setIntelTitle(`Apreciación: Detección ${alert.sourceName} en ${alert.coordinates}`);
+    setReliability(alert.reliability);
+    setCertainty(alert.certainty);
+    
+    // Choose appropriate rubro based on details
+    if (alert.details.toLowerCase().includes('combustible') || alert.details.toLowerCase().includes('cisterna') || alert.details.toLowerCase().includes('f-12') || alert.details.toLowerCase().includes('mercadería')) {
+      setExpedienteRubro('ECONOMICO');
+    } else {
+      setExpedienteRubro('MILITAR');
+    }
+
+    const currentRoute = alert.clandestineRouteId || 'Ruta Colchane';
+    setRouteId(currentRoute);
+    const matchedClan = clans.find(c => c.knownRoutes.includes(currentRoute));
+    setTargetClan(matchedClan ? matchedClan.name : clans[0]?.name || 'Clan Los Choneros de Frontera');
+
+    setRecommendedAction(`Desplegar patrulla de interdicción CEO-LCC sobre el vector ${currentRoute} para interceptar caravana reportada por ${alert.sourceName}.`);
+
+    let score = 55;
+    if (alert.reliability === 'A') score += 20;
+    if (alert.certainty === '1') score += 15;
+    if (alert.details.toLowerCase().includes('armad') || alert.details.toLowerCase().includes('miguelines')) score += 10;
+    setThreatScore(Math.min(100, score));
+
+    // Seed alert ideas
+    const ideas = extractAlertIdeas(alert);
+    setSelectedIdeas(ideas);
+  };
+
+  // Toggle selection of an idea fuerza
+  const toggleIdea = (idea: string) => {
+    setSelectedIdeas(prev => {
+      if (prev.includes(idea)) {
+        return prev.filter(i => i !== idea);
+      } else {
+        return [...prev, idea];
+      }
+    });
+  };
+
+  // Append selected ideas into the recommended action
+  const handleInjectIdeasIntoAction = () => {
+    if (selectedIdeas.length === 0) return;
+    const synthesized = `[SÍNTESIS ANALÍTICA]: ${selectedIdeas.join(' | ')}. ${recommendedAction}`;
+    setRecommendedAction(synthesized);
+  };
+
+  // CORE WORKFLOW: Automatically process and implement search organ alert into an Expediente
+  const handleProcessAlertToExpediente = (sourceAlert?: RawAlert) => {
+    const targetAlert = sourceAlert || selectedAlert;
+    if (!targetAlert) return;
+
+    const generatedId = nextExpedienteId;
+    const ideasToUse = selectedIdeas.length > 0 ? selectedIdeas : extractAlertIdeas(targetAlert);
+
+    const isGraphic = targetAlert.mediaUrl !== undefined || targetAlert.sourceType === 'IMINT';
+
+    // Build complete legal & operational content
+    const detailedContent = `EXPEDIENTE TÁCTICO // PII-LCC (LEY 1053 / ART. 251 CPE)
+
+1. ORIGEN DE LA DETECCIÓN:
+• Órgano de Búsqueda S-2: ${targetAlert.sourceName} (${targetAlert.sourceType})
+• Coordenadas Cuadrícula MGRS: ${targetAlert.coordinates}
+• Timestamp de Captura: ${new Date(targetAlert.timestamp).toLocaleString()}
+
+2. REPORTE PRIMARIO DE CAMPO:
+"${targetAlert.details}"
+
+3. APRECIACIÓN ANALÍTICA DE FUSIÓN (CFI / CEO-LCC):
+${recommendedAction}
+
+4. CORRELACIÓN Y PARÁMETROS OPERACIONALES:
+• Vector Clandestino Contrastado: ${routeId}
+• Organización / Facción Hostil: ${targetClan}
+• Nivel de Amenaza Estimado: ${threatScore}% (${threatScore > 80 ? 'CRÍTICO' : threatScore > 50 ? 'ALTO' : 'MODERADO'})
+• Código Doctrinal de Evaluación: ${reliability}-${certainty}
+• Base Legal: Ley 1053 de Fortalecimiento de la Lucha Contra el Contrabando y Art. 251 CPE.`;
+
+    const newExpediente: G2RegistryRecord = {
+      id: generatedId,
+      fechaHoraIngreso: new Date().toISOString().slice(0, 16),
+      tipoRegistro: isGraphic ? 'GRAFICO' : 'LITERAL',
+      componenteRubro: expedienteRubro,
+      clasificacionSeguridad: 'CONFIDENCIAL',
+      contenidoDetallado: detailedContent,
+      referenciasAntecedentes: [
+        `REPORTE S-2 ${targetAlert.id}`,
+        targetAlert.sourceName,
+        routeId,
+        targetClan
+      ],
+      unidadReceptora: 'Puesto de Comando Central CEO-LCC / Taller de Fusión',
+      operadorRegistro: 'Cap. Marcelo Benítez Vargas (Analista LCC)',
+      observacionesAdicionales: `EXPEDIENTE IMPLEMENTADO AUTOMÁTICAMENTE DESDE ÓRGANO DE BÚSQUEDA S-2 // SENSOR: ${targetAlert.sourceName}`,
+      especificoGrafico: isGraphic ? {
+        subtipoElemento: `Detección Sensor ${targetAlert.sourceType} // Telemetría de Campo`,
+        ubicacionReferenciaDigital: `Ingesta S-2 / PII-LCC / Sensor ${targetAlert.sourceName}`,
+        archivoAdjunto: targetAlert.mediaUrl ? {
+          nombre: `captura_${targetAlert.id}.jpg`,
+          tipo: 'image/jpeg',
+          tamano: 48200,
+          base64Data: targetAlert.mediaUrl.startsWith('data:') ? targetAlert.mediaUrl : '',
+          fechaCarga: new Date().toISOString()
+        } : undefined,
+        escalaCoordenadas: `1:50.000 / ${targetAlert.coordinates}`,
+        fechaCapturaGrafica: new Date().toISOString().slice(0, 10),
+        interpretacionVisualPreliminar: `Captura y telemetría de sensor ${targetAlert.sourceName} en cuadrícula ${targetAlert.coordinates}. ${targetAlert.details.slice(0, 130)}...`,
+        tipoSoporte: 'Sensor Órgano de Búsqueda / FLIR / Radar',
+        identificadorHojaPliego: `PLIEGO-AUTO-${generatedId}`,
+        escala: '1:50.000',
+        coordenadasCuadricula: targetAlert.coordinates,
+        metadatosSensorFecha: new Date().toISOString().slice(0, 10),
+        orientacionNorte: 'Norte Cuadrícula (NC)'
+      } : undefined,
+      especificoLiteral: !isGraphic ? {
+        subtipoSoporte: 'Parte Informativo de Órgano de Búsqueda',
+        extractoPalabrasClave: `CONTRABANDO / ${targetClan.toUpperCase()} / ${routeId.toUpperCase()}`,
+        canalTransmision: 'Canal Táctico S-2 Encriptado',
+        documentoOrigenReferencia: `REPORTE PRIMARIO ${targetAlert.id}`
+      } : undefined,
+      estadoRegistro: 'Evaluado',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      calificacionEvaluacion: `${reliability}-${certainty}`,
+      evaluacion: {
+        pertinencia: {
+          componenteDestino: expedienteRubro,
+          nivelUrgencia: threatScore > 75 ? 'Urgente' : 'Prioritaria'
+        },
+        confiabilidad: {
+          escala: reliability,
+          evaluarPorSeparado: true,
+          evaluacionFuente: reliability,
+          evaluacionMedio: reliability
+        },
+        exactitud: {
+          escala: certainty
+        },
+        codigoAlfanumerico: `${reliability}-${certainty}`,
+        analistaEvaluador: 'Cap. M. Vargas (Analista LCC)',
+        fechaHoraEvaluacion: new Date().toISOString().slice(0, 16),
+        observacionesEvaluacion: `Evaluado bajo metodología PII-LCC desde sensor S-2 (${targetAlert.sourceName}). Código: ${reliability}-${certainty}.`,
+        ideasFuerza: ideasToUse
+      }
+    };
+
+    // 1. Add to expedientes list
+    setG2Records(prev => [newExpediente, ...prev]);
+    if (onAddExpediente) {
+      onAddExpediente(newExpediente);
+    }
+
+    // 2. Mark alert as PROCESSED and link to the generated Expediente
+    onUpdateAlertStatus(targetAlert.id, 'PROCESSED');
+
+    // 3. Promote to Actionable Intel for CEO-LCC
+    const newIntel: ActionableIntel = {
+      id: `intel-LCC-${Math.floor(100 + Math.random() * 900)}`,
+      rawAlertId: targetAlert.id,
+      title: intelTitle || `Apreciación: ${newExpediente.id} - ${targetAlert.sourceName}`,
+      threatScore,
+      validatedBy: 'División de Inteligencia LCC / Analista Cap. M. Vargas',
+      targetClan,
+      recommendedAction,
+      coordinates: targetAlert.coordinates,
+      status: 'APPROVED',
+      timestamp: new Date().toISOString()
+    };
+    onPromoteToIntel(newIntel, reliability, certainty, routeId);
+
+    // 4. Trigger celebration banner
+    setJustImplementedExpediente({
+      id: newExpediente.id,
+      title: `${newExpediente.componenteRubro} // ${targetAlert.sourceName}`
+    });
+
+    // 5. Automatically switch feed to EXPEDIENTES and open the new dossier!
+    setActiveFeedTab('G2');
+    handleSelectG2(newExpediente);
+  };
+
+  // Submit handler for fusion form
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedRecordId) return;
+
+    if (!isG2Selected && selectedAlert) {
+      // Process alert and convert to Expediente
+      handleProcessAlertToExpediente(selectedAlert);
+    } else if (isG2Selected && selectedG2) {
+      // Promote existing Expediente to actionable intel
+      const newIntel: ActionableIntel = {
+        id: `intel-LCC-${Math.floor(100 + Math.random() * 900)}`,
+        rawAlertId: selectedG2.id,
+        title: intelTitle,
+        threatScore,
+        validatedBy: 'División de Inteligencia LCC / Analista Cap. M. Vargas',
+        targetClan,
+        recommendedAction,
+        coordinates: selectedG2.especificoGrafico?.coordenadasCuadricula || 'MGRS 19K DQ 4521 8932',
+        status: 'APPROVED',
+        timestamp: new Date().toISOString()
+      };
+      onPromoteToIntel(newIntel, reliability, certainty, routeId);
+
+      setG2Records(prev =>
+        prev.map(r => r.id === selectedG2.id ? { ...r, estadoRegistro: 'Procesado' } : r)
+      );
+    }
+  };
+
+  // Simulation generator: dispatches realistic search organ field reports into the system
+  const handleSimulateFieldReport = () => {
+    const simulationPool: Array<{
+      sourceType: 'IMINT' | 'SIGINT' | 'HUMINT';
+      sourceName: string;
+      details: string;
+      coordinates: string;
+      clandestineRouteId: string;
+      reliability: 'A' | 'B' | 'C' | 'D';
+      certainty: '1' | '2' | '3' | '4';
+      mediaUrl: string;
+      operatorName: string;
+      originUnit: string;
+      originSector: string;
+      transmissionChannel: string;
+      emitterDeviceId: string;
+    }> = [
+      {
+        sourceType: 'IMINT',
+        sourceName: 'VANT-02 Halcón (Térmico Nocturno)',
+        details: 'Detección FLIR de columna furtiva: 4 camiones F-12 de alto tonelaje avanzando con luces apagadas sobre huella no balizada en dirección a Hito 14. Se detecta firma térmica de bultos voluminosos y camioneta escolta en vanguardia.',
+        coordinates: '19°14\'22"S 68°34\'10"W',
+        clandestineRouteId: 'Hito 14',
+        reliability: 'A',
+        certainty: '1',
+        mediaUrl: 'multimedia-thermal',
+        operatorName: 'Sgto. 1ro. Juan Pérez Vargas (Operador VANT)',
+        originUnit: 'Escuadrilla Aérea CEO-LCC // RI-22 Mejillones',
+        originSector: 'Hito 14 - Frontera Chileno-Boliviana',
+        transmissionChannel: 'Enlace Encriptado VANT-DL UHF 433 MHz // Red CAD-C2',
+        emitterDeviceId: 'Terminal VANT-GCS-02 // Sensor FLIR Tau-2'
+      },
+      {
+        sourceType: 'SIGINT',
+        sourceName: 'SENSOR-RADAR-05 (Radar Terrestre)',
+        details: 'Detección Doppler de velocidad anómala (58 km/h) en el sector oriental del Salar de Coipasa. Eco característico de 3 camiones cisterna desviados de la carretera autorizada evadiendo punto de control aduanero.',
+        coordinates: '19°22\'05"S 68°15\'40"W',
+        clandestineRouteId: 'Salar de Coipasa',
+        reliability: 'A',
+        certainty: '2',
+        mediaUrl: 'multimedia-radar',
+        operatorName: 'Suboficial Técnico M. Quiroga (Especialista Radar)',
+        originUnit: 'Batería de Sensores y Vigilancia Electrónica Pisiga',
+        originSector: 'Salar de Coipasa (Sector Challapata)',
+        transmissionChannel: 'Canal VHF Táctico Encriptado CAD-C2 // Frecuencia 142.850 MHz',
+        emitterDeviceId: 'Estación Fija SIGINT-ESM-Alfa // Antena Radar'
+      },
+      {
+        sourceType: 'HUMINT',
+        sourceName: 'HUMINT-P2 (Contacto de Frontera)',
+        details: 'Informante en paso fronterizo no habilitado alerta sobre acopio de 12 vehículos indocumentados ("chutos") y combustible subvencionado en galpón clandestino cerca de Tambo Quemado con intención de cruce a las 03:00 hrs.',
+        coordinates: '18°17\'40"S 69°02\'15"W',
+        clandestineRouteId: 'Tambo Quemado',
+        reliability: 'B',
+        certainty: '1',
+        mediaUrl: 'multimedia-optical',
+        operatorName: 'Agente de Campo HUMINT-09 (Inteligencia Territorial)',
+        originUnit: 'Destacamento de Control Fronterizo Charaña',
+        originSector: 'Paso Tambo Quemado - Charaña (Paso Ilegal)',
+        transmissionChannel: 'Mensajería Táctica Cifrada Satelital Iridium // Enlace S-2',
+        emitterDeviceId: 'Handheld Táctico Rugged S2-TX-9041'
+      }
+    ];
+
+    const pick = simulationPool[Math.floor(Math.random() * simulationPool.length)];
+    const generatedAlert: RawAlert = {
+      id: `alert-auto-${Date.now().toString().slice(-4)}`,
+      timestamp: new Date().toISOString(),
+      sourceType: pick.sourceType,
+      sourceName: pick.sourceName,
+      reliability: pick.reliability,
+      certainty: pick.certainty,
+      details: pick.details,
+      coordinates: pick.coordinates,
+      status: 'PENDING',
+      clandestineRouteId: pick.clandestineRouteId,
+      mediaUrl: pick.mediaUrl,
+      operatorName: pick.operatorName,
+      originUnit: pick.originUnit,
+      originSector: pick.originSector,
+      transmissionChannel: pick.transmissionChannel,
+      emitterDeviceId: pick.emitterDeviceId
+    };
+
+    if (onSimulateRawAlert) {
+      onSimulateRawAlert(generatedAlert);
+    }
+
+    // Auto select this newly generated alert in the workshop
+    handleSelectAlert(generatedAlert);
+  };
+
+  // Filtered lists
+  const filteredG2 = g2Records.filter(r => {
+    const matchesRubro = filterRubro === 'ALL' || r.componenteRubro === filterRubro;
+    const matchesSearch =
+      r.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      r.contenidoDetallado.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (r.evaluacion?.ideasFuerza?.some(i => i.toLowerCase().includes(searchTerm.toLowerCase())));
+    return matchesRubro && matchesSearch;
+  });
+
+  const filteredAlerts = rawAlerts.filter(a => {
+    const matchesFilter =
+      alertFilterStatus === 'ALL' ? true :
+      alertFilterStatus === 'PENDING' ? a.status === 'PENDING' :
+      a.status === 'PROCESSED';
+    const matchesSearch =
+      a.sourceName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      a.details.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      a.coordinates.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesFilter && matchesSearch;
+  });
+
+  const filteredClans = clans.filter(clan =>
     clan.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     clan.knownRoutes.some(r => r.toLowerCase().includes(searchTerm.toLowerCase()))
   );
@@ -96,408 +519,768 @@ export default function OperationalView({
   const activeClanDetails = clans.find(c => c.id === selectedClanId) || clans[0];
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left column: Feed of raw alerts from Search Organs (Órganos de Búsqueda) */}
-        <div className="lg:col-span-4 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3 mb-4">
-              <div className="flex items-center gap-2">
-                <Radio className="w-4 h-4 text-[#f97316] animate-pulse" />
-                <h3 className="text-sm font-mono font-bold text-white uppercase">
-                  Alertas No Procesadas
-                </h3>
-              </div>
-              <span className="text-[10px] font-mono text-[#f97316] bg-[#f97316]/10 px-2 py-0.5 rounded">
-                Órganos de Búsqueda
+    <div className="space-y-5 animate-fade-in font-sans">
+      {/* Top Header & Tactical Controls */}
+      <div className="bg-[#0b0f19] border border-[#1e2738] rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xl">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-[#f97316]/10 border border-[#f97316]/30 flex items-center justify-center">
+            <TrendingUp className="w-5 h-5 text-[#f97316]" />
+          </div>
+          <div className="text-left">
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-mono font-bold text-white uppercase tracking-wider">
+                TALLER DE FUSIÓN ANALÍTICA // PII-LCC
+              </h2>
+              <span className="text-[10px] font-mono bg-[#f97316]/15 text-[#f97316] border border-[#f97316]/30 px-2 py-0.5 rounded font-bold uppercase">
+                EXPEDIENTES & ÓRGANOS DE BÚSQUEDA
               </span>
             </div>
-
-            <p className="text-[#888] text-xs mb-4 font-sans">
-              Afluencia de logs crudos listos para verificación analítica (IMINT/HUMINT/SIGINT):
+            <p className="text-xs text-[#94a3b8] font-mono mt-0.5">
+              Fusión doctrinaria, correlación de sensores tácticos y generación de expedientes operativos.
             </p>
-
-            <div className="space-y-3 max-h-[450px] overflow-y-auto pr-1">
-              {rawAlerts.filter(a => a.status === 'PENDING').length === 0 ? (
-                <div className="text-center py-10 border border-dashed border-[#1a1a1a] rounded-lg text-[#666] text-xs font-mono">
-                  No hay alertas de búsqueda pendientes. Introduzca datos en el nivel táctico.
-                </div>
-              ) : (
-                rawAlerts.filter(a => a.status === 'PENDING').map(alert => (
-                  <div 
-                    key={alert.id}
-                    onClick={() => handleAlertSelect(alert.id)}
-                    className={`p-3 rounded-lg border transition-all cursor-pointer text-left ${
-                      selectedAlertId === alert.id 
-                        ? 'bg-[#f97316]/5 border-[#f97316]' 
-                        : 'bg-[#111] border-[#222] hover:border-[#444]'
-                    }`}
-                  >
-                    <div className="flex justify-between items-center mb-1.5">
-                      <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
-                        alert.sourceType === 'IMINT' ? 'bg-purple-500/10 text-purple-400' :
-                        alert.sourceType === 'HUMINT' ? 'bg-[#3b82f6]/10 text-[#3b82f6]' :
-                        'bg-teal-500/10 text-teal-400'
-                      }`}>
-                        {alert.sourceType} // {alert.sourceName}
-                      </span>
-                      <span className="text-[9px] font-mono text-[#666]">
-                        Fiab: {alert.reliability}-{alert.certainty}
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-[#ccc] font-sans leading-relaxed line-clamp-2">
-                      {alert.details}
-                    </p>
-
-                    {alert.mediaUrl && (
-                      <div className="mt-1.5 flex items-center gap-1 text-[9px] font-mono text-[#10b981]">
-                        <span>📷 Evidencia Adjunta</span>
-                        {!['multimedia-thermal', 'multimedia-optical', 'multimedia-radar', 'multimedia-satellite'].includes(alert.mediaUrl) && (
-                          <span className="text-[8px] bg-[#10b981]/15 text-[#10b981] px-1 rounded font-bold uppercase tracking-wider">Foto de Terreno</span>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="flex justify-between items-center pt-2 mt-2 border-t border-[#1a1a1a] text-[9px] font-mono text-[#666]">
-                      <span>Ruta: <b className="text-[#888]">{alert.clandestineRouteId || 'No asignada'}</b></span>
-                      <span>{new Date(alert.timestamp).toLocaleTimeString()}</span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="mt-4 bg-[#111] p-3 rounded-lg border border-[#1a1a1a] flex justify-between text-[10px] font-mono">
-            <span className="text-[#666]">Clasificación de Fiabilidad:</span>
-            <span className="text-[#f97316]">Escala de Cooperación A-1</span>
           </div>
         </div>
 
-        {/* Center column: Intelligence Fusion Workshop (Fusión de Datos) */}
-        <div className="lg:col-span-4 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg relative">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-[#f97316]/5 rounded-full blur-2xl pointer-events-none" />
-          
-          <h3 className="text-sm font-mono font-bold text-white border-b border-[#1a1a1a] pb-3 mb-4 flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-[#f97316]" />
-            TALLER DE FUSIÓN ANALÍTICA
-          </h3>
+        {/* Action buttons: Simulation & Manual Record */}
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={handleSimulateFieldReport}
+            className="flex-1 sm:flex-initial bg-gradient-to-r from-cyan-950 to-blue-950 hover:from-cyan-900 hover:to-blue-900 text-cyan-200 border border-cyan-500/40 text-xs font-mono py-2 px-3 rounded-lg flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 cursor-pointer font-bold"
+            title="Simula la llegada de un reporte táctico desde un sensor o patrulla en frontera"
+          >
+            <Radio className="w-4 h-4 text-cyan-400 animate-pulse" />
+            <span>Simular Transmisión Órgano S-2</span>
+          </button>
 
-          {!selectedAlertId ? (
-            <div className="h-full flex flex-col items-center justify-center text-center py-20 text-[#888] font-mono text-xs">
-              <Eye className="w-8 h-8 text-[#444] mb-2 animate-pulse" />
-              <span>Seleccione un registro del panel izquierdo para analizar la fuente y fusionarla con la base de datos táctica.</span>
+          <button
+            type="button"
+            onClick={() => setIsNewRecordModalOpen(true)}
+            className="flex-1 sm:flex-initial bg-[#121722] hover:bg-[#1a2233] text-white border border-[#222c40] text-xs font-mono py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4 text-[#f97316]" />
+            <span>+ Nuevo Expediente</span>
+          </button>
+        </div>
+      </div>
+
+      {/* SUCCESS BANNER: Newly Implemented Expediente Notice */}
+      {justImplementedExpediente && (
+        <div className="bg-emerald-950/70 border border-emerald-500/50 rounded-xl p-3 text-left flex items-center justify-between gap-3 shadow-xl animate-fade-in">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-emerald-500/20 rounded-lg text-emerald-400">
+              <CheckCircle className="w-5 h-5" />
             </div>
-          ) : (
-            <form onSubmit={handleCreateIntel} className="space-y-4 text-left">
-              <div>
-                <label className="block text-[10px] font-mono text-[#666] uppercase mb-1 font-bold">
-                  Título de Inteligencia Generada
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full bg-[#111] text-white border border-[#222] rounded px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
-                />
+            <div>
+              <span className="text-xs font-mono font-bold text-white uppercase block">
+                ¡EXPEDIENTE {justImplementedExpediente.id} IMPLEMENTADO AUTOMÁTICAMENTE CON ÉXITO!
+              </span>
+              <span className="text-[11px] font-mono text-emerald-300">
+                La información del órgano de búsqueda ha sido archivada en la base doctrinal PII-LCC y remitida al Comando Estratégico (CEO-LCC).
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setJustImplementedExpediente(null)}
+            className="text-[10px] font-mono bg-emerald-900/60 hover:bg-emerald-800 text-emerald-200 px-3 py-1 rounded border border-emerald-600/40 transition-colors cursor-pointer"
+          >
+            Entendido
+          </button>
+        </div>
+      )}
+
+      {/* LIVE INCOMING ALERT BANNER: Ingesta desde Órgano de Búsqueda */}
+      {latestPendingAlert && activeFeedTab === 'G2' && (
+        <div className="bg-gradient-to-r from-orange-950/80 via-[#1e1308] to-orange-950/80 border border-orange-500/50 rounded-xl p-3 text-left flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-full bg-gradient-to-l from-orange-500/10 to-transparent pointer-events-none" />
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <span className="w-3 h-3 rounded-full bg-orange-500 animate-ping absolute" />
+              <span className="w-2.5 h-2.5 rounded-full bg-orange-400 relative block" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono font-black text-orange-200 uppercase tracking-wide">
+                  ALERTA ENTRADA DESDE ÓRGANO DE BÚSQUEDA S-2
+                </span>
+                <span className="text-[9px] font-mono bg-orange-500/20 text-orange-300 px-1.5 py-0.2 rounded font-bold border border-orange-500/30">
+                  {latestPendingAlert.sourceType} // {latestPendingAlert.sourceName}
+                </span>
               </div>
+              <p className="text-xs text-slate-300 font-sans line-clamp-1 mt-0.5">
+                "{latestPendingAlert.details}" — <span className="font-mono text-orange-300 font-bold">{latestPendingAlert.coordinates}</span>
+              </p>
+            </div>
+          </div>
 
-              {/* Reliability & Certainty Grid */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-mono text-[#666] uppercase mb-1 font-bold">
-                    [Fiabilidad de la Fuente] *
-                  </label>
-                  <select
-                    value={reliability}
-                    onChange={(e) => setReliability(e.target.value as any)}
-                    className="w-full bg-[#111] text-white border border-[#222] rounded px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
-                  >
-                    <option value="A">A - Completamente Fiable</option>
-                    <option value="B">B - Usualmente Fiable</option>
-                    <option value="C">C - Bastante Fiable</option>
-                    <option value="D">D - No Fiable</option>
-                  </select>
-                </div>
+          <button
+            type="button"
+            onClick={() => handleSelectAlert(latestPendingAlert)}
+            className="bg-[#f97316] hover:bg-[#ea580c] text-white text-xs font-mono font-black px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-lg active:scale-95 transition-all cursor-pointer whitespace-nowrap shrink-0 uppercase"
+          >
+            <Zap className="w-4 h-4 fill-current" />
+            <span>Procesar en Mesa de Fusión</span>
+          </button>
+        </div>
+      )}
 
-                <div>
-                  <label className="block text-[10px] font-mono text-[#666] uppercase mb-1 font-bold">
-                    [Certeza Información] *
-                  </label>
-                  <select
-                    value={certainty}
-                    onChange={(e) => setCertainty(e.target.value as any)}
-                    className="w-full bg-[#111] text-white border border-[#222] rounded px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
-                  >
-                    <option value="1">1 - Confirmada por otras fuentes</option>
-                    <option value="2">2 - Probable / Coincidente</option>
-                    <option value="3">3 - Posible / No confirmada</option>
-                    <option value="4">4 - Dudosa / Improbable</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Route Assignment & Clan Cross Reference */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-mono text-[#666] uppercase mb-1 font-bold">
-                    [Ruta Clandestina Contrastada] *
-                  </label>
-                  <select
-                    value={routeId}
-                    onChange={(e) => {
-                      setRouteId(e.target.value);
-                      // Update recommended action description when route changes
-                      setRecommendedAction(`Desplegar fuerza operativa rápida sobre la zona crítica ${e.target.value} para neutralizar transporte de contrabando.`);
-                      // Auto cross-reference clan
-                      const matchedClan = clans.find(c => c.knownRoutes.includes(e.target.value));
-                      if (matchedClan) setTargetClan(matchedClan.name);
-                    }}
-                    className="w-full bg-[#111] text-white border border-[#222] rounded px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
-                  >
-                    <option value="Ruta Colchane">Ruta Colchane</option>
-                    <option value="Paso Pisiga">Paso Pisiga</option>
-                    <option value="Hito 14">Hito 14</option>
-                    <option value="Salar de Coipasa">Salar de Coipasa</option>
-                    <option value="Ruta Ollagüe">Ruta Ollagüe</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-mono text-[#666] uppercase mb-1 font-bold">
-                    [Clan Implicado Contraste] *
-                  </label>
-                  <select
-                    value={targetClan}
-                    onChange={(e) => setTargetClan(e.target.value)}
-                    required
-                    className="w-full bg-[#111] text-white border border-[#222] rounded px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
-                  >
-                    {clans.map(clan => (
-                      <option key={clan.id} value={clan.name}>
-                        {clan.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Threat score & info */}
-              <div className="grid grid-cols-1 gap-3">
-                <div>
-                  <label className="block text-[10px] font-mono text-[#666] uppercase mb-1 font-bold">
-                    Nivel de Amenaza Estimado (%)
-                  </label>
-                  <div className="flex items-center bg-[#111] border border-[#222] rounded px-2.5 py-1">
-                    <input
-                      type="range"
-                      min="1"
-                      max="100"
-                      value={threatScore}
-                      onChange={(e) => setThreatScore(parseInt(e.target.value))}
-                      className="w-full accent-[#f97316] h-1.5 bg-[#222] rounded-lg appearance-none cursor-pointer"
-                    />
-                    <span className="text-xs font-mono text-[#f97316] font-bold ml-3 w-10 text-right">{threatScore}%</span>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-mono text-[#666] uppercase mb-1 font-bold">
-                  Acción Táctica Recomendada (CFI)
-                </label>
-                <textarea
-                  rows={3}
-                  required
-                  value={recommendedAction}
-                  onChange={(e) => setRecommendedAction(e.target.value)}
-                  className="w-full bg-[#111] text-white border border-[#222] rounded px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316] resize-none"
-                />
-              </div>
-
-              {/* Live Media Thumbnail Preview inside Fusion Workspace */}
-              {rawAlerts.find(a => a.id === selectedAlertId)?.mediaUrl && (
-                <div className="border border-[#222] rounded bg-black p-2 space-y-1.5 text-[9px] font-mono text-[#f97316]">
-                  <div className="text-[10px] uppercase font-bold text-gray-400 flex items-center justify-between border-b border-[#222] pb-1">
-                    <span>MULTIMEDIA ASOCIADO S-2</span>
-                    <span className="text-[#10b981] animate-pulse">● FEED DISPONIBLE</span>
-                  </div>
-                  <div className="aspect-video relative overflow-hidden bg-zinc-950 rounded flex flex-col justify-between p-2 text-[8px]">
-                    <div className="absolute inset-0 bg-radial-gradient from-transparent to-black pointer-events-none" />
-                    
-                    {rawAlerts.find(a => a.id === selectedAlertId)?.mediaUrl && 
-                     !['multimedia-thermal', 'multimedia-optical', 'multimedia-radar', 'multimedia-satellite'].includes(rawAlerts.find(a => a.id === selectedAlertId)?.mediaUrl || '') ? (
-                      <div className="absolute inset-0 flex items-center justify-center bg-[#050505]">
-                        <img 
-                          src={rawAlerts.find(a => a.id === selectedAlertId)?.mediaUrl} 
-                          alt="Evidencia de Terreno" 
-                          className="w-full h-full object-contain"
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
-                    ) : (
-                      <>
-                        {rawAlerts.find(a => a.id === selectedAlertId)?.mediaUrl === 'multimedia-thermal' && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-950/60 via-purple-950/60 to-orange-950/50 animate-pulse">
-                            <span className="text-[9px] text-orange-400 font-bold uppercase">CAPTURA TÉRMICA ANALIZADA</span>
-                          </div>
-                        )}
-                        {rawAlerts.find(a => a.id === selectedAlertId)?.mediaUrl === 'multimedia-optical' && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-emerald-950/60">
-                            <span className="text-[9px] text-emerald-400 font-bold uppercase">RESOLUCIÓN DE INFRAESTRUCTURA IR</span>
-                          </div>
-                        )}
-                        {rawAlerts.find(a => a.id === selectedAlertId)?.mediaUrl === 'multimedia-radar' && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-black bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.25)_0%,transparent_80%)]">
-                            <span className="text-[9px] text-blue-400 font-bold uppercase">PLOTEADO DE RADIOFRECUENCIA</span>
-                          </div>
-                        )}
-                        {rawAlerts.find(a => a.id === selectedAlertId)?.mediaUrl === 'multimedia-satellite' && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-slate-900/60">
-                            <span className="text-[9px] text-purple-400 font-bold uppercase">VÍNCULO SATELITAL ACTIVO</span>
-                          </div>
-                        )}
-                      </>
-                    )}
-                    
-                    <div className="flex justify-between z-10 text-white bg-black/40 px-1 rounded">
-                      <span>CFI EXP_INTEL</span>
-                      <span>SRC: {rawAlerts.find(a => a.id === selectedAlertId)?.sourceName}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="p-3 bg-[#111] border border-[#222] rounded text-[11px] font-mono text-[#888] space-y-1">
-                <p className="text-[#f97316] font-bold">Resumen de Alerta Cruda:</p>
-                <p className="line-clamp-2 text-[10px]">
-                  {rawAlerts.find(a => a.id === selectedAlertId)?.details}
-                </p>
-                <p className="text-[9px] text-[#555]">COORDENADAS: {rawAlerts.find(a => a.id === selectedAlertId)?.coordinates}</p>
-              </div>
-
-              <div className="flex gap-2">
+      {/* Main 3-Column Fusion Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        
+        {/* LEFT COLUMN: Expedientes Repository & Search Organ Alerts */}
+        <div className="lg:col-span-4 bg-[#0a0d14] border border-[#1e2738] rounded-xl p-4 shadow-xl flex flex-col justify-between text-left">
+          <div>
+            {/* Feed Tabs Switcher */}
+            <div className="flex items-center justify-between border-b border-[#1e2738] pb-3 mb-3">
+              <div className="flex gap-1.5 w-full">
                 <button
                   type="button"
                   onClick={() => {
-                    onUpdateAlertStatus(selectedAlertId, 'DISMISSED');
-                    setSelectedAlertId('');
+                    setActiveFeedTab('G2');
+                    if (g2Records.length > 0 && !selectedG2) {
+                      handleSelectG2(g2Records[0]);
+                    }
                   }}
-                  className="flex-1 bg-[#111] hover:bg-red-950/20 text-[#888] hover:text-red-400 border border-[#222] hover:border-red-900/50 text-xs font-mono py-2 rounded transition-colors cursor-pointer"
-                >
-                  Descartar Reporte S-2
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-[#f97316] hover:bg-[#f97316]/90 text-white text-xs font-mono py-2 rounded font-black flex items-center justify-center gap-1.5 transition-all active:scale-[0.99] uppercase cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Validar Reporte S-2</span>
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
-
-        {/* Right column: Clanes Clandestinos Database (Contraste de Base de Datos de Clanes) */}
-        <div className="lg:col-span-4 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3 mb-4">
-              <div className="flex items-center gap-2">
-                <Database className="w-4 h-4 text-[#10b981]" />
-                <h3 className="text-sm font-mono font-bold text-white uppercase">
-                  Base de Datos de Clanes
-                </h3>
-              </div>
-              <span className="text-[10px] text-[#666] font-mono">REGISTROS S-2</span>
-            </div>
-
-            {/* Search Input */}
-            <div className="relative mb-4">
-              <Search className="w-3.5 h-3.5 text-[#555] absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Buscar clan, ruta..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-[#111] border border-[#222] rounded-lg pl-9 pr-4 py-2 text-xs font-mono text-white focus:outline-none focus:border-[#10b981]"
-              />
-            </div>
-
-            {/* Clan List Grid */}
-            <div className="grid grid-cols-2 gap-2 mb-4 max-h-[160px] overflow-y-auto pr-1">
-              {filteredClans.map(clan => (
-                <div
-                  key={clan.id}
-                  onClick={() => setSelectedClanId(clan.id)}
-                  className={`p-2 rounded border cursor-pointer text-left transition-all ${
-                    selectedClanId === clan.id 
-                      ? 'bg-[#10b981]/5 border-[#10b981]' 
-                      : 'bg-[#111] border-[#222] hover:border-[#444]'
+                  className={`flex-1 py-1.5 px-2 rounded text-[11px] font-mono font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    activeFeedTab === 'G2'
+                      ? 'bg-[#f97316] text-white shadow-md'
+                      : 'bg-[#121722] text-[#94a3b8] hover:text-white border border-[#22293a]'
                   }`}
                 >
-                  <p className="text-xs font-bold text-white truncate font-mono">{clan.name}</p>
-                  <div className="flex justify-between items-center mt-1">
-                    <span className="text-[8px] font-mono text-[#666]">{clan.membersCount} integrantes</span>
-                    <span className={`text-[8px] font-mono font-bold px-1 rounded ${
-                      clan.threatLevel === 'CRITICAL' ? 'bg-[#f43f5e]/10 text-[#f43f5e]' :
-                      clan.threatLevel === 'HIGH' ? 'bg-[#f97316]/10 text-[#f97316]' :
-                      'bg-yellow-500/10 text-yellow-500'
-                    }`}>
-                      {clan.threatLevel}
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  <span>EXPEDIENTES ({g2Records.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveFeedTab('S2');
+                    if (rawAlerts.length > 0 && !selectedAlert) {
+                      const firstPending = rawAlerts.find(a => a.status === 'PENDING') || rawAlerts[0];
+                      handleSelectAlert(firstPending);
+                    }
+                  }}
+                  className={`flex-1 py-1.5 px-2 rounded text-[11px] font-mono font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer relative ${
+                    activeFeedTab === 'S2'
+                      ? 'bg-cyan-600 text-white shadow-md'
+                      : 'bg-[#121722] text-[#94a3b8] hover:text-white border border-[#22293a]'
+                  }`}
+                >
+                  <Radio className="w-3.5 h-3.5" />
+                  <span>ÓRGANOS S-2</span>
+                  {pendingAlerts.length > 0 && (
+                    <span className="bg-[#f97316] text-white text-[9px] px-1.5 rounded-full font-bold animate-pulse">
+                      {pendingAlerts.length}
                     </span>
-                  </div>
-                </div>
-              ))}
+                  )}
+                </button>
+              </div>
             </div>
 
-            {/* Selected Clan Details panel */}
-            {activeClanDetails && (
-              <div className="bg-[#111] border border-[#222] rounded-lg p-3 text-left space-y-2 animate-fade-in text-xs font-mono">
-                <div className="flex justify-between items-center border-b border-[#222] pb-1.5">
-                  <span className="font-bold text-white text-sm">{activeClanDetails.name}</span>
-                  <span className="text-[10px] text-[#666]">Última Actividad: {activeClanDetails.lastActive}</span>
-                </div>
+            {/* Filter and Search */}
+            <div className="space-y-2 mb-3">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder={isG2Selected ? "Buscar expediente, rubro o vector..." : "Buscar alerta S-2, sensor..."}
+                className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-3 py-1.5 text-xs font-mono placeholder:text-[#64748b] focus:outline-none focus:border-[#f97316]"
+              />
 
-                <div className="space-y-1">
-                  <p className="text-[9px] text-[#666] uppercase font-bold">Rutas Clandestinas Conocidas:</p>
-                  <div className="flex flex-wrap gap-1">
-                    {activeClanDetails.knownRoutes.map((route, i) => (
-                      <span key={i} className="bg-[#050505] text-[#ccc] text-[9px] px-1.5 py-0.5 rounded border border-[#1a1a1a]">
-                        {route}
-                      </span>
-                    ))}
+              {isG2Selected ? (
+                /* Rubro Filter Chips for Expedientes */
+                <div className="flex flex-wrap gap-1">
+                  {(['ALL', 'MILITAR', 'ECONOMICO', 'POLITICO', 'PSICOSOCIAL'] as const).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setFilterRubro(r)}
+                      className={`text-[9px] font-mono px-2 py-0.5 rounded cursor-pointer transition-colors ${
+                        filterRubro === r
+                          ? 'bg-[#f97316]/20 text-[#f97316] border border-[#f97316]/40 font-bold'
+                          : 'bg-[#121722] text-[#64748b] hover:text-[#94a3b8] border border-[#1e2738]'
+                      }`}
+                    >
+                      {r === 'ALL' ? 'TODOS' : r}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                /* Status Filter Chips for S-2 Alerts */
+                <div className="flex gap-1">
+                  {(['PENDING', 'ALL', 'PROCESSED'] as const).map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setAlertFilterStatus(st)}
+                      className={`flex-1 text-[9px] font-mono py-1 rounded cursor-pointer transition-colors ${
+                        alertFilterStatus === st
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold'
+                          : 'bg-[#121722] text-[#64748b] hover:text-[#94a3b8] border border-[#1e2738]'
+                      }`}
+                    >
+                      {st === 'PENDING' ? `PENDIENTES (${pendingAlerts.length})` : st === 'ALL' ? 'TODAS' : 'PROCESADAS'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* List View Container */}
+            <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
+              {isG2Selected ? (
+                filteredG2.length === 0 ? (
+                  <div className="text-center py-12 border border-dashed border-[#1e2738] rounded-lg text-[#64748b] text-xs font-mono">
+                    No se encontraron expedientes con los filtros actuales.
+                  </div>
+                ) : (
+                  filteredG2.map((rec) => {
+                    const isSelected = selectedRecordId === rec.id;
+                    const isFromSearch = Boolean(
+                      rec.observacionesAdicionales?.includes('ÓRGANO DE BÚSQUEDA') ||
+                      rec.referenciasAntecedentes?.some(r => r.includes('ÓRGANO') || r.includes('ALERTA'))
+                    );
+                    return (
+                      <div
+                        key={rec.id}
+                        onClick={() => handleSelectG2(rec)}
+                        className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#f97316]/10 border-[#f97316]'
+                            : 'bg-[#0f1420] border-[#1e2738] hover:border-[#334155]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-mono font-bold text-white">
+                              {rec.id}
+                            </span>
+                            <span className="text-[8px] font-mono bg-[#1e2738] text-[#94a3b8] px-1 rounded">
+                              {rec.tipoRegistro}
+                            </span>
+                            {isFromSearch && (
+                              <span className="text-[8px] font-mono bg-cyan-950 text-cyan-300 border border-cyan-800/40 px-1 rounded font-bold">
+                                ÓRGANO S-2
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[9px] font-mono text-[#f97316] font-bold">
+                            {rec.calificacionEvaluacion || 'A-1'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#cbd5e1] line-clamp-2 mb-1.5 font-sans">
+                          {rec.especificoGrafico?.interpretacionVisualPreliminar || rec.contenidoDetallado}
+                        </p>
+                        <div className="flex items-center justify-between text-[9px] font-mono text-[#64748b] pt-1 border-t border-[#1e2738]">
+                          <span>Rubro: <strong className="text-[#94a3b8]">{rec.componenteRubro}</strong></span>
+                          <span className="text-[#10b981] font-bold">● {rec.estadoRegistro}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )
+              ) : (
+                filteredAlerts.length === 0 ? (
+                  <div className="text-center py-12 border border-dashed border-[#1e2738] rounded-lg text-[#64748b] text-xs font-mono">
+                    No hay alertas de órganos de búsqueda en esta vista.
+                  </div>
+                ) : (
+                  filteredAlerts.map((alert) => {
+                    const isSelected = selectedRecordId === alert.id;
+                    const isPending = alert.status === 'PENDING';
+                    return (
+                      <div
+                        key={alert.id}
+                        onClick={() => handleSelectAlert(alert)}
+                        className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-cyan-500/10 border-cyan-400'
+                            : 'bg-[#0f1420] border-[#1e2738] hover:border-[#334155]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                            alert.sourceType === 'IMINT' ? 'bg-cyan-500/20 text-cyan-300' :
+                            alert.sourceType === 'SIGINT' ? 'bg-yellow-500/20 text-yellow-300' :
+                            'bg-emerald-500/20 text-emerald-300'
+                          }`}>
+                            {alert.sourceType} // {alert.sourceName}
+                          </span>
+                          <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                            isPending ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-emerald-500/20 text-emerald-400'
+                          }`}>
+                            {isPending ? 'PENDIENTE' : 'PROCESADA'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#cbd5e1] line-clamp-2 mb-1.5 font-sans">
+                          {alert.details}
+                        </p>
+                        <div className="flex items-center justify-between text-[9px] font-mono text-[#64748b] pt-1 border-t border-[#1e2738]">
+                          <span>Coord: {alert.coordinates}</span>
+                          <span>{new Date(alert.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4 p-2.5 bg-[#121722] border border-[#1e2738] rounded-lg text-[10px] font-mono text-[#64748b] flex justify-between">
+            <span>Matriz Doctrinal:</span>
+            <span className="text-[#f97316] font-bold">PII-LCC Ley 1053 Compliant</span>
+          </div>
+        </div>
+
+        {/* CENTER COLUMN: Central Fusion Workshop & S-2 Ingestion Engine */}
+        <div className="lg:col-span-5 bg-[#0a0d14] border border-[#1e2738] rounded-xl p-5 shadow-xl relative text-left flex flex-col justify-between">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-[#f97316]/5 rounded-full blur-3xl pointer-events-none" />
+
+          <div>
+            {/* Header */}
+            <div className="border-b border-[#1e2738] pb-3 mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#f97316]" />
+                <h3 className="text-sm font-mono font-bold text-white uppercase tracking-wider">
+                  MÓDULO DE FUSIÓN & VALIDACIÓN
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                {!isG2Selected && selectedAlert && (
+                  <button
+                    type="button"
+                    onClick={() => setIsCentralPhotoModalOpen(true)}
+                    className="bg-gradient-to-r from-orange-950 to-amber-950 hover:from-orange-900 hover:to-amber-900 text-amber-200 border border-orange-500/50 text-[10px] font-mono font-bold px-2 py-1 rounded flex items-center gap-1.5 shadow active:scale-95 transition-all cursor-pointer animate-pulse"
+                    title="Ver fotografía capturada por el sensor"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-[#f97316]" />
+                    <span>FOTO SENSOR [{selectedAlert.id}]</span>
+                  </button>
+                )}
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                  isG2Selected
+                    ? 'text-[#38bdf8] bg-[#38bdf8]/10 border-[#38bdf8]/30'
+                    : 'text-orange-400 bg-orange-500/10 border-orange-500/30 font-bold'
+                }`}>
+                  {isG2Selected ? `EXPEDIENTE: ${selectedRecordId || 'SIN SELECCIÓN'}` : `ÓRGANO S-2: ${selectedAlert?.sourceName || selectedRecordId}`}
+                </span>
+              </div>
+            </div>
+
+            {!selectedRecordId ? (
+              <div className="py-24 text-center text-[#64748b] font-mono text-xs">
+                <Eye className="w-8 h-8 text-[#334155] mx-auto mb-2 animate-pulse" />
+                <p>Seleccione un expediente o alerta en el panel izquierdo para abrir la mesa de fusión analítica.</p>
+              </div>
+            ) : (
+              <form onSubmit={handleFormSubmit} className="space-y-4 text-xs font-mono">
+                
+                {/* CASE A: Search Organ Alert Selected -> Render Full S-2 Inspector */}
+                {!isG2Selected && selectedAlert && (
+                  <SearchOrganAlertViewer
+                    alert={selectedAlert}
+                    selectedIdeas={selectedIdeas}
+                    onToggleIdea={toggleIdea}
+                    onInjectIdeas={handleInjectIdeasIntoAction}
+                    onQuickProcessToExpediente={() => handleProcessAlertToExpediente(selectedAlert)}
+                    nextExpedienteId={nextExpedienteId}
+                  />
+                )}
+
+                {/* CASE B: Expediente Selected -> Render Cartographic & Doctrinal Viewer */}
+                {isG2Selected && selectedG2 && (
+                  <div className="space-y-3">
+                    <G2DoctrinalViewer record={selectedG2} />
+
+                    {/* Ideas Fuerza Selector & Injector */}
+                    {selectedG2.evaluacion?.ideasFuerza && selectedG2.evaluacion.ideasFuerza.length > 0 && (
+                      <div className="bg-[#0f1420] border border-[#222c40] rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between border-b border-[#1e2738] pb-1.5">
+                          <span className="text-[10px] font-bold text-[#f97316] uppercase flex items-center gap-1.5">
+                            <Layers className="w-3.5 h-3.5" />
+                            IDEAS FUERZA EXTRAÍDAS
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleInjectIdeasIntoAction}
+                            className="text-[9px] bg-[#f97316]/20 hover:bg-[#f97316]/30 text-[#f97316] px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
+                          >
+                            Incorporar al Análisis
+                          </button>
+                        </div>
+                        <div className="space-y-1 max-h-[100px] overflow-y-auto pr-1">
+                          {selectedG2.evaluacion.ideasFuerza.map((idea, idx) => {
+                            const isChecked = selectedIdeas.includes(idea);
+                            return (
+                              <div
+                                key={idx}
+                                onClick={() => toggleIdea(idea)}
+                                className={`p-1.5 rounded text-[10px] flex items-start gap-2 cursor-pointer transition-colors ${
+                                  isChecked
+                                    ? 'bg-[#f97316]/10 text-[#fdba74] border border-[#f97316]/30'
+                                    : 'bg-[#121722] text-[#94a3b8] hover:text-white border border-transparent'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {}}
+                                  className="mt-0.5 accent-[#f97316]"
+                                />
+                                <span className="leading-snug">{idea}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Title & Expediente Rubro Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block text-[#94a3b8] mb-1 font-bold">
+                      Título de la Inteligencia / Expediente Generado
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={intelTitle}
+                      onChange={(e) => setIntelTitle(e.target.value)}
+                      className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-3 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[#94a3b8] mb-1 font-bold">
+                      Rubro Destino PII-LCC
+                    </label>
+                    <select
+                      value={expedienteRubro}
+                      onChange={(e) => setExpedienteRubro(e.target.value as any)}
+                      className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
+                    >
+                      <option value="ECONOMICO">ECONÓMICO (Contrabando)</option>
+                      <option value="MILITAR">MILITAR (Interdicción/Armas)</option>
+                      <option value="POLITICO">POLÍTICO (Ley 1053)</option>
+                      <option value="PSICOSOCIAL">PSICOSOCIAL</option>
+                      <option value="OTRO">OTRO</option>
+                    </select>
                   </div>
                 </div>
 
-                <div className="space-y-0.5">
-                  <p className="text-[9px] text-[#666] uppercase font-bold">Tácticas Operativas:</p>
-                  <p className="text-[#aaa] font-sans text-[11px] leading-relaxed">
-                    {activeClanDetails.tactics}
-                  </p>
-                </div>
+                {/* Reliability & Certainty Grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[#94a3b8] mb-1 font-bold">
+                      [Confiabilidad de Fuente] *
+                    </label>
+                    <select
+                      value={reliability}
+                      onChange={(e) => setReliability(e.target.value as any)}
+                      className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
+                    >
+                      <option value="A">A - Completamente Fiable</option>
+                      <option value="B">B - Usualmente Fiable</option>
+                      <option value="C">C - Bastante Fiable</option>
+                      <option value="D">D - No Fiable</option>
+                    </select>
+                  </div>
 
-                <div className="space-y-1">
-                  <p className="text-[9px] text-[#666] uppercase font-bold">Puntos Calientes de Actividad:</p>
-                  <div className="flex flex-wrap gap-1">
-                    {activeClanDetails.recentHotspots.map((hs, i) => (
-                      <span key={i} className="text-[9px] text-[#10b981] flex items-center gap-1 font-bold">
-                        ● {hs}
-                      </span>
-                    ))}
+                  <div>
+                    <label className="block text-[#94a3b8] mb-1 font-bold">
+                      [Certeza Información] *
+                    </label>
+                    <select
+                      value={certainty}
+                      onChange={(e) => setCertainty(e.target.value as any)}
+                      className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
+                    >
+                      <option value="1">1 - Confirmada por otras fuentes</option>
+                      <option value="2">2 - Probable / Coincidente</option>
+                      <option value="3">3 - Posible / No confirmada</option>
+                      <option value="4">4 - Dudosa / Improbable</option>
+                    </select>
                   </div>
                 </div>
+
+                {/* Route & Hostile Clan Target */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[#94a3b8] mb-1 font-bold">
+                      [Ruta / Vector Contrastado]
+                    </label>
+                    <select
+                      value={routeId}
+                      onChange={(e) => setRouteId(e.target.value)}
+                      className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
+                    >
+                      <option value="Ruta Colchane">Ruta Colchane</option>
+                      <option value="Paso Pisiga">Paso Pisiga</option>
+                      <option value="Salar de Coipasa">Salar de Coipasa</option>
+                      <option value="Hito 14">Hito 14</option>
+                      <option value="Tambo Quemado">Tambo Quemado</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[#94a3b8] mb-1 font-bold">
+                      [Facción / Clan Implicado]
+                    </label>
+                    <select
+                      value={targetClan}
+                      onChange={(e) => setTargetClan(e.target.value)}
+                      className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
+                    >
+                      {clans.map((clan) => (
+                        <option key={clan.id} value={clan.name}>
+                          {clan.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Threat Score Slider */}
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-[#94a3b8] font-bold">Nivel de Amenaza Estimado</label>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                      threatScore > 80 ? 'bg-red-500/20 text-red-400' :
+                      threatScore > 50 ? 'bg-orange-500/20 text-orange-400' :
+                      'bg-emerald-500/20 text-emerald-400'
+                    }`}>
+                      {threatScore}% // {threatScore > 80 ? 'CRÍTICO' : threatScore > 50 ? 'ALTO' : 'MODERADO'}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="100"
+                    value={threatScore}
+                    onChange={(e) => setThreatScore(parseInt(e.target.value))}
+                    className="w-full accent-[#f97316] h-1.5 bg-[#1e2738] rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+
+                {/* Actionable Tactical Recommendation */}
+                <div>
+                  <label className="block text-[#94a3b8] mb-1 font-bold">
+                    Acción Táctica Recomendada (CFI / PII-LCC / OOA)
+                  </label>
+                  <textarea
+                    rows={3}
+                    required
+                    value={recommendedAction}
+                    onChange={(e) => setRecommendedAction(e.target.value)}
+                    className="w-full bg-[#121722] text-white border border-[#22293a] rounded p-2 text-xs font-mono focus:outline-none focus:border-[#f97316] resize-none font-sans"
+                  />
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex gap-2 pt-2 border-t border-[#1e2738]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isG2Selected && selectedAlert) {
+                        onUpdateAlertStatus(selectedAlert.id, 'DISMISSED');
+                      }
+                      setSelectedRecordId('');
+                    }}
+                    className="flex-1 bg-[#121722] hover:bg-red-950/30 text-[#94a3b8] hover:text-red-400 border border-[#22293a] text-xs font-mono py-2.5 rounded transition-colors cursor-pointer"
+                  >
+                    Descartar / Cerrar
+                  </button>
+
+                  <button
+                    type="submit"
+                    className="flex-2 bg-[#f97316] hover:bg-[#ea580c] text-white text-xs font-mono py-2.5 rounded font-black flex items-center justify-center gap-2 transition-all shadow-lg active:scale-98 uppercase cursor-pointer"
+                  >
+                    <Zap className="w-4 h-4 fill-current" />
+                    <span>
+                      {!isG2Selected 
+                        ? `Procesar e Implementar a Expediente (${nextExpedienteId})`
+                        : 'Validar y Promover a Inteligencia (CEO-LCC)'
+                      }
+                    </span>
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-[#1e2738] flex items-center justify-between text-[9px] font-mono text-[#64748b]">
+            <span>Operador: Cap. M. Vargas (Analista LCC)</span>
+            <span>Clasif: {selectedG2?.clasificacionSeguridad || 'CONFIDENCIAL'}</span>
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: Clan Database & Validated Intel Monitor */}
+        <div className="lg:col-span-3 bg-[#0a0d14] border border-[#1e2738] rounded-xl p-4 shadow-xl flex flex-col justify-between text-left">
+          <div>
+            {/* Tab switch */}
+            <div className="flex items-center justify-between border-b border-[#1e2738] pb-3 mb-3">
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4 text-[#10b981]" />
+                <h3 className="text-xs font-mono font-bold text-white uppercase">
+                  CORRELACIÓN Y CLANES
+                </h3>
+              </div>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setRightTab('CLANS')}
+                  className={`text-[9px] font-mono px-2 py-0.5 rounded cursor-pointer ${
+                    rightTab === 'CLANS'
+                      ? 'bg-[#10b981]/20 text-[#10b981] font-bold border border-[#10b981]/30'
+                      : 'text-[#64748b] hover:text-[#94a3b8]'
+                  }`}
+                >
+                  Clanes ({clans.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRightTab('VALIDATED')}
+                  className={`text-[9px] font-mono px-2 py-0.5 rounded cursor-pointer ${
+                    rightTab === 'VALIDATED'
+                      ? 'bg-[#38bdf8]/20 text-[#38bdf8] font-bold border border-[#38bdf8]/30'
+                      : 'text-[#64748b] hover:text-[#94a3b8]'
+                  }`}
+                >
+                  Inteligencia ({actionableIntel.length})
+                </button>
+              </div>
+            </div>
+
+            {/* Tab: Clans */}
+            {rightTab === 'CLANS' && (
+              <div className="space-y-3">
+                <div className="space-y-1.5 max-h-[190px] overflow-y-auto pr-1">
+                  {filteredClans.map((clan) => (
+                    <div
+                      key={clan.id}
+                      onClick={() => setSelectedClanId(clan.id)}
+                      className={`p-2 rounded border cursor-pointer transition-all ${
+                        selectedClanId === clan.id
+                          ? 'bg-[#10b981]/10 border-[#10b981]'
+                          : 'bg-[#0f1420] border-[#1e2738] hover:border-[#334155]'
+                      }`}
+                    >
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-mono font-bold text-white truncate">{clan.name}</span>
+                        <span className={`text-[8px] font-mono font-bold px-1 rounded ${
+                          clan.threatLevel === 'CRITICAL' ? 'bg-red-500/20 text-red-400' :
+                          clan.threatLevel === 'HIGH' ? 'bg-orange-500/20 text-orange-400' :
+                          'bg-yellow-500/20 text-yellow-400'
+                        }`}>
+                          {clan.threatLevel}
+                        </span>
+                      </div>
+                      <div className="text-[9px] font-mono text-[#64748b] mt-0.5">
+                        {clan.membersCount} integrantes // Activo: {clan.lastActive}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Active Clan Details */}
+                {activeClanDetails && (
+                  <div className="bg-[#121722] border border-[#22293a] rounded-lg p-3 space-y-2 text-xs font-mono">
+                    <div className="border-b border-[#1e2738] pb-1 flex justify-between items-center">
+                      <span className="font-bold text-white">{activeClanDetails.name}</span>
+                      <span className="text-[9px] text-[#10b981]">VECTOR CONTRASTADO</span>
+                    </div>
+
+                    <div>
+                      <span className="text-[9px] text-[#64748b] uppercase font-bold block mb-1">Rutas Conocidas:</span>
+                      <div className="flex flex-wrap gap-1">
+                        {activeClanDetails.knownRoutes.map((r, i) => (
+                          <span key={i} className="bg-[#0b0f19] text-[#cbd5e1] text-[9px] px-1.5 py-0.5 rounded border border-[#1e2738]">
+                            {r}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="text-[9px] text-[#64748b] uppercase font-bold block mb-0.5">Tácticas:</span>
+                      <p className="text-[#94a3b8] font-sans text-[11px] leading-relaxed">
+                        {activeClanDetails.tactics}
+                      </p>
+                    </div>
+
+                    <div>
+                      <span className="text-[9px] text-[#64748b] uppercase font-bold block mb-1">Puntos Calientes:</span>
+                      <div className="flex flex-wrap gap-1">
+                        {activeClanDetails.recentHotspots.map((hs, i) => (
+                          <span key={i} className="text-[9px] text-[#38bdf8] flex items-center gap-1 font-bold">
+                            ● {hs}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab: Validated Intelligence */}
+            {rightTab === 'VALIDATED' && (
+              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+                {actionableIntel.length === 0 ? (
+                  <div className="text-center py-10 text-xs font-mono text-[#64748b]">
+                    No hay reportes validados aún.
+                  </div>
+                ) : (
+                  actionableIntel.map((intel) => (
+                    <div key={intel.id} className="p-2.5 rounded bg-[#0f1420] border border-[#1e2738] space-y-1">
+                      <div className="flex items-center justify-between text-[9px] font-mono">
+                        <span className="font-bold text-[#38bdf8]">{intel.id}</span>
+                        <span className="text-[#10b981] font-bold">● {intel.status}</span>
+                      </div>
+                      <p className="text-xs text-white font-mono font-bold line-clamp-1">{intel.title}</p>
+                      <p className="text-[10px] text-[#94a3b8] line-clamp-2">{intel.recommendedAction}</p>
+                      <div className="flex justify-between items-center text-[8px] font-mono text-[#64748b] pt-1 border-t border-[#1e2738]">
+                        <span>Clan: {intel.targetClan}</span>
+                        <span>{new Date(intel.timestamp).toLocaleTimeString()}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </div>
 
-          <div className="mt-4 bg-[#111] p-2 border border-[#1a1a1a] rounded text-[10px] text-[#666] text-left font-sans leading-relaxed">
-            * Al cruzar registros con el clan asignado, el algoritmo calcula correlaciones automáticas en base a la ventana temporal histórica de cruces.
+          <div className="mt-4 p-2 bg-[#121722] border border-[#1e2738] rounded text-[9px] font-mono text-[#64748b] leading-tight">
+            * Integración directa S-2 con matriz doctrinal PII-LCC (Ley 1053 y Art. 251 CPE).
           </div>
         </div>
       </div>
+
+      {/* New Expediente Manual Modal */}
+      <NewG2RecordModal
+        isOpen={isNewRecordModalOpen}
+        onClose={() => setIsNewRecordModalOpen(false)}
+        onAddRecord={(newRec) => {
+          setG2Records(prev => [newRec, ...prev]);
+          if (onAddExpediente) {
+            onAddExpediente(newRec);
+          }
+          handleSelectG2(newRec);
+        }}
+      />
+
+      {/* Central Tactical Photo Modal for Selected Alert */}
+      {selectedAlert && (
+        <TacticalPhotoViewerModal
+          isOpen={isCentralPhotoModalOpen}
+          onClose={() => setIsCentralPhotoModalOpen(false)}
+          alert={selectedAlert}
+        />
+      )}
     </div>
   );
 }

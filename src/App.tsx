@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MilitaryRole, RawAlert, Clan, ActionableIntel, AutomatedOrder, TacticalUnit, User, AuditLogEntry } from './types';
+import { MilitaryRole, RawAlert, Clan, ActionableIntel, AutomatedOrder, TacticalUnit, User, AuditLogEntry, G2RegistryRecord } from './types';
 import { 
   initialRawAlerts, 
   initialClans, 
@@ -13,6 +13,7 @@ import {
   initialTacticalUnits, 
   initialChartData 
 } from './utils/mockData';
+import { initialG2Records } from './utils/g2Records';
 
 import HorizontalFlowSimulator from './components/HorizontalFlowSimulator';
 import StrategicView from './components/StrategicView';
@@ -53,6 +54,15 @@ export default function App() {
 
   const [selectedLoginRole, setSelectedLoginRole] = useState<MilitaryRole>('ROL_PATRULLA');
   const [rawAlerts, setRawAlerts] = useState<RawAlert[]>(initialRawAlerts);
+  const [expedientes, setExpedientes] = useState<G2RegistryRecord[]>(() => {
+    try {
+      const saved = safeStorage.getItem('pii_lcc_expedientes');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to load saved expedientes:', e);
+    }
+    return initialG2Records;
+  });
   const [clans, setClans] = useState<Clan[]>(initialClans);
   const [actionableIntel, setActionableIntel] = useState<ActionableIntel[]>(initialActionableIntel);
   const [activeOrders, setActiveOrders] = useState<AutomatedOrder[]>(initialOrders);
@@ -671,6 +681,36 @@ export default function App() {
     sendWsMessage('CONFIRM_ORDER', { id, newStatus, statusText, unitName, unitStatus });
   };
 
+  const handleAppendOrderUpdate = (orderId: string, updateMsg: string) => {
+    setActiveOrders(prev =>
+      prev.map(order => order.id === orderId ? { ...order, updates: [...order.updates, updateMsg] } : order)
+    );
+    sendWsMessage('ORDER_UPDATE', { orderId, updateMsg });
+  };
+
+  const handleAddExpediente = (newExp: G2RegistryRecord) => {
+    setExpedientes(prev => {
+      const updated = [newExp, ...prev.filter(e => e.id !== newExp.id)];
+      try {
+        safeStorage.setItem('pii_lcc_expedientes', JSON.stringify(updated));
+      } catch (e) {
+        console.warn('Failed to persist expedientes:', e);
+      }
+      return updated;
+    });
+
+    // Record audit log
+    const logEntry: AuditLogEntry = {
+      id: `log-exp-${Date.now()}`,
+      userId: user ? user.name : 'ANALISTA LCC',
+      role: currentRole,
+      action: `Implementación de Expediente ${newExp.id} (${newExp.componenteRubro}) desde Órgano de Búsqueda S-2`,
+      timestamp: new Date().toISOString(),
+      coordinates: newExp.especificoGrafico?.coordenadasCuadricula || '19°13\'10"S 68°35\'50"W'
+    };
+    setAuditLogs(prev => [logEntry, ...prev]);
+  };
+
   const handleSendFieldReport = (report: RawAlert) => {
     if (!validateBackendPermission('ROL_PATRULLA', 'Enviar Registro de Búsqueda de Campo (S-2)', report.coordinates)) return;
     setRawAlerts(prev => [report, ...prev]);
@@ -701,6 +741,7 @@ export default function App() {
                    'EQUIPOS DE BÚSQUEDA S-2',
         role: currentRole
       },
+      expedientes,
       rawAlerts,
       clans,
       actionableIntel,
@@ -760,13 +801,27 @@ Estado del Enlace Central: NOMINAL (SINC_ACTIVE)
 --------------------------------------------------------------------------------
 1. RESUMEN EJECUTIVO DE SITUACIÓN
 --------------------------------------------------------------------------------
+* Expedientes Doctrinales PII-LCC Registrados: ${expedientes.length}
 * Registros de Búsqueda de Campo (S-2) Totales: ${rawAlerts.length}
 * Inteligencias de Fusión CFI Activas: ${actionableIntel.length}
 * Órdenes de Operaciones Automatizadas (OOA): ${activeOrders.length}
 * Unidades Tácticas Desplegadas en Terreno: ${tacticalUnits.length}
 
 --------------------------------------------------------------------------------
-2. DETALLE DE REGISTROS DE BÚSQUEDA DE CAMPO (S-2 RAW ALERTS)
+2. EXPEDIENTES OPERATIVOS Y DOCTRINALES PII-LCC (${expedientes.length})
+--------------------------------------------------------------------------------
+`;
+
+    expedientes.forEach((exp, idx) => {
+      report += `\n[EXPEDIENTE #${idx + 1}] ID: ${exp.id} (${exp.componenteRubro} // ${exp.tipoRegistro})
+ - Clasificación: ${exp.clasificacionSeguridad} // Calificación: ${exp.calificacionEvaluacion || 'A-1'}
+ - Estado: ${exp.estadoRegistro}
+ - Síntesis: ${exp.contenidoDetallado.slice(0, 180)}...
+ - Ideas Fuerza: ${exp.evaluacion?.ideasFuerza ? exp.evaluacion.ideasFuerza.join(' | ') : 'N/A'}\n`;
+    });
+
+    report += `\n--------------------------------------------------------------------------------
+3. DETALLE DE REGISTROS DE BÚSQUEDA DE CAMPO (S-2 RAW ALERTS)
 --------------------------------------------------------------------------------
 `;
 
@@ -1363,55 +1418,43 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
             )}
           </div>
 
-          {/* Core Navigation Tabs (4 Órganos de la Doctrina Militar) */}
-          <div className="flex bg-[#0a0a0a] border border-[#1a1a1a] p-1 rounded-lg self-start md:self-auto w-full md:w-auto overflow-x-auto gap-1">
-            <button
-              onClick={() => handleSetRoleAttempt('ROL_BUSQUEDA')}
-              className={`flex-1 md:flex-none px-3 py-2.5 rounded text-xs font-mono font-bold uppercase transition-all flex items-center justify-center gap-2 ${
-                currentRole === 'ROL_BUSQUEDA'
-                  ? 'bg-yellow-500/10 border-l-2 border-yellow-500 text-yellow-400'
-                  : 'text-[#444] hover:text-[#666] bg-[#0c0c0c]/50'
-              }`}
-            >
-              <Radio className={`w-3.5 h-3.5 ${currentRole === 'ROL_BUSQUEDA' ? 'animate-pulse text-yellow-400' : 'text-zinc-600'}`} />
-              <span className={currentRole === 'ROL_BUSQUEDA' ? 'text-white' : 'text-zinc-600'}>1. Búsqueda</span>
-            </button>
+          {/* Core Module Indicator (Exclusivo por Órgano Doctrinal Autenticado) */}
+          <div className="flex bg-[#0a0a0a] border border-[#1a1a1a] p-1.5 rounded-lg self-start md:self-auto w-full md:w-auto items-center">
+            {currentRole === 'ROL_BUSQUEDA' && (
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-yellow-500/10 border border-yellow-500/30 text-xs font-mono font-bold text-yellow-400">
+                <Radio className="w-4 h-4 animate-pulse text-yellow-400" />
+                <span className="text-[#888] font-normal uppercase text-[10px]">MÓDULO EXCLUSIVO:</span>
+                <span className="text-white">1. ÓRGANOS DE BÚSQUEDA (S-2)</span>
+                <span className="text-[9px] bg-yellow-950/70 text-yellow-300 px-2 py-0.5 rounded border border-yellow-800/40">ACTIVO</span>
+              </div>
+            )}
 
-            <button
-              onClick={() => handleSetRoleAttempt('ROL_FUSION')}
-              className={`flex-1 md:flex-none px-3 py-2.5 rounded text-xs font-mono font-bold uppercase transition-all flex items-center justify-center gap-2 ${
-                currentRole === 'ROL_FUSION'
-                  ? 'bg-[#f97316]/10 border-l-2 border-[#f97316] text-[#f97316]'
-                  : 'text-[#444] hover:text-[#666] bg-[#0c0c0c]/50'
-              }`}
-            >
-              <Shield className={`w-3.5 h-3.5 ${currentRole === 'ROL_FUSION' ? 'text-[#f97316]' : 'text-zinc-600'}`} />
-              <span className={currentRole === 'ROL_FUSION' ? 'text-white' : 'text-zinc-600'}>2. Fusión (CFI)</span>
-            </button>
+            {currentRole === 'ROL_FUSION' && (
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-[#f97316]/10 border border-[#f97316]/30 text-xs font-mono font-bold text-[#f97316]">
+                <Shield className="w-4 h-4 text-[#f97316]" />
+                <span className="text-[#888] font-normal uppercase text-[10px]">MÓDULO EXCLUSIVO:</span>
+                <span className="text-white">2. CENTRAL DE FUSIÓN (CFI)</span>
+                <span className="text-[9px] bg-orange-950/70 text-orange-300 px-2 py-0.5 rounded border border-orange-800/40">ACTIVO</span>
+              </div>
+            )}
 
-            <button
-              onClick={() => handleSetRoleAttempt('ROL_CEO')}
-              className={`flex-1 md:flex-none px-3 py-2.5 rounded text-xs font-mono font-bold uppercase transition-all flex items-center justify-center gap-2 ${
-                currentRole === 'ROL_CEO'
-                  ? 'bg-[#3b82f6]/10 border-l-2 border-[#3b82f6] text-[#3b82f6]'
-                  : 'text-[#444] hover:text-[#666] bg-[#0c0c0c]/50'
-              }`}
-            >
-              <Zap className={`w-3.5 h-3.5 ${currentRole === 'ROL_CEO' ? 'text-[#3b82f6]' : 'text-zinc-600'}`} />
-              <span className={currentRole === 'ROL_CEO' ? 'text-white' : 'text-zinc-600'}>3. Mando (CEO)</span>
-            </button>
+            {currentRole === 'ROL_CEO' && (
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-[#3b82f6]/10 border border-[#3b82f6]/30 text-xs font-mono font-bold text-[#3b82f6]">
+                <Zap className="w-4 h-4 text-[#3b82f6]" />
+                <span className="text-[#888] font-normal uppercase text-[10px]">MÓDULO EXCLUSIVO:</span>
+                <span className="text-white">3. MANDO ESTRATÉGICO (CEO-LCC)</span>
+                <span className="text-[9px] bg-blue-950/70 text-blue-300 px-2 py-0.5 rounded border border-blue-800/40">ACTIVO</span>
+              </div>
+            )}
 
-            <button
-              onClick={() => handleSetRoleAttempt('ROL_TERRENO')}
-              className={`flex-1 md:flex-none px-3 py-2.5 rounded text-xs font-mono font-bold uppercase transition-all flex items-center justify-center gap-2 ${
-                currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA'
-                  ? 'bg-emerald-500/10 border-l-2 border-emerald-500 text-emerald-400'
-                  : 'text-[#444] hover:text-[#666] bg-[#0c0c0c]/50'
-              }`}
-            >
-              <Navigation className={`w-3.5 h-3.5 ${currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA' ? 'text-emerald-400' : 'text-zinc-600'}`} />
-              <span className={currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA' ? 'text-white' : 'text-zinc-600'}>4. Terreno</span>
-            </button>
+            {(currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && (
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-xs font-mono font-bold text-emerald-400">
+                <Navigation className="w-4 h-4 text-emerald-400" />
+                <span className="text-[#888] font-normal uppercase text-[10px]">MÓDULO EXCLUSIVO:</span>
+                <span className="text-white">4. UNIDADES DE TERRENO (PATRULLAS)</span>
+                <span className="text-[9px] bg-emerald-950/70 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800/40">ACTIVO</span>
+              </div>
+            )}
           </div>
 
         </div>
@@ -1514,6 +1557,8 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                       onCreateOrder={handleCreateOrder}
                       onCancelOrder={handleCancelOrder}
                       onArchiveIntel={handleArchiveIntel}
+                      rawAlerts={rawAlerts}
+                      expedientes={expedientes}
                     />
                   )}
 
@@ -1522,8 +1567,14 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                       rawAlerts={rawAlerts}
                       clans={clans}
                       actionableIntel={actionableIntel}
+                      expedientes={expedientes}
+                      onAddExpediente={handleAddExpediente}
                       onPromoteToIntel={handlePromoteToIntel}
                       onUpdateAlertStatus={handleUpdateAlertStatus}
+                      onSimulateRawAlert={(alert) => {
+                        setRawAlerts(prev => [alert, ...prev]);
+                        sendWsMessage('SEND_FIELD_REPORT', { report: alert });
+                      }}
                     />
                   )}
 
@@ -1540,7 +1591,15 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                 </div>
 
                 {/* Dynamic Joint Route Analysis Custom Chart Maker (Required) */}
-                <InteractiveChartCreator initialData={initialChartData} tacticalUnits={tacticalUnits} />
+                <InteractiveChartCreator 
+                  initialData={initialChartData} 
+                  tacticalUnits={tacticalUnits}
+                  activeOrders={activeOrders}
+                  rawAlerts={rawAlerts}
+                  onConfirmOrder={handleConfirmOrder}
+                  onAddOrderUpdate={handleAppendOrderUpdate}
+                  onCreateOrder={handleCreateOrder}
+                />
               </ErrorBoundary>
             )}
 
@@ -1946,22 +2005,10 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
             <div className="p-5 border-t border-zinc-900 bg-zinc-950/40 flex flex-col sm:flex-row gap-2.5">
               <button
                 onClick={() => setValidatedReportAlert(null)}
-                className="w-full sm:w-auto bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white font-bold text-[10px] uppercase tracking-wider px-4 py-2.5 rounded-lg transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
+                className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black font-black text-[10px] uppercase tracking-wider px-5 py-2.5 rounded-lg transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] active:scale-95 cursor-pointer flex items-center justify-center gap-2"
               >
-                Cerrar Ventana
-              </button>
-              
-              <button
-                onClick={() => {
-                  // Switch role directly to CEO to allow operations on the validated report
-                  handleSetRoleAttempt('ROL_CEO');
-                  // Clear the modal alert state
-                  setValidatedReportAlert(null);
-                }}
-                className="w-full sm:flex-1 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-black font-black text-[10px] uppercase tracking-wider px-5 py-2.5 rounded-lg transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] active:scale-95 cursor-pointer flex items-center justify-center gap-2"
-              >
-                <Zap className="w-3.5 h-3.5 fill-black" />
-                Proceder a Mando Estratégico (Nivel 3)
+                <Check className="w-3.5 h-3.5" />
+                Confirmar Notificación // Transmitido a Mando Estratégico (CEO-LCC)
               </button>
             </div>
 

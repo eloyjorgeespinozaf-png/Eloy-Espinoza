@@ -4,8 +4,9 @@
  */
 
 import React, { useState } from 'react';
-import { AutomatedOrder, Clan, ActionableIntel, TacticalUnit } from '../types';
-import { Shield, Zap, TrendingUp, AlertTriangle, Play, MapPin, Send, Eye, RefreshCw, Layers, CheckCircle, Radio } from 'lucide-react';
+import { AutomatedOrder, Clan, ActionableIntel, TacticalUnit, RawAlert, G2RegistryRecord } from '../types';
+import { Shield, Zap, TrendingUp, AlertTriangle, Play, MapPin, Send, Eye, RefreshCw, Layers, CheckCircle, Radio, Camera, Maximize2, ExternalLink } from 'lucide-react';
+import { TacticalPhotoViewerModal } from './fusion/TacticalPhotoViewerModal';
 
 interface StrategicViewProps {
   activeOrders: AutomatedOrder[];
@@ -15,6 +16,8 @@ interface StrategicViewProps {
   onCreateOrder: (order: AutomatedOrder) => void;
   onCancelOrder: (id: string) => void;
   onArchiveIntel: (id: string) => void;
+  rawAlerts?: RawAlert[];
+  expedientes?: G2RegistryRecord[];
 }
 
 // Helper to parse DMS (Degrees, Minutes, Seconds) or decimal coordinates
@@ -94,13 +97,108 @@ export default function StrategicView({
   tacticalUnits = [],
   onCreateOrder,
   onCancelOrder,
-  onArchiveIntel
+  onArchiveIntel,
+  rawAlerts = [],
+  expedientes = []
 }: StrategicViewProps) {
   const [selectedIntelId, setSelectedIntelId] = useState<string>('');
   const [codeName, setCodeName] = useState<string>('');
   const [assignedUnit, setAssignedUnit] = useState<string>('');
   const [customObjective, setCustomObjective] = useState<string>('');
   const [activeHotspot, setActiveHotspot] = useState<string | null>(null);
+
+  // Modal inspection state for analyzed photograph
+  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState<boolean>(false);
+  const [modalAlert, setModalAlert] = useState<RawAlert | null>(null);
+  const [modalIntel, setModalIntel] = useState<ActionableIntel | null>(null);
+  const [modalOrderCode, setModalOrderCode] = useState<string>('');
+
+  const approvedIntel = actionableIntel.filter(i => i.status === 'APPROVED');
+
+  // Resolves the exact RawAlert/G2 photograph analyzed in the fusion workshop
+  const resolveAlertForIntel = (intel: ActionableIntel | null): RawAlert => {
+    const fallbackAlert: RawAlert = {
+      id: 'alert-2',
+      timestamp: new Date().toISOString(),
+      sourceType: 'IMINT',
+      sourceName: 'VANT-02 Cóndor (Térmico Nocturno)',
+      reliability: 'A',
+      certainty: '1',
+      details: 'Avistamiento térmico de caravana de camiones sin patentes operando en ruta clandestina fronteriza.',
+      coordinates: intel?.coordinates || '19°12\'05"S 68°36\'40"W',
+      status: 'PROCESSED',
+      clandestineRouteId: 'Paso Coipasa',
+      mediaUrl: 'multimedia-thermal',
+      operatorName: 'Sgto. 1ro. Juan Pérez Vargas (Operador VANT)',
+      originUnit: 'Escuadrilla de Reconocimiento Aéreo CEO-LCC',
+      originSector: 'Salar de Coipasa - Sector Challapata',
+      transmissionChannel: 'Canal VHF Táctico Encriptado CAD-C2 // Frecuencia 142.850 MHz',
+      emitterDeviceId: 'Terminal VANT-GCS-02 // Sensor FLIR Tau-2'
+    };
+
+    if (!intel) {
+      return rawAlerts[0] || fallbackAlert;
+    }
+
+    // 1. Search by alert ID
+    const foundAlert = rawAlerts.find(a => a.id === intel.rawAlertId);
+    if (foundAlert) return foundAlert;
+
+    // 2. Search by coordinates
+    const coordAlert = rawAlerts.find(a => a.coordinates === intel.coordinates);
+    if (coordAlert) return coordAlert;
+
+    // 3. Search in expedientes
+    const foundExp = expedientes.find(e => e.id === intel.rawAlertId);
+    if (foundExp) {
+      return {
+        id: foundExp.id,
+        timestamp: foundExp.fechaHoraIngreso,
+        sourceType: foundExp.tipoRegistro === 'GRAFICO' ? 'IMINT' : 'HUMINT',
+        sourceName: `Expediente S-2: ${foundExp.id}`,
+        reliability: (foundExp.calificacionEvaluacion?.charAt(0) as any) || 'A',
+        certainty: (foundExp.calificacionEvaluacion?.charAt(2) as any) || '1',
+        details: foundExp.contenidoDetallado,
+        coordinates: intel.coordinates,
+        status: 'PROCESSED',
+        mediaUrl: foundExp.archivoAdjunto?.base64Data || foundExp.especificoGrafico?.archivoAdjunto?.base64Data || 'multimedia-optical',
+        operatorName: foundExp.operadorRegistro || 'Analista Evaluador S-2',
+        originUnit: foundExp.unidadReceptora,
+        originSector: 'Sector Fronterizo Occidental LCC',
+        transmissionChannel: 'Enlace Táctico Encriptado PII-LCC',
+        emitterDeviceId: `S2-EXP-${foundExp.id}`
+      };
+    }
+
+    return rawAlerts[0] || fallbackAlert;
+  };
+
+  // Currently focused intelligence for photo inspection
+  const activeIntelForForm = actionableIntel.find(i => i.id === selectedIntelId) || approvedIntel[0] || null;
+  const activeAlertForForm = resolveAlertForIntel(activeIntelForForm);
+
+  const handleOpenPhotoModal = (targetIntel?: ActionableIntel | null) => {
+    const intelToUse = targetIntel !== undefined ? targetIntel : activeIntelForForm;
+    const alertToUse = resolveAlertForIntel(intelToUse);
+    setModalAlert(alertToUse);
+    setModalIntel(intelToUse);
+    setModalOrderCode(codeName || (intelToUse ? `OP_${intelToUse.targetClan.toUpperCase().replace(/\s+/g, '_')}` : 'OOA-ESTRATÉGICA'));
+    setIsPhotoModalOpen(true);
+  };
+
+  const handleOpenPhotoModalForOrder = (order: AutomatedOrder) => {
+    const relatedIntel = actionableIntel.find(i => i.id === order.intelId);
+    let alertToUse: RawAlert;
+    if (order.rawAlertId) {
+      alertToUse = rawAlerts.find(a => a.id === order.rawAlertId) || resolveAlertForIntel(relatedIntel || null);
+    } else {
+      alertToUse = resolveAlertForIntel(relatedIntel || null);
+    }
+    setModalAlert(alertToUse);
+    setModalIntel(relatedIntel || null);
+    setModalOrderCode(order.codeName);
+    setIsPhotoModalOpen(true);
+  };
 
   // Auto-fill forms when an actionable intelligence is selected
   const handleIntelChange = (id: string) => {
@@ -124,6 +222,7 @@ export default function StrategicView({
     if (!codeName || !assignedUnit) return;
 
     const intelObj = actionableIntel.find(i => i.id === selectedIntelId);
+    const resolvedAlert = resolveAlertForIntel(intelObj || null);
     
     const newOrder: AutomatedOrder = {
       id: `ooa-${Math.floor(100 + Math.random() * 900)}`,
@@ -135,7 +234,9 @@ export default function StrategicView({
       coordinates: intelObj?.coordinates || '19°13\'00"S 68°35\'00"W',
       status: 'ISSUED',
       timestamp: new Date().toISOString(),
-      updates: ['Orden inyectada automáticamente desde Mando Estratégico (CEO-LCC).']
+      updates: ['Orden inyectada automáticamente desde Mando Estratégico (CEO-LCC).'],
+      rawAlertId: resolvedAlert?.id,
+      mediaUrl: resolvedAlert?.mediaUrl
     };
 
     onCreateOrder(newOrder);
@@ -146,8 +247,6 @@ export default function StrategicView({
     setAssignedUnit('');
     setCustomObjective('');
   };
-
-  const approvedIntel = actionableIntel.filter(i => i.status === 'APPROVED');
 
   // Vector Border Map Hotspots representation
   const mapHotspots = [
@@ -442,6 +541,131 @@ export default function StrategicView({
                 )}
               </div>
 
+              {/* FOTOGRAFÍA ANALIZADA EN EL TALLER DE FUSIÓN (VENTANA OOA) */}
+              <div className="bg-[#080d1a] border border-blue-900/60 rounded-xl p-3.5 space-y-3 relative overflow-hidden shadow-md">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-orange-500/15 border border-orange-500/40 flex items-center justify-center text-[#f97316]">
+                      <Camera className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-[11px] font-mono font-bold text-white uppercase tracking-wider block">
+                        FOTOGRAFÍA ANALIZADA EN FUSIÓN
+                      </span>
+                      <span className="text-[9px] font-mono text-zinc-400">
+                        {activeIntelForForm 
+                          ? `Evidencia certificada: ${activeIntelForForm.title}`
+                          : 'Evidencia táctica S-2 en espera de emisión OOA'
+                        }
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-mono bg-blue-500/20 text-blue-300 border border-blue-500/40 px-2 py-0.5 rounded font-bold uppercase">
+                      SENSOR ID: {activeAlertForForm.id}
+                    </span>
+                    <span className="text-[9px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded font-bold uppercase">
+                      CALIF: {activeAlertForForm.reliability}-{activeAlertForForm.certainty}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Interactive Photographic Preview Box */}
+                <div 
+                  onClick={() => handleOpenPhotoModal(activeIntelForForm)}
+                  className="relative h-44 rounded-lg overflow-hidden border border-blue-900/60 bg-black group cursor-pointer hover:border-orange-500/70 transition-all select-none shadow-inner"
+                  title="Haga clic para abrir la ventana de inspección fotográfica táctica"
+                >
+                  {/* Tactical Scanlines & grid */}
+                  <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent_50%,rgba(0,0,0,0.4)_51%)] bg-[length:100%_4px] pointer-events-none opacity-50 z-10" />
+
+                  {/* Render real photo if base64/url, or high-fidelity tactical graphic */}
+                  {activeAlertForForm.mediaUrl && (activeAlertForForm.mediaUrl.startsWith('data:') || activeAlertForForm.mediaUrl.startsWith('http')) ? (
+                    <img
+                      src={activeAlertForForm.mediaUrl}
+                      alt={`Evidencia analizada en fusión ${activeAlertForForm.id}`}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : activeAlertForForm.mediaUrl === 'multimedia-optical' || activeAlertForForm.sourceName.includes('Óptico') ? (
+                    <div className="w-full h-full bg-gradient-to-b from-[#021008] via-[#042410] to-[#021008] flex items-center justify-center p-4">
+                      <div className="text-center space-y-2">
+                        <div className="flex items-center justify-center gap-3">
+                          <div className="w-20 h-12 border border-emerald-400 bg-emerald-950/80 rounded flex items-center justify-center text-[8px] font-mono text-emerald-300 font-bold shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                            OBJETIVO NVG #1
+                          </div>
+                          <div className="w-20 h-12 border border-emerald-400 bg-emerald-950/80 rounded flex items-center justify-center text-[8px] font-mono text-emerald-300 font-bold shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+                            PUNTO DE ACOPIO
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-mono text-emerald-300 font-bold bg-black/60 px-2 py-0.5 rounded border border-emerald-600/40 inline-block">
+                          [NVG FÓSFORO VERDE]: 2 VEHÍCULOS DETECTADOS EN LÍNEA FRONTERIZA
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-b from-[#100502] via-[#2d0e06] to-[#100502] flex items-center justify-center p-4">
+                      <div className="text-center space-y-2">
+                        <div className="flex items-center justify-center gap-3">
+                          {[1, 2, 3].map(i => (
+                            <div key={i} className="w-16 h-10 bg-gradient-to-r from-orange-500 to-yellow-500 rounded border border-yellow-300 shadow-[0_0_15px_rgba(249,115,22,0.5)] flex items-center justify-center text-[8px] font-mono font-black text-black">
+                              VOLVO #{i}
+                            </div>
+                          ))}
+                        </div>
+                        <span className="text-[9px] font-mono text-orange-300 font-bold bg-black/60 px-2 py-0.5 rounded border border-orange-500/40 inline-block">
+                          [CAPTURA TÉRMICA FLIR]: COLUMNA CLANDESTINA IDENTIFICADA
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* HUD badges on image */}
+                  <div className="absolute top-2 left-2 z-20 pointer-events-none bg-black/85 px-2 py-0.5 rounded text-[8px] font-mono text-blue-300 border border-blue-900/60">
+                    S-2 // {activeAlertForForm.sourceType} • {activeAlertForForm.sourceName}
+                  </div>
+                  <div className="absolute bottom-2 left-2 z-20 pointer-events-none bg-black/85 px-2 py-0.5 rounded text-[8px] font-mono text-emerald-400 border border-emerald-900/60 flex items-center gap-1">
+                    <MapPin className="w-2.5 h-2.5 text-emerald-400" />
+                    <span>{activeAlertForForm.coordinates}</span>
+                  </div>
+
+                  {/* Hover Prompt to Open Inspection Window */}
+                  <div className="absolute inset-0 bg-blue-950/70 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity z-20 flex flex-col items-center justify-center gap-2 text-white">
+                    <div className="p-2 rounded-full bg-[#f97316] text-black shadow-lg">
+                      <Maximize2 className="w-5 h-5" />
+                    </div>
+                    <span className="text-xs font-mono font-black uppercase tracking-wider bg-black/90 px-3 py-1 rounded border border-orange-500/60 text-orange-200">
+                      ABRIR VENTANA DE FOTOGRAFÍA
+                    </span>
+                    <span className="text-[9px] font-mono text-zinc-300">
+                      Telemetría, procedencia completa y zoom táctico 3x
+                    </span>
+                  </div>
+                </div>
+
+                {/* Provenance Metadata Strip */}
+                <div className="grid grid-cols-2 gap-2 text-[10px] font-mono bg-black/40 p-2 rounded border border-blue-950">
+                  <div>
+                    <span className="text-zinc-500 block text-[8px] uppercase font-bold">Órgano de Búsqueda:</span>
+                    <span className="text-zinc-300 font-bold truncate block">{activeAlertForForm.sourceName}</span>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500 block text-[8px] uppercase font-bold">Sector / Procedencia:</span>
+                    <span className="text-amber-300 font-bold truncate block">{activeAlertForForm.originSector || 'Sector Occidental LCC'}</span>
+                  </div>
+                </div>
+
+                {/* Prominent Button to open the window */}
+                <button
+                  type="button"
+                  onClick={() => handleOpenPhotoModal(activeIntelForForm)}
+                  className="w-full bg-gradient-to-r from-blue-950 via-slate-900 to-blue-950 hover:from-blue-900 hover:to-slate-800 text-blue-200 hover:text-white border border-blue-500/40 hover:border-blue-400 py-2 px-3 rounded-lg text-xs font-mono font-bold flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.99] cursor-pointer"
+                >
+                  <Camera className="w-4 h-4 text-orange-400" />
+                  <span>VER FOTOGRAFÍA ANALIZADA EN VENTANA (MODAL OOA)</span>
+                  <Eye className="w-3.5 h-3.5 text-blue-400 ml-auto" />
+                </button>
+              </div>
+
               {/* Target codeName & Unit */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -523,7 +747,7 @@ export default function StrategicView({
             </form>
           </div>
 
-          {/* List of Active OOAs with Cancel options */}
+          {/* List of Active OOAs with Cancel options & Photo Inspection */}
           <div className="bg-[#0a0a0a]/85 backdrop-blur-md border border-[#1e293b]/70 rounded-xl p-5 shadow-lg flex-1">
             <h3 className="text-sm font-mono font-bold text-white border-b border-[#1a1a1a] pb-3 mb-4 flex items-center justify-between">
               <span className="flex items-center gap-2">
@@ -566,18 +790,29 @@ export default function StrategicView({
                       <div>COORD: <span className="text-white">{order.coordinates}</span></div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-2">
+                    <div className="flex items-center justify-between pt-2 flex-wrap gap-1">
                       <span className="text-[9px] font-mono text-[#444]">
                         {new Date(order.timestamp).toLocaleTimeString()}
                       </span>
-                      {order.status !== 'COMPLETED' && (
+                      <div className="flex items-center gap-2">
                         <button
-                          onClick={() => onCancelOrder(order.id)}
-                          className="text-[9px] font-mono text-red-400 hover:text-red-300 underline transition-colors cursor-pointer"
+                          type="button"
+                          onClick={() => handleOpenPhotoModalForOrder(order)}
+                          className="text-[9px] font-mono text-orange-400 hover:text-orange-300 bg-orange-950/30 hover:bg-orange-950/60 border border-orange-500/30 px-2 py-0.5 rounded flex items-center gap-1 transition-colors cursor-pointer"
+                          title="Ver fotografía analizada en el Taller de Fusión para esta orden"
                         >
-                          Abortar Operación
+                          <Camera className="w-3 h-3" />
+                          <span>Ver Foto Fusión</span>
                         </button>
-                      )}
+                        {order.status !== 'COMPLETED' && (
+                          <button
+                            onClick={() => onCancelOrder(order.id)}
+                            className="text-[9px] font-mono text-red-400 hover:text-red-300 underline transition-colors cursor-pointer"
+                          >
+                            Abortar
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -586,6 +821,18 @@ export default function StrategicView({
           </div>
         </div>
       </div>
+
+      {/* MODAL DE INSPECCIÓN FOTOGRÁFICA PARA EMISIÓN DE OOA */}
+      {modalAlert && (
+        <TacticalPhotoViewerModal
+          isOpen={isPhotoModalOpen}
+          onClose={() => setIsPhotoModalOpen(false)}
+          alert={modalAlert}
+          intel={modalIntel}
+          orderCodeName={modalOrderCode}
+          sourceContext="STRATEGIC_OOA"
+        />
+      )}
     </div>
   );
 }

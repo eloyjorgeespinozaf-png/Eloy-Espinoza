@@ -63,13 +63,19 @@ export const initialRawAlerts: RawAlert[] = [
     id: 'alert-1',
     timestamp: '2026-07-17T18:10:00Z',
     sourceType: 'IMINT',
-    sourceName: 'Drone Cóndor-4',
+    sourceName: 'VANT-02 Cóndor (Térmico Nocturno)',
     reliability: 'A',
     certainty: '1',
-    details: 'Avistamiento de 3 camiones pesados sin patentes circulando fuera de ruta autorizada cerca de la frontera.',
+    details: 'Avistamiento térmico de 3 camiones pesados F-12 sin patentes circulando con luces apagadas fuera de ruta autorizada cerca del Hito 14.',
     coordinates: '19°14\'32"S 68°37\'15"W',
     status: 'PENDING',
-    clandestineRouteId: 'Ruta Colchane'
+    clandestineRouteId: 'Ruta Colchane',
+    mediaUrl: 'multimedia-thermal',
+    operatorName: 'Sgto. 1ro. Juan Pérez Vargas (Operador VANT)',
+    originUnit: 'Escuadrilla de Reconocimiento Aéreo CEO-LCC // RI-22 Mejillones',
+    originSector: 'Hito 14 - Frontera Chileno-Boliviana (Sector Quebrada)',
+    transmissionChannel: 'Enlace Encriptado VANT-DL UHF 433 MHz // Red CAD-C2',
+    emitterDeviceId: 'Terminal VANT-GCS-02 // Sensor FLIR Tau-2'
   },
   {
     id: 'alert-2',
@@ -81,31 +87,49 @@ export const initialRawAlerts: RawAlert[] = [
     details: 'Aviso de cargamento masivo de mercancías y electrónicos clandestinos saliendo desde almacén temporal del clan del Altiplano.',
     coordinates: '19°12\'05"S 68°36\'40"W',
     status: 'PROCESSED',
-    clandestineRouteId: 'Salar de Coipasa'
+    clandestineRouteId: 'Salar de Coipasa',
+    mediaUrl: 'multimedia-optical',
+    operatorName: 'Agente de Campo HUMINT-09 (Agente de Inteligencia)',
+    originUnit: 'Destacamento de Inteligencia Fronteriza Coipasa',
+    originSector: 'Salar de Coipasa (Sector Challapata - Acceso Clandestino)',
+    transmissionChannel: 'Mensajería Táctica Cifrada Satelital Iridium // Enlace S-2',
+    emitterDeviceId: 'Handheld Táctico Rugged S2-TX-8821'
   },
   {
     id: 'alert-3',
     timestamp: '2026-07-17T16:30:00Z',
     sourceType: 'SIGINT',
-    sourceName: 'Estación de Escucha Alfa',
+    sourceName: 'Estación de Escucha Alfa (Radar Doppler)',
     reliability: 'A',
     certainty: '2',
     details: 'Interceptación de comunicaciones de radio UHF. Se coordinan coordenadas para el "cruce nocturno" en el Hito 14.',
     coordinates: '20°05\'44"S 68°29\'10"W',
     status: 'PENDING',
-    clandestineRouteId: 'Hito 14'
+    clandestineRouteId: 'Hito 14',
+    mediaUrl: 'multimedia-radar',
+    operatorName: 'Suboficial Técnico M. Quiroga (Especialista Guerra Electrónica)',
+    originUnit: 'Compañía de Comunicaciones y SIGINT Regimiento Pisiga',
+    originSector: 'Puesto Avanzado Cerro Quimsachata (Elevación 4.120 msnm)',
+    transmissionChannel: 'Canal VHF Táctico Encriptado CAD-C2 // Frecuencia 142.850 MHz',
+    emitterDeviceId: 'Estación Fija SIGINT-ESM-Alfa // Antena Goniométrica'
   },
   {
     id: 'alert-4',
     timestamp: '2026-07-17T15:00:00Z',
     sourceType: 'HUMINT',
-    sourceName: 'Patrullaje Local',
+    sourceName: 'Patrullaje Local Terrestre',
     reliability: 'C',
     certainty: '3',
     details: 'Rastros frescos de neumáticos de gran calado en un paso no habilitado.',
     coordinates: '21°10\'12"S 68°15\'22"W',
     status: 'DISMISSED',
-    clandestineRouteId: 'Ruta Ollagüe'
+    clandestineRouteId: 'Ruta Ollagüe',
+    mediaUrl: 'multimedia-satellite',
+    operatorName: 'Tte. Carlos Montaño (Comandante Patrulla Delta-4)',
+    originUnit: 'Patrulla de Reacción Inmediata CEO-LCC',
+    originSector: 'Paso No Habilitado Ollagüe Sur',
+    transmissionChannel: 'Radio VHF Motorola APX-8000 P25 Cifrado',
+    emitterDeviceId: 'Terminal Móvil Vehicular CEO-M-04'
   }
 ];
 
@@ -135,7 +159,9 @@ export const initialOrders: AutomatedOrder[] = [
     coordinates: '19°12\'05"S 68°36\'40"W',
     status: 'ISSUED',
     timestamp: '2026-07-17T18:20:00Z',
-    updates: ['Orden emitida e inyectada al sistema central de telecomunicaciones de terreno.']
+    updates: ['Orden emitida e inyectada al sistema central de telecomunicaciones de terreno desde CEO-LCC.'],
+    mediaUrl: 'multimedia-thermal',
+    rawAlertId: 'alert-1'
   }
 ];
 

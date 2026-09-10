@@ -612,6 +612,18 @@ export default function TacticalView({
       finalMediaUrl = multimediaPreset;
     }
 
+    // Derive realistic origin sector from coordinates
+    let detectedSector = 'Sector Occidental Fronterizo';
+    if (coordinates.includes('68°34') || coordinates.includes('68°37')) {
+      detectedSector = 'Hito 14 - Frontera Chileno-Boliviana';
+    } else if (coordinates.includes('68°15') || coordinates.includes('Coipasa')) {
+      detectedSector = 'Salar de Coipasa (Sector Challapata)';
+    } else if (coordinates.includes('69°02') || coordinates.includes('Tambo')) {
+      detectedSector = 'Paso Tambo Quemado - Charaña';
+    } else if (coordinates.includes('Pisiga')) {
+      detectedSector = 'Paso No Habilitado Pisiga';
+    }
+
     const newReport: RawAlert = {
       id: `alert-${Math.floor(1000 + Math.random() * 9000)}`,
       timestamp: new Date().toISOString(),
@@ -623,7 +635,12 @@ export default function TacticalView({
       coordinates: coordinates,
       status: 'PENDING',
       clandestineRouteId: undefined, // Strict DOCTRINE constraint: search team cannot analyze routes
-      mediaUrl: finalMediaUrl
+      mediaUrl: finalMediaUrl,
+      operatorName: selectedPatrol ? `${selectedPatrol} (Operador de Búsqueda S-2)` : 'Operador Táctico S-2',
+      originUnit: selectedUnitDetails ? selectedUnitDetails.name : 'Patrulla de Terreno LCC // CEO-LCC',
+      originSector: detectedSector,
+      transmissionChannel: 'Canal VHF Táctico Encriptado CAD-C2 // Frecuencia 142.850 MHz',
+      emitterDeviceId: `Terminal Ruggedized S2-TX-${Math.floor(1000 + Math.random() * 9000)}`
     };
 
     onSendFieldReport(newReport);
@@ -753,20 +770,21 @@ export default function TacticalView({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left column: Immediate Alarms & OOA Reception HUD */}
-        <div className="lg:col-span-6 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg relative overflow-hidden flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3 mb-4">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-[#f43f5e] animate-bounce" />
-                <h3 className="text-sm font-mono font-bold text-white uppercase">
-                  Recepción de Órdenes Automatizadas (OOA)
-                </h3>
+        {/* Module 4 Only: Immediate Alarms & OOA Reception HUD (Unidades de Terreno) */}
+        {(currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && (
+          <div className="lg:col-span-7 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg relative overflow-hidden flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-[#f43f5e] animate-bounce" />
+                  <h3 className="text-sm font-mono font-bold text-white uppercase">
+                    Recepción de Órdenes Automatizadas (OOA)
+                  </h3>
+                </div>
+                <span className="text-[10px] text-[#f43f5e] bg-[#f43f5e]/10 px-2 py-0.5 rounded font-mono animate-pulse">
+                  CANAL CRÍTICO DE ENLACE
+                </span>
               </div>
-              <span className="text-[10px] text-[#f43f5e] bg-[#f43f5e]/10 px-2 py-0.5 rounded font-mono animate-pulse">
-                CANAL CRÍTICO DE ENLACE
-              </span>
-            </div>
 
             {patrolOrders.length === 0 ? (
               <div className="text-center py-16 border border-dashed border-[#1a1a1a] rounded-lg text-[#666] text-xs font-mono space-y-2">
@@ -860,25 +878,29 @@ export default function TacticalView({
             <span>Al confirmar el cierre de la misión, el sistema notificará inmediatamente al CEO de la desarticulación del contrabandista.</span>
           </div>
         </div>
+      )}
 
-        {/* Center column: Ground GPS Coordinates Georeferencing Simulator */}
-        <div className="lg:col-span-3 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg text-left flex flex-col justify-between">
+        {/* Secondary Column: Ground GPS Coordinates Georeferencing Simulator (Adapted per Role) */}
+        <div className="lg:col-span-5 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg text-left flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3 mb-4">
               <div className="flex items-center gap-2">
                 <Navigation className="w-4 h-4 text-[#10b981] animate-pulse" />
                 <h3 className="text-sm font-mono font-bold text-white uppercase">
-                  Georreferenciación GPS
+                  {currentRole === 'ROL_BUSQUEDA' ? 'Georreferenciación de Sensores S-2' : 'Georreferenciación GPS Terreno'}
                 </h3>
               </div>
               <span className="text-[10px] text-[#10b981] bg-[#10b981]/10 px-2 py-0.5 rounded font-mono">
-                GPS MIL-SPEC
+                {currentRole === 'ROL_BUSQUEDA' ? 'TELEMETRÍA S-2' : 'GPS MIL-SPEC'}
               </span>
             </div>
 
             <div className="space-y-4">
               <p className="text-[#888] text-xs font-sans leading-relaxed">
-                Establezca la ubicación física actual de su dispositivo en tiempo real para sincronizar su movimiento táctico en la red.
+                {currentRole === 'ROL_BUSQUEDA'
+                  ? 'Sincronice las coordenadas de los sensores ópticos, drones o puestos avanzados para transferir coordenadas al reporte.'
+                  : 'Establezca la ubicación física actual de su dispositivo en tiempo real para sincronizar su movimiento táctico en la red.'
+                }
               </p>
 
               {/* Mode Selectors */}
@@ -1008,18 +1030,19 @@ export default function TacticalView({
           </div>
         </div>
 
-        {/* Right column: Raw Field Report Sender (Órganos de Búsqueda inputs) */}
-        <div className="lg:col-span-3 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg text-left flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3 mb-4">
-              <div className="flex items-center gap-2">
-                <Send className="w-4 h-4 text-[#f97316]" />
-                <h3 className="text-sm font-mono font-bold text-white uppercase">
-                  Órgano de Búsqueda (Captura)
-                </h3>
+        {/* Module 1 Only: Raw Field Report Sender (Órganos de Búsqueda inputs) */}
+        {currentRole === 'ROL_BUSQUEDA' && (
+          <div className="lg:col-span-7 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg text-left flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <Send className="w-4 h-4 text-yellow-400" />
+                  <h3 className="text-sm font-mono font-bold text-white uppercase">
+                    Órgano de Búsqueda // Ingesta S-2
+                  </h3>
+                </div>
+                <span className="text-[10px] text-yellow-300 bg-yellow-950/40 px-2 py-0.5 rounded font-mono font-semibold border border-yellow-700/50">MÓDULO EXCLUSIVO S-2</span>
               </div>
-              <span className="text-[10px] text-[#f97316] bg-[#f97316]/10 px-2 py-0.5 rounded font-mono font-semibold">BÚSQUEDA S-2</span>
-            </div>
 
             <form onSubmit={handleSendReport} className="space-y-4">
               <p className="text-[#888] text-xs font-sans leading-relaxed">
@@ -1356,6 +1379,7 @@ export default function TacticalView({
             </form>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
