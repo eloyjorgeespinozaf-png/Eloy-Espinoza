@@ -26,12 +26,14 @@ import {
   Crosshair, 
   ArrowRight,
   ShieldCheck,
-  Radar
+  Radar,
+  Download
 } from 'lucide-react';
 import { MilitaryRole } from '../types';
 import { useAuth, PRESET_CREDENTIALS, PRESET_USERS } from '../context/AuthContext';
 import { playSyntheticBeep } from '../utils/audio';
 import { GamerFontSelector } from './GamerFontSelector';
+import { AppInstallModal } from './AppInstallModal';
 import { 
   FullDashboardBackground, 
   FullDashboardBackgroundControl, 
@@ -55,6 +57,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({ onLoginSuc
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [cryptoHash, setCryptoHash] = useState<string>('AES256-SHA512-SEC-INIT');
+  const [showInstallModal, setShowInstallModal] = useState<boolean>(false);
 
   // Rotate simulated crypto hash every few seconds for high-tech military immersion
   useEffect(() => {
@@ -247,6 +250,18 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({ onLoginSuc
 
           {/* Videogame Font Selector in Login Screen */}
           <GamerFontSelector compact />
+
+          {/* Download & Install App button (PC & Celular) */}
+          <button
+            type="button"
+            onClick={() => setShowInstallModal(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-600/70 text-emerald-300 hover:text-white transition-all cursor-pointer text-[11px] font-mono font-bold shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+            title="Descargar e Instalar la App en PC y Celular"
+          >
+            <Download className="w-3.5 h-3.5 animate-bounce" />
+            <span className="hidden sm:inline">Instalar App (PC / Celular)</span>
+            <span className="sm:hidden">Instalar</span>
+          </button>
 
           <button
             type="button"
@@ -527,6 +542,12 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({ onLoginSuc
           <span>DISTRIBUCIÓN RESTRINGIDA</span>
         </div>
       </footer>
+
+      {/* Cross-Platform PWA & App Download Modal */}
+      <AppInstallModal 
+        isOpen={showInstallModal} 
+        onClose={() => setShowInstallModal(false)} 
+      />
     </div>
   );
 };

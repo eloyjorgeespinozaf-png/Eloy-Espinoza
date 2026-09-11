@@ -165,6 +165,17 @@ export interface TacticalUnit {
   coordinates: string;
   personnel: number;
   lastReportTime: string;
+  commander?: string;
+  pin?: string;
+  frequency?: string;
+  sector?: string;
+  callsign?: string;
+  equipment?: string[];
+  battery?: number;
+  fuel?: number;
+  ammo?: number;
+  notes?: string;
+  createdAt?: string;
 }
 
 export interface ChartDataPoint {
@@ -175,3 +186,28 @@ export interface ChartDataPoint {
 }
 
 export type ChartType = 'BAR' | 'LINE' | 'AREA' | 'SCATTER' | 'MAP';
+
+export type TacticalModuleId = 
+  | 'MOD_CEO'          // 3. Mando Estratégico CEO-LCC
+  | 'MOD_FUSION'       // 2. Central de Fusión CFI
+  | 'MOD_BUSQUEDA'     // 1. Órganos de Búsqueda S-2
+  | 'MOD_PATRULLAS'    // 4. Unidades de Terreno (Patrullas)
+  | 'MOD_P2P_MESH'     // 5. Malla Descentrada P2P (S-6)
+  | 'MOD_ARCHITECTURE' // 6. Arquitectura de Sistemas PII-LCC
+  | 'MOD_CODE_VIEWER'; // 7. Terminal de Código y Auditoría
+
+export interface ModuleBackgroundConfig {
+  moduleId: TacticalModuleId;
+  moduleName: string;
+  imageUrl: string;
+  dataUrl?: string; // base64 cached offline
+  opacity: number; // 0.1 to 1.0 (default 0.80)
+  blur: number; // 0 to 6px (default 0)
+  contrastOverlay: boolean; // default true
+  fitMode: 'cover' | 'contain' | 'tile';
+  customFileName?: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export type ModuleBackgroundsMap = Record<TacticalModuleId, ModuleBackgroundConfig>;

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MilitaryRole, RawAlert, Clan, ActionableIntel, AutomatedOrder, TacticalUnit, User, AuditLogEntry, G2RegistryRecord } from './types';
+import { MilitaryRole, RawAlert, Clan, ActionableIntel, AutomatedOrder, TacticalUnit, User, AuditLogEntry, G2RegistryRecord, TacticalModuleId, ModuleBackgroundConfig, ModuleBackgroundsMap } from './types';
 import { 
   initialRawAlerts, 
   initialClans, 
@@ -31,8 +31,21 @@ import { MilitaryLoginView } from './components/MilitaryLoginView';
 import { GamerFontSelector } from './components/GamerFontSelector';
 import { useGamingFont } from './utils/fontTheme';
 import { FullDashboardBackground, FullDashboardBackgroundControl, useFullDashboardBackground } from './components/FullDashboardBackground';
+import { ModuleBackgroundLayer } from './components/ModuleBackgroundLayer';
+import { ModuleBackgroundModal } from './components/ModuleBackgroundModal';
+import { 
+  loadModuleBackgroundsLocal, 
+  saveModuleBackgroundLocal, 
+  fetchServerModuleBackgrounds, 
+  uploadModuleBackgroundToServer, 
+  resetModuleBackground, 
+  resolveActiveModuleId, 
+  createDefaultModuleBackgrounds,
+  TACTICAL_MODULES_LIST 
+} from './services/ModuleBackgroundService';
+import { AppInstallModal } from './components/AppInstallModal';
 
-import { Shield, Radio, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2 } from 'lucide-react';
+import { Shield, Radio, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2, Smartphone, Laptop, Image as ImageIcon } from 'lucide-react';
 import { useAuth, PRESET_USERS } from './context/AuthContext';
 import { safeStorage } from './utils/storage';
 import { playSyntheticBeep, playChime } from './utils/audio';
@@ -66,9 +79,25 @@ export default function App() {
   const [clans, setClans] = useState<Clan[]>(initialClans);
   const [actionableIntel, setActionableIntel] = useState<ActionableIntel[]>(initialActionableIntel);
   const [activeOrders, setActiveOrders] = useState<AutomatedOrder[]>(initialOrders);
-  const [tacticalUnits, setTacticalUnits] = useState<TacticalUnit[]>(initialTacticalUnits);
+  const [tacticalUnits, setTacticalUnits] = useState<TacticalUnit[]>(() => {
+    try {
+      const saved = localStorage.getItem('PII_LCC_TACTICAL_UNITS');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn('Failed to parse cached tactical units:', e);
+    }
+    return initialTacticalUnits;
+  });
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'OPERATIONS' | 'ARCHITECTURE' | 'P2P_MESH' | 'CODE_VIEWER'>('OPERATIONS');
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+  const [showInstallModal, setShowInstallModal] = useState(false);
+  
+  // Per-Module Backgrounds State (IndexedDB + Server Synced)
+  const [moduleBackgrounds, setModuleBackgrounds] = useState<ModuleBackgroundsMap>(createDefaultModuleBackgrounds);
+  const [showModuleBgModal, setShowModuleBgModal] = useState<boolean>(false);
 
   const [isInstalledDevice, setIsInstalledDevice] = useState<boolean>(() => {
     const isStandalone = typeof window !== 'undefined' && Boolean(
@@ -227,7 +256,17 @@ export default function App() {
     if (incomingClans) setClans(incomingClans);
     if (incomingIntel) setActionableIntel(incomingIntel);
     if (incomingOrders) setActiveOrders(incomingOrders);
-    if (incomingUnits) setTacticalUnits(incomingUnits);
+    if (incomingUnits) {
+      setTacticalUnits(incomingUnits);
+      try { localStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(incomingUnits)); } catch (e) {}
+    }
+
+    if (state.moduleBackgrounds) {
+      setModuleBackgrounds(prev => ({
+        ...prev,
+        ...state.moduleBackgrounds
+      }));
+    }
 
     if (incomingLogs && incomingLogs.length > 0) {
       setAuditLogs(prev => {
@@ -308,6 +347,18 @@ export default function App() {
 
             if (type && type.startsWith('P2P_')) {
               window.dispatchEvent(new CustomEvent('p2p-message', { detail: { type, payload } }));
+              return;
+            }
+
+            if (type === 'MODULE_BG_UPDATE' && payload) {
+              if (payload.allConfigs) {
+                setModuleBackgrounds(prev => ({ ...prev, ...payload.allConfigs }));
+              } else if (payload.moduleId && payload.config) {
+                setModuleBackgrounds(prev => ({
+                  ...prev,
+                  [payload.moduleId]: payload.config
+                }));
+              }
               return;
             }
 
@@ -395,9 +446,104 @@ export default function App() {
       }
     }
   }, [auditLogs]);
+
+  // Hydrate per-module backgrounds from IndexedDB/localStorage, then reconcile with server
+  useEffect(() => {
+    loadModuleBackgroundsLocal().then(localMap => {
+      if (localMap && Object.keys(localMap).length > 0) {
+        setModuleBackgrounds(localMap);
+      }
+      fetchServerModuleBackgrounds().then(serverMap => {
+        if (serverMap && Object.keys(serverMap).length > 0) {
+          setModuleBackgrounds(prev => ({ ...prev, ...serverMap }));
+        }
+      });
+    });
+  }, []);
   
   // Current active role equals user's role if logged in, or selectedLoginRole otherwise
   const currentRole = isAuthenticated && user ? user.role : selectedLoginRole;
+
+  // Resolve current active tactical module based on active tab and operator role
+  const activeModuleId: TacticalModuleId = resolveActiveModuleId(activeWorkspaceTab, currentRole);
+  const activeModuleMeta = TACTICAL_MODULES_LIST.find(m => m.id === activeModuleId);
+
+  // Handlers for Module Backgrounds management with cross-device sync
+  const handleUpdateModuleBackground = async (
+    moduleId: TacticalModuleId,
+    updates: Partial<ModuleBackgroundConfig>,
+    imageBase64?: string
+  ) => {
+    const current = moduleBackgrounds[moduleId] || createDefaultModuleBackgrounds()[moduleId];
+    const updated: ModuleBackgroundConfig = {
+      ...current,
+      ...updates,
+      moduleId,
+      updatedAt: new Date().toISOString()
+    };
+
+    setModuleBackgrounds(prev => ({
+      ...prev,
+      [moduleId]: updated
+    }));
+    await saveModuleBackgroundLocal(updated);
+
+    try {
+      const serverConfig = await uploadModuleBackgroundToServer(updated, imageBase64);
+      if (serverConfig) {
+        setModuleBackgrounds(prev => ({
+          ...prev,
+          [moduleId]: serverConfig
+        }));
+      }
+    } catch (err) {
+      console.warn('Server background sync warning (offline mode):', err);
+    }
+  };
+
+  const handleResetModuleBackground = async (moduleId: TacticalModuleId) => {
+    const resetConfig = await resetModuleBackground(moduleId);
+    setModuleBackgrounds(prev => ({
+      ...prev,
+      [moduleId]: resetConfig
+    }));
+  };
+
+  const handleApplyToAllModules = async (sourceModuleId: TacticalModuleId) => {
+    const source = moduleBackgrounds[sourceModuleId];
+    if (!source) return;
+
+    const newMap: Partial<ModuleBackgroundsMap> = {};
+    for (const mod of TACTICAL_MODULES_LIST) {
+      const copyConfig: ModuleBackgroundConfig = {
+        ...source,
+        moduleId: mod.id,
+        moduleName: mod.name,
+        updatedAt: new Date().toISOString()
+      };
+      newMap[mod.id] = copyConfig;
+      await saveModuleBackgroundLocal(copyConfig);
+    }
+
+    setModuleBackgrounds(newMap as ModuleBackgroundsMap);
+
+    try {
+      await fetch('/api/module-backgrounds/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backgrounds: newMap })
+      });
+    } catch (e) {
+      console.warn('Server batch save warning:', e);
+    }
+  };
+
+  const handleBatchImportBackgrounds = (importedMap: ModuleBackgroundsMap) => {
+    setModuleBackgrounds(prev => ({
+      ...prev,
+      ...importedMap
+    }));
+  };
 
   // Real-time UTC system clock & Local Time Detection
   const [systemTime, setSystemTime] = useState<string>('');
@@ -719,10 +865,42 @@ export default function App() {
 
   const handleUpdateUnitCoordinates = (unitName: string, newCoords: string) => {
     if (!validateBackendPermission('ROL_PATRULLA', `Actualizar Posición GPS de la Unidad: ${unitName}`, newCoords)) return;
-    setTacticalUnits(prev =>
-      prev.map(unit => unit.name === unitName ? { ...unit, coordinates: newCoords, lastReportTime: 'Hace un momento' } : unit)
-    );
+    setTacticalUnits(prev => {
+      const next = prev.map(unit => unit.name === unitName ? { ...unit, coordinates: newCoords, lastReportTime: 'Hace un momento' } : unit);
+      try { localStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
     sendWsMessage('UPDATE_UNIT_COORDINATES', { unitName, newCoords });
+  };
+
+  const handleAddTacticalUnit = (unit: TacticalUnit) => {
+    if (!validateBackendPermission('ROL_BUSQUEDA', `Desplegar Nueva Patrulla Táctica: ${unit.name}`, unit.coordinates)) return;
+    setTacticalUnits(prev => {
+      const next = [...prev, unit];
+      try { localStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+    sendWsMessage('ADD_TACTICAL_UNIT', { unit, userId: currentRole, role: currentRole });
+  };
+
+  const handleUpdateTacticalUnit = (unit: TacticalUnit) => {
+    if (!validateBackendPermission('ROL_BUSQUEDA', `Actualizar Datos de Patrulla: ${unit.name}`, unit.coordinates)) return;
+    setTacticalUnits(prev => {
+      const next = prev.map(u => u.id === unit.id ? unit : u);
+      try { localStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+    sendWsMessage('UPDATE_TACTICAL_UNIT', { unitId: unit.id, updates: unit, userId: currentRole, role: currentRole });
+  };
+
+  const handleDeleteTacticalUnit = (unitId: string) => {
+    if (!validateBackendPermission('ROL_BUSQUEDA', `Replegar Patrulla Táctica ID: ${unitId}`, '19°13\'10"S 68°35\'50"W')) return;
+    setTacticalUnits(prev => {
+      const next = prev.filter(u => u.id !== unitId);
+      try { localStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+    sendWsMessage('DELETE_TACTICAL_UNIT', { unitId, userId: currentRole, role: currentRole });
   };
 
   const handleSetRoleAttempt = (role: MilitaryRole) => {
@@ -747,7 +925,8 @@ export default function App() {
       actionableIntel,
       activeOrders,
       tacticalUnits,
-      auditLogs
+      auditLogs,
+      moduleBackgrounds
     };
 
     const blob = new Blob([JSON.stringify(exportPackage, null, 2)], { type: 'application/json;charset=utf-8;' });
@@ -998,10 +1177,11 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
       isNightModeActive && nightVisionFilter === 'RED_COMBAT' ? 'red-combat-mode' : ''
     }`}>
 
-      {/* Full Dashboard Background: CEO-LCC MÓDULO 3: INTERFAZ DE MANDO (DASHBOARD 2) at 80% contrast */}
-      <FullDashboardBackground 
-        settings={fullBgState.settings} 
-        imageSrc={fullBgState.activeImageSrc} 
+      {/* Per-Module Background: Strictly bound to current active tactical module with cross-device synchronization */}
+      <ModuleBackgroundLayer 
+        activeModuleId={activeModuleId} 
+        config={moduleBackgrounds[activeModuleId]} 
+        onOpenManager={() => setShowModuleBgModal(true)} 
       />
 
       {/* Tactical Grid Overlay Background */}
@@ -1072,13 +1252,22 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
               </button>
             </div>
 
-            {/* Full Dashboard Background (War Room 80%) Control */}
-            <FullDashboardBackgroundControl 
-              settings={fullBgState.settings}
-              updateSettings={fullBgState.updateSettings}
-              uploadDashboardImage={fullBgState.uploadDashboardImage}
-              resetToDefault={fullBgState.resetToDefault}
-            />
+            {/* Per-Module Backgrounds Customizer Trigger */}
+            <button
+              type="button"
+              id="btn-module-bg-manager"
+              onClick={() => setShowModuleBgModal(true)}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border font-mono text-xs transition-all cursor-pointer bg-blue-950/40 border-blue-500/60 text-blue-300 shadow-[0_0_14px_rgba(59,130,246,0.2)] hover:border-blue-400 hover:bg-blue-900/50 active:scale-95"
+              title="Personalizar fondo exclusivo para cada módulo (Persistente entre PC y Móvil)"
+            >
+              <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
+              <div className="flex flex-col text-left leading-none">
+                <span className="text-[10px] font-bold text-blue-300 tracking-wider">FONDO MÓDULO</span>
+                <span className="text-[9px] text-blue-400/80 font-mono truncate max-w-[110px]">
+                  {activeModuleMeta?.badge || 'CONFIGURAR'}
+                </span>
+              </div>
+            </button>
 
             {/* Videogame HUD Font Style Switcher */}
             <GamerFontSelector />
@@ -1333,6 +1522,20 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                   <Shield className="w-3.5 h-3.5" />
                 </button>
 
+                {/* Primary Install App Button (PC & Mobile PWA) */}
+                <button
+                  onClick={() => {
+                    setShowInstallModal(true);
+                    playSyntheticBeep(700, 0.1);
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 hover:text-white border border-emerald-600/70 shadow-[0_0_12px_rgba(16,185,129,0.25)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap"
+                  title="Descargar e Instalar la Aplicación en PC y Celular (PWA Nativa)"
+                >
+                  <Download className="w-3.5 h-3.5 animate-bounce text-emerald-400" />
+                  <span className="hidden sm:inline">Instalar App (PC / Celular)</span>
+                  <span className="sm:hidden">Instalar</span>
+                </button>
+
                 <button
                   onClick={() => setShowDownloadMenu(!showDownloadMenu)}
                   className={`flex items-center justify-center p-2 rounded border transition-colors cursor-pointer ${
@@ -1349,6 +1552,22 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                     <div className="px-2 py-1.5 border-b border-zinc-900 text-[9px] text-zinc-500 font-bold uppercase tracking-wider">
                       Descargas Disponibles (PII-LCC)
                     </div>
+                    <button
+                      onClick={() => {
+                        setShowInstallModal(true);
+                        setShowDownloadMenu(false);
+                      }}
+                      className="w-full text-left px-2 py-2 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 rounded flex items-center gap-2 transition-all cursor-pointer border border-emerald-700/60 mb-1 mt-1"
+                    >
+                      <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                      <div>
+                        <p className="font-bold leading-tight flex items-center gap-1">
+                          Instalar en PC / Celular
+                          <span className="text-[8px] bg-emerald-700 text-white px-1 rounded uppercase">PWA</span>
+                        </p>
+                        <p className="text-[9px] text-zinc-400 font-normal">Acceso directo y código QR</p>
+                      </div>
+                    </button>
                     <button
                       onClick={() => {
                         downloadJSONDatabase();
@@ -1419,13 +1638,22 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
           </div>
 
           {/* Core Module Indicator (Exclusivo por Órgano Doctrinal Autenticado) */}
-          <div className="flex bg-[#0a0a0a] border border-[#1a1a1a] p-1.5 rounded-lg self-start md:self-auto w-full md:w-auto items-center">
+          <div className="flex bg-[#0a0a0a] border border-[#1a1a1a] p-1.5 rounded-lg self-start md:self-auto w-full md:w-auto items-center flex-wrap gap-2">
             {currentRole === 'ROL_BUSQUEDA' && (
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-yellow-500/10 border border-yellow-500/30 text-xs font-mono font-bold text-yellow-400">
                 <Radio className="w-4 h-4 animate-pulse text-yellow-400" />
                 <span className="text-[#888] font-normal uppercase text-[10px]">MÓDULO EXCLUSIVO:</span>
                 <span className="text-white">1. ÓRGANOS DE BÚSQUEDA (S-2)</span>
                 <span className="text-[9px] bg-yellow-950/70 text-yellow-300 px-2 py-0.5 rounded border border-yellow-800/40">ACTIVO</span>
+                <button
+                  type="button"
+                  onClick={() => setShowModuleBgModal(true)}
+                  className="ml-2 flex items-center gap-1 text-[10px] bg-yellow-950/60 hover:bg-yellow-900/90 text-yellow-300 hover:text-white px-2 py-0.5 rounded border border-yellow-700/50 transition-all cursor-pointer"
+                  title="Cambiar fondo exclusivo para Órganos de Búsqueda"
+                >
+                  <ImageIcon className="w-3 h-3 text-yellow-400" />
+                  <span>Fondo Módulo</span>
+                </button>
               </div>
             )}
 
@@ -1435,6 +1663,15 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                 <span className="text-[#888] font-normal uppercase text-[10px]">MÓDULO EXCLUSIVO:</span>
                 <span className="text-white">2. CENTRAL DE FUSIÓN (CFI)</span>
                 <span className="text-[9px] bg-orange-950/70 text-orange-300 px-2 py-0.5 rounded border border-orange-800/40">ACTIVO</span>
+                <button
+                  type="button"
+                  onClick={() => setShowModuleBgModal(true)}
+                  className="ml-2 flex items-center gap-1 text-[10px] bg-orange-950/60 hover:bg-orange-900/90 text-orange-300 hover:text-white px-2 py-0.5 rounded border border-orange-700/50 transition-all cursor-pointer"
+                  title="Cambiar fondo exclusivo para Central de Fusión"
+                >
+                  <ImageIcon className="w-3 h-3 text-orange-400" />
+                  <span>Fondo Módulo</span>
+                </button>
               </div>
             )}
 
@@ -1444,6 +1681,15 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                 <span className="text-[#888] font-normal uppercase text-[10px]">MÓDULO EXCLUSIVO:</span>
                 <span className="text-white">3. MANDO ESTRATÉGICO (CEO-LCC)</span>
                 <span className="text-[9px] bg-blue-950/70 text-blue-300 px-2 py-0.5 rounded border border-blue-800/40">ACTIVO</span>
+                <button
+                  type="button"
+                  onClick={() => setShowModuleBgModal(true)}
+                  className="ml-2 flex items-center gap-1 text-[10px] bg-blue-950/60 hover:bg-blue-900/90 text-blue-300 hover:text-white px-2 py-0.5 rounded border border-blue-700/50 transition-all cursor-pointer"
+                  title="Cambiar fondo exclusivo para Mando Estratégico CEO-LCC"
+                >
+                  <ImageIcon className="w-3 h-3 text-blue-400" />
+                  <span>Fondo Módulo</span>
+                </button>
               </div>
             )}
 
@@ -1453,6 +1699,15 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                 <span className="text-[#888] font-normal uppercase text-[10px]">MÓDULO EXCLUSIVO:</span>
                 <span className="text-white">4. UNIDADES DE TERRENO (PATRULLAS)</span>
                 <span className="text-[9px] bg-emerald-950/70 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800/40">ACTIVO</span>
+                <button
+                  type="button"
+                  onClick={() => setShowModuleBgModal(true)}
+                  className="ml-2 flex items-center gap-1 text-[10px] bg-emerald-950/60 hover:bg-emerald-900/90 text-emerald-300 hover:text-white px-2 py-0.5 rounded border border-emerald-700/50 transition-all cursor-pointer"
+                  title="Cambiar fondo exclusivo para Unidades de Terreno"
+                >
+                  <ImageIcon className="w-3 h-3 text-emerald-400" />
+                  <span>Fondo Módulo</span>
+                </button>
               </div>
             )}
           </div>
@@ -1583,23 +1838,35 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                       activeOrders={activeOrders}
                       tacticalUnits={tacticalUnits}
                       currentRole={currentRole}
+                      rawAlerts={rawAlerts}
+                      clans={clans}
+                      actionableIntel={actionableIntel}
+                      expedientes={expedientes}
+                      onAddExpediente={handleAddExpediente}
+                      onPromoteToIntel={handlePromoteToIntel}
+                      onUpdateAlertStatus={handleUpdateAlertStatus}
                       onConfirmOrder={handleConfirmOrder}
                       onSendFieldReport={handleSendFieldReport}
                       onUpdateUnitCoordinates={handleUpdateUnitCoordinates}
+                      onAddTacticalUnit={handleAddTacticalUnit}
+                      onUpdateTacticalUnit={handleUpdateTacticalUnit}
+                      onDeleteTacticalUnit={handleDeleteTacticalUnit}
                     />
                   )}
                 </div>
 
-                {/* Dynamic Joint Route Analysis Custom Chart Maker (Required) */}
-                <InteractiveChartCreator 
-                  initialData={initialChartData} 
-                  tacticalUnits={tacticalUnits}
-                  activeOrders={activeOrders}
-                  rawAlerts={rawAlerts}
-                  onConfirmOrder={handleConfirmOrder}
-                  onAddOrderUpdate={handleAppendOrderUpdate}
-                  onCreateOrder={handleCreateOrder}
-                />
+                {/* Dynamic Joint Route Analysis Custom Chart Maker (Eliminado en Módulos Activos Asignados / Órganos de Búsqueda) */}
+                {currentRole !== 'ROL_BUSQUEDA' && currentRole !== 'ROL_TERRENO' && currentRole !== 'ROL_PATRULLA' && (
+                  <InteractiveChartCreator 
+                    initialData={initialChartData} 
+                    tacticalUnits={tacticalUnits}
+                    activeOrders={activeOrders}
+                    rawAlerts={rawAlerts}
+                    onConfirmOrder={handleConfirmOrder}
+                    onAddOrderUpdate={handleAppendOrderUpdate}
+                    onCreateOrder={handleCreateOrder}
+                  />
+                )}
               </ErrorBoundary>
             )}
 
@@ -2016,7 +2283,25 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
         </div>
       )}
 
+      {/* Cross-Platform PWA & App Download Modal (PC & Mobile) */}
+      <AppInstallModal
+        isOpen={showInstallModal}
+        onClose={() => setShowInstallModal(false)}
+        onDownloadDesktopPackage={downloadDesktopApp}
+        onDownloadMobilePackage={downloadMobileApp}
+      />
 
+      {/* Interactive Per-Module Background Manager Modal (Persistent across PC & Mobile) */}
+      <ModuleBackgroundModal
+        isOpen={showModuleBgModal}
+        onClose={() => setShowModuleBgModal(false)}
+        activeModuleId={activeModuleId}
+        backgrounds={moduleBackgrounds}
+        onUpdateBackground={handleUpdateModuleBackground}
+        onResetBackground={handleResetModuleBackground}
+        onApplyToAll={handleApplyToAllModules}
+        onBatchImport={handleBatchImportBackgrounds}
+      />
 
     </div>
   );

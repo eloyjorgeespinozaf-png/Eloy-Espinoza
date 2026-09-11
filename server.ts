@@ -17,7 +17,7 @@ import {
   initialOrders, 
   initialTacticalUnits 
 } from "./src/utils/mockData";
-import { RawAlert, Clan, ActionableIntel, AutomatedOrder, TacticalUnit, AuditLogEntry } from "./src/types";
+import { RawAlert, Clan, ActionableIntel, AutomatedOrder, TacticalUnit, AuditLogEntry, ModuleBackgroundConfig } from "./src/types";
 
 // Centralized in-memory synced database
 let serverVersion = "v2.4.0-CAD";
@@ -36,6 +36,117 @@ let serverAuditLogs: AuditLogEntry[] = [
     coordinates: "19°13'10\"S 68°35'50\"W"
   }
 ];
+
+// Per-Module Backgrounds Persistence System
+const DATA_DIR = path.join(process.cwd(), "data");
+const MODULE_BG_FILE = path.join(DATA_DIR, "module-backgrounds.json");
+const BG_DIR = path.join(process.cwd(), "public", "backgrounds");
+
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+if (!fs.existsSync(BG_DIR)) {
+  fs.mkdirSync(BG_DIR, { recursive: true });
+}
+
+const DEFAULT_SERVER_MODULE_BACKGROUNDS: Record<string, any> = {
+  MOD_CEO: {
+    moduleId: "MOD_CEO",
+    moduleName: "3. Mando Estratégico (CEO-LCC)",
+    imageUrl: "/INTERFAZ.jpg",
+    opacity: 0.80,
+    blur: 0,
+    contrastOverlay: true,
+    fitMode: "cover",
+    updatedAt: new Date().toISOString(),
+    updatedBy: "SISTEMA_DOCTRINAL"
+  },
+  MOD_FUSION: {
+    moduleId: "MOD_FUSION",
+    moduleName: "2. Central de Fusión (CFI de Brigada)",
+    imageUrl: "/DASHBOARD 2.png",
+    opacity: 0.80,
+    blur: 0,
+    contrastOverlay: true,
+    fitMode: "cover",
+    updatedAt: new Date().toISOString(),
+    updatedBy: "SISTEMA_DOCTRINAL"
+  },
+  MOD_BUSQUEDA: {
+    moduleId: "MOD_BUSQUEDA",
+    moduleName: "1. Órganos de Búsqueda (S-2)",
+    imageUrl: "/DASHB 3.jpg",
+    opacity: 0.80,
+    blur: 0,
+    contrastOverlay: true,
+    fitMode: "cover",
+    updatedAt: new Date().toISOString(),
+    updatedBy: "SISTEMA_DOCTRINAL"
+  },
+  MOD_PATRULLAS: {
+    moduleId: "MOD_PATRULLAS",
+    moduleName: "4. Unidades de Terreno (Patrullas)",
+    imageUrl: "/DASHBOARD.jpg",
+    opacity: 0.80,
+    blur: 0,
+    contrastOverlay: true,
+    fitMode: "cover",
+    updatedAt: new Date().toISOString(),
+    updatedBy: "SISTEMA_DOCTRINAL"
+  },
+  MOD_P2P_MESH: {
+    moduleId: "MOD_P2P_MESH",
+    moduleName: "5. Malla Descentrada P2P (S-6)",
+    imageUrl: "/dashboard-room.svg",
+    opacity: 0.80,
+    blur: 0,
+    contrastOverlay: true,
+    fitMode: "cover",
+    updatedAt: new Date().toISOString(),
+    updatedBy: "SISTEMA_DOCTRINAL"
+  },
+  MOD_ARCHITECTURE: {
+    moduleId: "MOD_ARCHITECTURE",
+    moduleName: "6. Arquitectura de Sistemas (PII-LCC)",
+    imageUrl: "/interfaz-room.svg",
+    opacity: 0.80,
+    blur: 0,
+    contrastOverlay: true,
+    fitMode: "cover",
+    updatedAt: new Date().toISOString(),
+    updatedBy: "SISTEMA_DOCTRINAL"
+  },
+  MOD_CODE_VIEWER: {
+    moduleId: "MOD_CODE_VIEWER",
+    moduleName: "7. Terminal de Código y Auditoría",
+    imageUrl: "/INTERFAZ.jpg",
+    opacity: 0.80,
+    blur: 0,
+    contrastOverlay: true,
+    fitMode: "cover",
+    updatedAt: new Date().toISOString(),
+    updatedBy: "SISTEMA_DOCTRINAL"
+  }
+};
+
+let serverModuleBackgrounds: Record<string, any> = { ...DEFAULT_SERVER_MODULE_BACKGROUNDS };
+
+if (fs.existsSync(MODULE_BG_FILE)) {
+  try {
+    const loaded = JSON.parse(fs.readFileSync(MODULE_BG_FILE, "utf-8"));
+    serverModuleBackgrounds = { ...DEFAULT_SERVER_MODULE_BACKGROUNDS, ...loaded };
+  } catch (err) {
+    console.error("Error reading module-backgrounds.json:", err);
+  }
+}
+
+function saveModuleBackgroundsToDisk() {
+  try {
+    fs.writeFileSync(MODULE_BG_FILE, JSON.stringify(serverModuleBackgrounds, null, 2));
+  } catch (err) {
+    console.error("Error saving module-backgrounds.json:", err);
+  }
+}
 
 function sanitizeMediaUrl(mediaUrl?: string): string | undefined {
   if (!mediaUrl) return undefined;
@@ -93,7 +204,8 @@ wss.on("connection", (ws: WebSocket) => {
       actionableIntel: serverActionableIntel,
       activeOrders: serverActiveOrders,
       tacticalUnits: serverTacticalUnits,
-      auditLogs: serverAuditLogs
+      auditLogs: serverAuditLogs,
+      moduleBackgrounds: serverModuleBackgrounds
     }
   }));
 
@@ -205,6 +317,60 @@ wss.on("connection", (ws: WebSocket) => {
           break;
         }
 
+        case "ADD_TACTICAL_UNIT": {
+          const { unit, userId, role } = payload;
+          if (unit && !serverTacticalUnits.some(u => u.id === unit.id || u.name.toLowerCase() === unit.name.toLowerCase())) {
+            serverTacticalUnits = [...serverTacticalUnits, unit];
+            serverAuditLogs = [{
+              id: `log-unit-add-${Date.now()}`,
+              userId: userId || "S-2",
+              role: role || "ROL_BUSQUEDA",
+              action: `NUEVA PATRULLA DESPLEGADA: ${unit.name} (Cmdte: ${unit.commander || 'S-2'}) en ${unit.coordinates}. Módulo activo asignado.`,
+              timestamp: new Date().toISOString(),
+              coordinates: unit.coordinates
+            }, ...serverAuditLogs];
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "UPDATE_TACTICAL_UNIT": {
+          const { unitId, updates, userId, role } = payload;
+          if (unitId && updates) {
+            serverTacticalUnits = serverTacticalUnits.map(u => 
+              u.id === unitId ? { ...u, ...updates, lastReportTime: "Hace un momento" } : u
+            );
+            serverAuditLogs = [{
+              id: `log-unit-upd-${Date.now()}`,
+              userId: userId || "S-2",
+              role: role || "ROL_BUSQUEDA",
+              action: `DATOS ACTUALIZADOS DE PATRULLA: ${updates.name || unitId} (Estado: ${updates.status || 'Actualizado'}).`,
+              timestamp: new Date().toISOString(),
+              coordinates: updates.coordinates || "19°13'10\"S 68°35'50\"W"
+            }, ...serverAuditLogs];
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "DELETE_TACTICAL_UNIT": {
+          const { unitId, userId, role } = payload;
+          if (unitId) {
+            const toRemove = serverTacticalUnits.find(u => u.id === unitId);
+            serverTacticalUnits = serverTacticalUnits.filter(u => u.id !== unitId);
+            serverAuditLogs = [{
+              id: `log-unit-del-${Date.now()}`,
+              userId: userId || "S-2",
+              role: role || "ROL_BUSQUEDA",
+              action: `PATRULLA REPLEGADA: ${toRemove ? toRemove.name : unitId}. Módulo asignado archivado.`,
+              timestamp: new Date().toISOString(),
+              coordinates: toRemove ? toRemove.coordinates : "19°13'10\"S 68°35'50\"W"
+            }, ...serverAuditLogs];
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
         case "LOG_AUDIT_ACTION": {
           const { logEntry } = payload;
           if (!serverAuditLogs.some(l => l.id === logEntry.id)) {
@@ -243,7 +409,26 @@ wss.on("connection", (ws: WebSocket) => {
           break;
         }
 
-
+        case "UPDATE_MODULE_BACKGROUND": {
+          const { moduleId, config } = payload;
+          if (moduleId && config) {
+            serverModuleBackgrounds[moduleId] = {
+              ...serverModuleBackgrounds[moduleId],
+              ...config,
+              updatedAt: new Date().toISOString()
+            };
+            saveModuleBackgroundsToDisk();
+            broadcast({
+              type: "MODULE_BG_UPDATE",
+              payload: {
+                moduleId,
+                config: serverModuleBackgrounds[moduleId],
+                allConfigs: serverModuleBackgrounds
+              }
+            });
+          }
+          break;
+        }
 
         case "P2P_REGISTER": {
           const { userId, name, role, level } = payload;
@@ -307,6 +492,41 @@ wss.on("connection", (ws: WebSocket) => {
                 message
               }
             }));
+          }
+          break;
+        }
+
+        case "UPDATE_MODULE_BACKGROUND": {
+          const { config, imageBase64 } = payload || {};
+          if (config && config.moduleId) {
+            let finalUrl = config.imageUrl || serverModuleBackgrounds[config.moduleId]?.imageUrl || "/INTERFAZ.jpg";
+            if (imageBase64) {
+              try {
+                const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+                const buffer = Buffer.from(base64Data, "base64");
+                const fileName = `bg_${config.moduleId}.png`;
+                const publicPath = path.join(process.cwd(), "public", "backgrounds", fileName);
+                fs.writeFileSync(publicPath, buffer);
+                finalUrl = `/backgrounds/${fileName}?v=${Date.now()}`;
+              } catch (e) {
+                console.error("Error writing WS module bg file:", e);
+              }
+            }
+            serverModuleBackgrounds[config.moduleId] = {
+              ...serverModuleBackgrounds[config.moduleId],
+              ...config,
+              imageUrl: finalUrl,
+              updatedAt: new Date().toISOString()
+            };
+            saveModuleBackgroundsToDisk();
+            broadcast({
+              type: "MODULE_BG_UPDATE",
+              payload: {
+                moduleId: config.moduleId,
+                config: serverModuleBackgrounds[config.moduleId],
+                allConfigs: serverModuleBackgrounds
+              }
+            });
           }
           break;
         }
@@ -490,6 +710,150 @@ async function startServer() {
     }
   });
 
+  // Serve static per-module backgrounds
+  app.use("/backgrounds", express.static(path.join(process.cwd(), "public", "backgrounds")));
+
+  // Get all module background configurations
+  app.get("/api/module-backgrounds", (req, res) => {
+    res.json({ success: true, backgrounds: serverModuleBackgrounds });
+  });
+
+  // Upload or update background for a specific module
+  app.post("/api/module-backgrounds", (req, res) => {
+    const {
+      moduleId,
+      moduleName,
+      imageBase64,
+      imageUrl,
+      opacity,
+      blur,
+      contrastOverlay,
+      fitMode,
+      customFileName,
+      updatedBy
+    } = req.body || {};
+
+    if (!moduleId) {
+      return res.status(400).json({ error: "Missing moduleId parameter" });
+    }
+
+    let finalUrl = imageUrl || serverModuleBackgrounds[moduleId]?.imageUrl || "/INTERFAZ.jpg";
+
+    if (imageBase64) {
+      try {
+        const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+        const buffer = Buffer.from(base64Data, "base64");
+        const fileName = `bg_${moduleId}.png`;
+        const publicPath = path.join(process.cwd(), "public", "backgrounds", fileName);
+        fs.writeFileSync(publicPath, buffer);
+
+        const distBgDir = path.join(process.cwd(), "dist", "backgrounds");
+        if (fs.existsSync(path.join(process.cwd(), "dist"))) {
+          if (!fs.existsSync(distBgDir)) {
+            fs.mkdirSync(distBgDir, { recursive: true });
+          }
+          fs.writeFileSync(path.join(distBgDir, fileName), buffer);
+        }
+        finalUrl = `/backgrounds/${fileName}?v=${Date.now()}`;
+        console.log(`[Module Background] Saved ${fileName} for ${moduleId} (${buffer.length} bytes).`);
+      } catch (err) {
+        console.error("Error writing module background file:", err);
+      }
+    }
+
+    const updatedConfig = {
+      ...(serverModuleBackgrounds[moduleId] || {}),
+      moduleId,
+      moduleName: moduleName || serverModuleBackgrounds[moduleId]?.moduleName || moduleId,
+      imageUrl: finalUrl,
+      opacity: opacity !== undefined ? opacity : 0.80,
+      blur: blur !== undefined ? blur : 0,
+      contrastOverlay: contrastOverlay !== undefined ? contrastOverlay : true,
+      fitMode: fitMode || "cover",
+      customFileName: customFileName || (imageBase64 ? "archivo_cargado.png" : undefined),
+      updatedAt: new Date().toISOString(),
+      updatedBy: updatedBy || "OPERADOR_CENTRAL"
+    };
+
+    serverModuleBackgrounds[moduleId] = updatedConfig;
+    saveModuleBackgroundsToDisk();
+
+    // Broadcast to all connected clients (PC, Celular, Tablets)
+    broadcast({
+      type: "MODULE_BG_UPDATE",
+      payload: {
+        moduleId,
+        config: updatedConfig,
+        allConfigs: serverModuleBackgrounds
+      }
+    });
+
+    res.json({ success: true, config: updatedConfig });
+  });
+
+  // Batch import module backgrounds package
+  app.post("/api/module-backgrounds/import", (req, res) => {
+    const { backgrounds } = req.body || {};
+    if (!backgrounds || typeof backgrounds !== "object") {
+      return res.status(400).json({ error: "Invalid backgrounds object" });
+    }
+
+    Object.keys(backgrounds).forEach(modId => {
+      const item = backgrounds[modId];
+      if (item && item.moduleId) {
+        if (item.dataUrl) {
+          try {
+            const base64Data = item.dataUrl.replace(/^data:image\/\w+;base64,/, "");
+            const buffer = Buffer.from(base64Data, "base64");
+            const fileName = `bg_${modId}.png`;
+            const publicPath = path.join(process.cwd(), "public", "backgrounds", fileName);
+            fs.writeFileSync(publicPath, buffer);
+            item.imageUrl = `/backgrounds/${fileName}?v=${Date.now()}`;
+          } catch (e) {
+            console.error("Error writing imported module bg file:", e);
+          }
+        }
+        serverModuleBackgrounds[modId] = {
+          ...serverModuleBackgrounds[modId],
+          ...item
+        };
+      }
+    });
+
+    saveModuleBackgroundsToDisk();
+
+    broadcast({
+      type: "MODULE_BG_UPDATE",
+      payload: {
+        allConfigs: serverModuleBackgrounds
+      }
+    });
+
+    res.json({ success: true, backgrounds: serverModuleBackgrounds });
+  });
+
+  // Reset module background to doctrinal default
+  app.delete("/api/module-backgrounds/:moduleId", (req, res) => {
+    const { moduleId } = req.params;
+    if (DEFAULT_SERVER_MODULE_BACKGROUNDS[moduleId]) {
+      serverModuleBackgrounds[moduleId] = {
+        ...DEFAULT_SERVER_MODULE_BACKGROUNDS[moduleId],
+        updatedAt: new Date().toISOString(),
+        updatedBy: "RESET_DOCTRINAL"
+      };
+      saveModuleBackgroundsToDisk();
+      broadcast({
+        type: "MODULE_BG_UPDATE",
+        payload: {
+          moduleId,
+          config: serverModuleBackgrounds[moduleId],
+          allConfigs: serverModuleBackgrounds
+        }
+      });
+    }
+    res.json({ success: true, config: serverModuleBackgrounds[moduleId] });
+  });
+
   app.get("/emblem-bg.png", (req, res) => {
     const publicPng = path.join(process.cwd(), "public", "emblem-bg.png");
     const distPng = path.join(process.cwd(), "dist", "emblem-bg.png");
@@ -650,6 +1014,60 @@ async function startServer() {
             break;
           }
 
+          case "ADD_TACTICAL_UNIT": {
+            const { unit, userId, role } = payload;
+            if (unit && !serverTacticalUnits.some(u => u.id === unit.id || u.name.toLowerCase() === unit.name.toLowerCase())) {
+              serverTacticalUnits = [...serverTacticalUnits, unit];
+              serverAuditLogs = [{
+                id: `log-unit-add-${Date.now()}`,
+                userId: userId || "S-2",
+                role: role || "ROL_BUSQUEDA",
+                action: `NUEVA PATRULLA DESPLEGADA: ${unit.name} (Cmdte: ${unit.commander || 'S-2'}) en ${unit.coordinates}. Módulo activo asignado.`,
+                timestamp: new Date().toISOString(),
+                coordinates: unit.coordinates
+              }, ...serverAuditLogs];
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "UPDATE_TACTICAL_UNIT": {
+            const { unitId, updates, userId, role } = payload;
+            if (unitId && updates) {
+              serverTacticalUnits = serverTacticalUnits.map(u => 
+                u.id === unitId ? { ...u, ...updates, lastReportTime: "Hace un momento" } : u
+              );
+              serverAuditLogs = [{
+                id: `log-unit-upd-${Date.now()}`,
+                userId: userId || "S-2",
+                role: role || "ROL_BUSQUEDA",
+                action: `DATOS ACTUALIZADOS DE PATRULLA: ${updates.name || unitId} (Estado: ${updates.status || 'Actualizado'}).`,
+                timestamp: new Date().toISOString(),
+                coordinates: updates.coordinates || "19°13'10\"S 68°35'50\"W"
+              }, ...serverAuditLogs];
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "DELETE_TACTICAL_UNIT": {
+            const { unitId, userId, role } = payload;
+            if (unitId) {
+              const toRemove = serverTacticalUnits.find(u => u.id === unitId);
+              serverTacticalUnits = serverTacticalUnits.filter(u => u.id !== unitId);
+              serverAuditLogs = [{
+                id: `log-unit-del-${Date.now()}`,
+                userId: userId || "S-2",
+                role: role || "ROL_BUSQUEDA",
+                action: `PATRULLA REPLEGADA: ${toRemove ? toRemove.name : unitId}. Módulo asignado archivado.`,
+                timestamp: new Date().toISOString(),
+                coordinates: toRemove ? toRemove.coordinates : "19°13'10\"S 68°35'50\"W"
+              }, ...serverAuditLogs];
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
           case "LOG_AUDIT_ACTION": {
             const { logEntry } = payload;
             if (!serverAuditLogs.some(l => l.id === logEntry.id)) {
@@ -691,7 +1109,8 @@ async function startServer() {
           actionableIntel: serverActionableIntel,
           activeOrders: serverActiveOrders,
           tacticalUnits: serverTacticalUnits,
-          auditLogs: serverAuditLogs
+          auditLogs: serverAuditLogs,
+          moduleBackgrounds: serverModuleBackgrounds
         }
       });
     }
@@ -703,7 +1122,8 @@ async function startServer() {
       actionableIntel: serverActionableIntel,
       activeOrders: serverActiveOrders,
       tacticalUnits: serverTacticalUnits,
-      auditLogs: serverAuditLogs
+      auditLogs: serverAuditLogs,
+      moduleBackgrounds: serverModuleBackgrounds
     });
   });
 
@@ -737,8 +1157,8 @@ async function startServer() {
   app.get("/api/download-mobile", (req, res) => {
     const tempFilename = `pii_lcc_movil_${Date.now()}.tar.gz`;
     const archivePath = path.join(process.cwd(), tempFilename);
-    // Bundle the app along with the special instructions file specifically for mobile devices and tablets
-    const cmd = `tar -czf "${archivePath}" --exclude=node_modules --exclude=dist --exclude=.git --exclude=.cache --exclude=.npm --exclude=*.tar.gz INSTRUCCIONES_MOVIL.html public src index.html package.json vite.config.ts`;
+    // Bundle the app along with the special instructions file specifically for mobile devices and tablets, including persisted backgrounds data
+    const cmd = `tar -czf "${archivePath}" --exclude=node_modules --exclude=dist --exclude=.git --exclude=.cache --exclude=.npm --exclude=*.tar.gz INSTRUCCIONES_MOVIL.html public data src index.html package.json vite.config.ts`;
 
     exec(cmd, { cwd: process.cwd() }, (error, stdout, stderr) => {
       if (error) {
@@ -801,22 +1221,14 @@ async function startServer() {
     }
   });
 
-  // Explicitly serve self-destructing service worker with no-cache headers
-  app.get("/sw.js", (req, res) => {
-    res.setHeader("Content-Type", "application/javascript");
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
-    res.send(`
-      self.addEventListener('install', (e) => self.skipWaiting());
-      self.addEventListener('activate', (e) => {
-        e.waitUntil(
-          caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
-            .then(() => self.clients.claim())
-            .then(() => self.registration.unregister())
-        );
-      });
-    `);
+  // PWA Service Worker handler (serves real SW if available in dist)
+  app.get("/sw.js", (req, res, next) => {
+    const distSw = path.join(process.cwd(), "dist", "sw.js");
+    if (fs.existsSync(distSw)) {
+      res.setHeader("Content-Type", "application/javascript");
+      return res.sendFile(distSw);
+    }
+    next();
   });
 
   const distPath = path.join(process.cwd(), "dist");

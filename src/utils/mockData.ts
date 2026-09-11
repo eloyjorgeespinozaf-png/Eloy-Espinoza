@@ -172,7 +172,15 @@ export const initialTacticalUnits: TacticalUnit[] = [
     status: 'PATROLLING',
     coordinates: '19°13\'10"S 68°35\'50"W',
     personnel: 8,
-    lastReportTime: 'Hace 5 minutos'
+    lastReportTime: 'Hace 5 minutos',
+    commander: 'CB1. F. Valenzuela',
+    pin: '1234',
+    frequency: '142.850 MHz (VHF-01 Encriptado)',
+    sector: 'Salar de Coipasa - Hito XIX',
+    equipment: ['Camioneta 4x4 Táctica', 'VANT-01 Cóndor', 'Visor Térmico FLIR', 'Radio VHF Harris'],
+    battery: 94,
+    fuel: 82,
+    ammo: 100
   },
   {
     id: 'unit-2',
@@ -180,7 +188,15 @@ export const initialTacticalUnits: TacticalUnit[] = [
     status: 'STATIONARY',
     coordinates: '20°06\'15"S 68°30\'05"W',
     personnel: 12,
-    lastReportTime: 'Hace 12 minutos'
+    lastReportTime: 'Hace 12 minutos',
+    commander: 'SGTO1. M. Quispe',
+    pin: '2244',
+    frequency: '143.100 MHz (VHF-02 Encriptado)',
+    sector: 'Paso Pisiga - Hito XXIII',
+    equipment: ['Camioneta Táctica Interceptora', 'Visor Nocturno Infrarrojo', 'Rifle de Precisión', 'Kit Brechero'],
+    battery: 88,
+    fuel: 75,
+    ammo: 95
   },
   {
     id: 'unit-3',
@@ -188,7 +204,15 @@ export const initialTacticalUnits: TacticalUnit[] = [
     status: 'INTERCEPTING',
     coordinates: '20°05\'44"S 68°29\'10"W',
     personnel: 10,
-    lastReportTime: 'Hace 1 minuto'
+    lastReportTime: 'Hace 1 minuto',
+    commander: 'SOF. R. Mamani',
+    pin: '3310',
+    frequency: '141.950 MHz (VHF-03 Encriptado)',
+    sector: 'Ruta Colchane - Quebrada Norte',
+    equipment: ['Vehículo Blindado Ligero', 'Sensor Radar Terrestre', 'Dron VANT-02', 'Lanzador Fumígenos'],
+    battery: 98,
+    fuel: 90,
+    ammo: 100
   }
 ];
 

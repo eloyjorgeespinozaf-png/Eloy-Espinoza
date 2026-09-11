@@ -1,0 +1,113 @@
+/**
+ * ModuleBackgroundLayer.tsx
+ * Renders the background strictly bound to the active tactical module.
+ * Guarantees that each assigned module has its own independent background,
+ * isolated from other modules, with 80% tactical contrast and full cross-device fidelity.
+ */
+
+import React, { useState, useEffect } from 'react';
+import { TacticalModuleId, ModuleBackgroundConfig } from '../types';
+import { TACTICAL_MODULES_LIST } from '../services/ModuleBackgroundService';
+import { Sliders, Image as ImageIcon } from 'lucide-react';
+
+interface ModuleBackgroundLayerProps {
+  activeModuleId: TacticalModuleId;
+  config?: ModuleBackgroundConfig;
+  onOpenManager: () => void;
+}
+
+export const ModuleBackgroundLayer: React.FC<ModuleBackgroundLayerProps> = ({
+  activeModuleId,
+  config,
+  onOpenManager
+}) => {
+  const moduleMeta = TACTICAL_MODULES_LIST.find(m => m.id === activeModuleId);
+  const fallbackUrl = moduleMeta?.defaultPresetImage || '/INTERFAZ.jpg';
+
+  const [activeSrc, setActiveSrc] = useState<string>(() => {
+    return config?.dataUrl || config?.imageUrl || fallbackUrl;
+  });
+
+  // Smoothly switch background when active module or config changes
+  useEffect(() => {
+    const nextSrc = config?.dataUrl || config?.imageUrl || fallbackUrl;
+    setActiveSrc(nextSrc);
+  }, [config?.dataUrl, config?.imageUrl, fallbackUrl, activeModuleId]);
+
+  const opacity = config?.opacity !== undefined ? config.opacity : 0.80;
+  const blur = config?.blur || 0;
+  const fitMode = config?.fitMode || 'cover';
+  const contrastOverlay = config?.contrastOverlay !== false;
+
+  return (
+    <div 
+      className="fixed inset-0 pointer-events-none z-0 overflow-hidden select-none"
+      aria-hidden="true"
+      id={`module-bg-layer-${activeModuleId}`}
+    >
+      {/* 1. Dynamic Per-Module Background Image with Smooth Fade */}
+      <img
+        key={`${activeModuleId}-${activeSrc}`}
+        src={activeSrc}
+        alt={`Fondo Táctico Asignado - ${moduleMeta?.name || activeModuleId}`}
+        referrerPolicy="no-referrer"
+        onError={() => {
+          if (activeSrc !== fallbackUrl) {
+            setActiveSrc(fallbackUrl);
+          }
+        }}
+        className={`w-full h-full transition-all duration-700 ease-out ${
+          fitMode === 'contain' ? 'object-contain object-center' : 'object-cover object-center'
+        }`}
+        style={{
+          opacity,
+          filter: blur > 0 ? `blur(${blur}px)` : 'none'
+        }}
+      />
+
+      {/* 2. Tactical Contrast Layer - Harmonizes with Dark Military UI */}
+      {contrastOverlay && (
+        <>
+          {/* Radial Vignette */}
+          <div 
+            className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-black/35"
+            style={{ mixBlendMode: 'multiply' }}
+          />
+          {/* Subtle Grid / Scanline overlay for tactical military realism */}
+          <div 
+            className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-transparent via-black/25 to-black/75"
+          />
+          {/* Ultra-subtle top & bottom border vignette */}
+          <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/85 via-black/40 to-transparent" />
+          <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/95 via-black/60 to-transparent" />
+        </>
+      )}
+
+      {/* 3. Subtle Module Watermark Indicator Badge (Bottom Left) */}
+      <div className="absolute bottom-3 left-4 pointer-events-auto z-10 hidden sm:flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onOpenManager}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-black/70 hover:bg-black/90 border border-zinc-800/80 hover:border-zinc-700 text-[10px] font-mono text-zinc-400 hover:text-zinc-200 backdrop-blur-md transition-all shadow-lg cursor-pointer group"
+          title={`Fondo asignado exclusivamente a ${moduleMeta?.name}. Clic para cambiar.`}
+        >
+          <span 
+            className="w-2 h-2 rounded-full animate-pulse" 
+            style={{ backgroundColor: moduleMeta?.color || '#3b82f6' }}
+          />
+          <span className="font-bold text-zinc-300 group-hover:text-white">
+            FONDO ACTIVO:
+          </span>
+          <span className="text-zinc-400 max-w-[170px] truncate">
+            {moduleMeta?.badge || moduleMeta?.name}
+          </span>
+          <span className="text-zinc-600">|</span>
+          <span className="text-[9px] text-zinc-500 font-normal">
+            {Math.round(opacity * 100)}% opac.
+          </span>
+          <Sliders className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300 ml-0.5" />
+        </button>
+      </div>
+    </div>
+  );
+};
