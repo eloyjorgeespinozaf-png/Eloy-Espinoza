@@ -8,12 +8,15 @@ import { AutomatedOrder, MilitaryRole, RawAlert, TacticalUnit, Clan, ActionableI
 import { 
   AlertCircle, Shield, Navigation, Send, Radio, Check, Volume2, VolumeX, 
   Eye, Info, Camera, Upload, RefreshCw, Trash2, Video, VideoOff, Crosshair,
-  Lock, Unlock, Key, Plus, Sliders, Battery, Fuel, AlertTriangle, X
+  Lock, Unlock, Key, Plus, Sliders, Battery, Fuel, AlertTriangle, X,
+  MapPin, Clock, CheckCircle2, ChevronRight, FileText, Layers, Activity,
+  Globe
 } from 'lucide-react';
 import { playSyntheticBeep } from '../utils/audio';
 import { PatrolAuthModal } from './PatrolAuthModal';
 import { PatrolEditorModal } from './PatrolEditorModal';
 import { PatrolOperationalDashboard } from './PatrolOperationalDashboard';
+import GoogleEarthPatrolModal from './GoogleEarthPatrolModal';
 
 interface TacticalViewProps {
   activeOrders?: AutomatedOrder[];
@@ -89,7 +92,9 @@ export default function TacticalView({
   const [editorTargetPatrol, setEditorTargetPatrol] = useState<TacticalUnit | null>(null);
 
   const [sosConfirmModal, setSosConfirmModal] = useState<boolean>(false);
-  const [activePatrolTab, setActivePatrolTab] = useState<'REPORT' | 'ORDERS'>('REPORT');
+  const [activePatrolTab, setActivePatrolTab] = useState<'REPORT' | 'ORDERS' | 'GPS' | 'DASHBOARD'>('REPORT');
+  const [isGoogleEarthModalOpen, setIsGoogleEarthModalOpen] = useState<boolean>(false);
+  const [selectedPatrolForEarth, setSelectedPatrolForEarth] = useState<TacticalUnit | null>(null);
 
   const [inlinePin, setInlinePin] = useState<string>('');
   const [inlinePinError, setInlinePinError] = useState<string | null>(null);
@@ -110,6 +115,9 @@ export default function TacticalView({
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const [isSimulatingMovement, setIsSimulatingMovement] = useState<boolean>(false);
   const [trackingLog, setTrackingLog] = useState<string[]>([]);
+  const [isLocatingDevice, setIsLocatingDevice] = useState<boolean>(false);
+  const [liveLocationAcquired, setLiveLocationAcquired] = useState<boolean>(false);
+  const [isRealtimeAutoSync, setIsRealtimeAutoSync] = useState<boolean>(true);
   
   const watchIdRef = React.useRef<number | null>(null);
   const simulationIntervalRef = React.useRef<any>(null);
@@ -302,6 +310,62 @@ export default function TacticalView({
       }
     };
   }, [isSimulatingCamera, customLat, customLon]);
+
+  // Captura inmediata de la ubicación física del dispositivo mediante Geolocation API
+  const acquireCurrentLocationOnce = () => {
+    if (!navigator.geolocation) {
+      setSuccessBanner("SISTEMA GNSS: Su terminal o navegador no soporta geolocalización física.");
+      return;
+    }
+    setIsLocatingDevice(true);
+    playTacticalBeep(850, 0.08);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        const dmsLat = convertToDMS(latitude, true);
+        const dmsLon = convertToDMS(longitude, false);
+        const formatted = `${dmsLat} ${dmsLon}`;
+
+        setCustomLat(dmsLat);
+        setCustomLon(dmsLon);
+        setCoordinates(formatted);
+        setGpsAccuracy(accuracy);
+        setIsLocatingDevice(false);
+        setLiveLocationAcquired(true);
+
+        // Transmisión inmediata de coordenadas en vivo a Central de Fusión (CFI) y Mando LCC
+        onUpdateUnitCoordinates(selectedPatrol, formatted);
+
+        playTacticalBeep(1200, 0.2);
+        setTrackingLog(prev => [
+          `[${new Date().toLocaleTimeString()}] GPS EN VIVO CAPTURADO: ${formatted} (±${Math.round(accuracy)}m). Sincronizado con CFI y Mando.`,
+          ...prev
+        ].slice(0, 15));
+
+        setSuccessBanner(`UBICACIÓN REAL TRANSMITIDA A CFI Y MANDO: ${selectedPatrol} fijada en ${formatted} (Precisión: ±${Math.round(accuracy)}m).`);
+        setTimeout(() => setSuccessBanner(null), 5000);
+      },
+      (err) => {
+        setIsLocatingDevice(false);
+        let errorMsg = "Señal satelital no disponible.";
+        if (err.code === err.PERMISSION_DENIED) {
+          errorMsg = "Permiso de geolocalización denegado en el navegador.";
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          errorMsg = "Posición física no disponible.";
+        } else if (err.code === err.TIMEOUT) {
+          errorMsg = "Tiempo de respuesta GPS agotado.";
+        }
+        setSuccessBanner(`ERROR DE GEOLOCALIZACIÓN: ${errorMsg}`);
+        setTimeout(() => setSuccessBanner(null), 5000);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      }
+    );
+  };
 
   const startRealTimeGPSTracking = () => {
     if (isSimulatingMovement) {
@@ -700,6 +764,8 @@ export default function TacticalView({
     };
 
     onSendFieldReport(newReport);
+    // Sincronización en tiempo real: actualiza la posición de la patrulla con las coordenadas de la detección
+    onUpdateUnitCoordinates(selectedPatrol, coordinates);
     playTacticalBeep(980, 0.25);
     setReportDetails('');
     setCustomPhoto(null);
@@ -1068,7 +1134,20 @@ export default function TacticalView({
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedPatrolForEarth(selectedUnitDetails);
+                  setIsGoogleEarthModalOpen(true);
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-[#0a1628] hover:bg-[#112440] text-cyan-300 hover:text-white border border-cyan-500/50 flex items-center gap-1.5 text-xs transition-colors cursor-pointer font-bold shadow-[0_0_10px_rgba(6,182,212,0.25)]"
+                title="Visualizar ubicación actual de esta patrulla en Google Earth 3D en tiempo real"
+              >
+                <Globe className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                <span>Google Earth 3D</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => handleOpenEditPatrol(selectedUnitDetails)}
@@ -1118,127 +1197,723 @@ export default function TacticalView({
         )}
       </div>
 
-      {/* LOCKED PATROL CONSOLE SCREEN */}
-      {!isCurrentPatrolUnlocked && selectedUnitDetails && (
-        <div className="bg-[#0a0a0a] border border-amber-500/40 rounded-xl p-8 shadow-2xl text-center space-y-6 animate-fade-in relative overflow-hidden">
-          <div className="absolute inset-0 pointer-events-none opacity-5 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-amber-500 via-transparent to-transparent" />
-          
-          <div className="w-16 h-16 rounded-2xl bg-amber-950/50 border border-amber-500/50 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/20">
-            <Lock className="w-8 h-8 text-amber-400 animate-pulse" />
-          </div>
-
-          <div className="max-w-md mx-auto space-y-2">
-            <div className="inline-flex items-center gap-2 text-[10px] font-mono uppercase px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400">
-              <Shield className="w-3 h-3" />
-              Módulo Asignado Restringido
-            </div>
-            <h3 className="text-xl font-mono font-bold text-white tracking-wider">
-              CONSOLA BLOQUEADA: {selectedUnitDetails.name.toUpperCase()}
-            </h3>
-            <p className="text-xs font-sans text-[#888] leading-relaxed">
-              Cada patrulla asignada cuenta con su propio entorno de comando táctico protegido con contraseña. Ingrese el PIN de seguridad o clave autorizada para activar la ingesta de sensores, telemetría y órdenes operacionales.
-            </p>
-          </div>
-
-          {/* Quick Patrol Details Card */}
-          <div className="max-w-md mx-auto grid grid-cols-3 gap-2 text-left bg-[#111] p-3 rounded-lg border border-[#222] text-xs font-mono">
-            <div>
-              <span className="text-[10px] text-[#666] block">Comandante:</span>
-              <span className="text-white font-bold truncate block">{selectedUnitDetails.commander || 'Cap. S-2'}</span>
-            </div>
-            <div>
-              <span className="text-[10px] text-[#666] block">Canal VHF:</span>
-              <span className="text-[#3b82f6] font-bold block">{selectedUnitDetails.frequency || '142.850 MHz'}</span>
-            </div>
-            <div>
-              <span className="text-[10px] text-[#666] block">Sector Asignado:</span>
-              <span className="text-[#10b981] font-bold truncate block">{selectedUnitDetails.sector || 'Frontera'}</span>
-            </div>
-          </div>
-
-          {/* Inline PIN Unlock Form */}
-          <form onSubmit={handleInlineUnlock} className="max-w-xs mx-auto space-y-3">
-            <div>
-              <input
-                type="password"
-                maxLength={8}
-                value={inlinePin}
-                onChange={(e) => {
-                  setInlinePin(e.target.value);
-                  setInlinePinError(null);
-                }}
-                placeholder="INGRESE PIN (ej. 1234)"
-                className="w-full bg-[#111] border border-[#333] focus:border-[#10b981] rounded-lg px-4 py-2.5 text-center font-mono tracking-widest text-lg text-white focus:outline-none placeholder:text-xs placeholder:tracking-normal placeholder:text-[#555]"
-                autoFocus
-              />
-              {inlinePinError && (
-                <p className="text-[11px] font-mono text-[#f43f5e] mt-1.5 animate-pulse font-bold">
-                  {inlinePinError}
-                </p>
-              )}
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                className="flex-1 bg-[#10b981] hover:bg-[#10b981]/90 text-black font-mono font-bold text-xs py-2.5 rounded-lg flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 cursor-pointer"
-              >
-                <Key className="w-3.5 h-3.5" />
-                <span>Desbloquear Módulo</span>
-              </button>
-            </div>
-          </form>
-
-          {/* Secondary Actions */}
-          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+      {/* SELECTED PATROL OPERATIONAL WORKSPACE */}
+      {selectedUnitDetails && (
+        <div className="space-y-4">
+          {/* Patrol View Navigation Tabs */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-[#1f1f1f] pb-2">
             <button
               type="button"
               onClick={() => {
-                setAuthTargetPatrol(selectedUnitDetails);
-                setAuthModalOpen(true);
+                setActivePatrolTab('REPORT');
+                playTacticalBeep(880, 0.08);
               }}
-              className="text-xs font-mono text-amber-400 hover:text-amber-300 underline underline-offset-4 cursor-pointer flex items-center gap-1.5"
+              className={`px-3.5 py-2 rounded-lg text-xs font-mono font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                activePatrolTab === 'REPORT'
+                  ? 'bg-[#10b981]/20 text-[#10b981] border border-[#10b981]/50 shadow-md shadow-[#10b981]/10'
+                  : 'bg-[#111] text-[#888] hover:text-white border border-[#222]'
+              }`}
             >
-              <Key className="w-3 h-3" />
-              <span>Abrir Teclado Virtual Numérico Completo</span>
+              <Radio className="w-3.5 h-3.5 text-[#10b981]" />
+              <span>1. Ingesta de Sensores S-2</span>
             </button>
-
-            <span className="text-[#444]">|</span>
 
             <button
               type="button"
-              onClick={() => handleOpenEditPatrol(selectedUnitDetails)}
-              className="text-xs font-mono text-[#888] hover:text-white cursor-pointer flex items-center gap-1.5"
+              onClick={() => {
+                setActivePatrolTab('ORDERS');
+                playTacticalBeep(880, 0.08);
+              }}
+              className={`px-3.5 py-2 rounded-lg text-xs font-mono font-bold flex items-center gap-2 transition-all cursor-pointer relative ${
+                activePatrolTab === 'ORDERS'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 shadow-md shadow-emerald-500/10'
+                  : 'bg-[#111] text-[#888] hover:text-white border border-[#222]'
+              }`}
             >
-              <Sliders className="w-3 h-3 text-[#3b82f6]" />
-              <span>Editar Datos / Reasignar Clave</span>
+              <Navigation className="w-3.5 h-3.5 text-emerald-400" />
+              <span>2. Órdenes Asignadas (OOA)</span>
+              {patrolOrders.length > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-[#f43f5e] text-white font-bold ml-1">
+                  {patrolOrders.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActivePatrolTab('GPS');
+                playTacticalBeep(880, 0.08);
+              }}
+              className={`px-3.5 py-2 rounded-lg text-xs font-mono font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                activePatrolTab === 'GPS'
+                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/50 shadow-md shadow-blue-500/10'
+                  : 'bg-[#111] text-[#888] hover:text-white border border-[#222]'
+              }`}
+            >
+              <MapPin className="w-3.5 h-3.5 text-blue-400" />
+              <span>3. Telemetría GPS Satelital</span>
+              {(isTrackingGPS || isSimulatingMovement) && (
+                <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping ml-1" />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActivePatrolTab('DASHBOARD');
+                playTacticalBeep(880, 0.08);
+              }}
+              className={`px-3.5 py-2 rounded-lg text-xs font-mono font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                activePatrolTab === 'DASHBOARD'
+                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50 shadow-md shadow-purple-500/10'
+                  : 'bg-[#111] text-[#888] hover:text-white border border-[#222]'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 text-purple-400" />
+              <span>4. Consola de Fusión / Expedientes</span>
             </button>
           </div>
 
-          <div className="text-[10px] font-mono text-[#555]">
-            Doctrina Militar: PIN predeterminado de demostración para nuevas patrullas: <span className="text-[#888] font-bold">{selectedUnitDetails.pin || '1234'}</span>
-          </div>
-        </div>
-      )}
+          {/* TAB 1: S-2 SENSOR CAPTURE AND FIELD DISPATCH */}
+          {activePatrolTab === 'REPORT' && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 animate-fade-in">
+              {/* Left Column: Field Sensor Report Form */}
+              <div className="lg:col-span-7 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg space-y-4">
+                <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3">
+                  <div className="flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-[#10b981]" />
+                    <h4 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                      Captación de Sensores S-2 // Despacho a CFI
+                    </h4>
+                  </div>
+                  <span className="text-[10px] font-mono text-[#777] bg-[#111] px-2 py-0.5 rounded border border-[#222]">
+                    Operador: {selectedPatrol}
+                  </span>
+                </div>
 
-      {isCurrentPatrolUnlocked && selectedUnitDetails && (
-        <PatrolOperationalDashboard
-          patrol={selectedUnitDetails}
-          rawAlerts={rawAlerts}
-          clans={clans}
-          actionableIntel={actionableIntel}
-          expedientes={expedientes}
-          activeOrders={activeOrders}
-          onLockPatrol={handleLockPatrol}
-          onOpenEditPatrol={handleOpenEditPatrol}
-          onTriggerSOS={() => setSosConfirmModal(true)}
-          onAddExpediente={onAddExpediente}
-          onPromoteToIntel={onPromoteToIntel}
-          onUpdateAlertStatus={onUpdateAlertStatus}
-          onConfirmOrder={onConfirmOrder}
-          onSendFieldReport={onSendFieldReport}
-          onUpdateUnitCoordinates={onUpdateUnitCoordinates}
-        />
+                <form onSubmit={handleSendReport} className="space-y-4 text-xs font-mono">
+                  {/* Intelligence Source Type (IMINT / HUMINT / SIGINT) */}
+                  <div>
+                    <label className="text-[10px] text-[#888] uppercase block mb-1.5 font-bold">
+                      Tipo de Fuente de Inteligencia:
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['IMINT', 'HUMINT', 'SIGINT'] as const).map(type => {
+                        const isSelected = reportType === type;
+                        return (
+                          <button
+                            key={type}
+                            type="button"
+                            onClick={() => {
+                              setReportType(type);
+                              playTacticalBeep(700, 0.05);
+                            }}
+                            className={`py-2 px-2.5 rounded-lg border font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                              isSelected
+                                ? type === 'IMINT'
+                                  ? 'bg-blue-500/20 border-blue-500 text-blue-400 shadow-sm'
+                                  : type === 'HUMINT'
+                                  ? 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-sm'
+                                  : 'bg-purple-500/20 border-purple-500 text-purple-400 shadow-sm'
+                                : 'bg-[#111] border-[#222] text-[#777] hover:border-[#333]'
+                            }`}
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>{type}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Acquisition Sensor Dropdown */}
+                  <div>
+                    <label className="text-[10px] text-[#888] uppercase block mb-1.5 font-bold">
+                      Sensor / Unidad de Captación:
+                    </label>
+                    <select
+                      value={sensorId}
+                      onChange={(e) => setSensorId(e.target.value)}
+                      className="w-full bg-[#111] border border-[#222] focus:border-[#10b981] rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none"
+                    >
+                      <option value="VANT-01 (Cóndor - Dron Óptico)">VANT-01 (Cóndor - Dron Óptico)</option>
+                      <option value="VANT-02 (Halcón - Reconocimiento Térmico)">VANT-02 (Halcón - Reconocimiento Térmico)</option>
+                      <option value="Sensor Terrestre Acústico S-03">Sensor Terrestre Acústico S-03</option>
+                      <option value="Visor Nocturno AN/PVS-14 (Patrulla)">Visor Nocturno AN/PVS-14 (Patrulla)</option>
+                      <option value="Cámara Térmica FLIR Recon V">Cámara Térmica FLIR Recon V</option>
+                      <option value="Binoculares Telémetro Vector 21">Binoculares Telémetro Vector 21</option>
+                      <option value="Receptor SIGINT Portátil Harris">Receptor SIGINT Portátil Harris</option>
+                    </select>
+                  </div>
+
+                  {/* Coordinates Field with Direct Sync & Real-Time GNSS */}
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-1 mb-1">
+                      <label className="text-[10px] text-[#888] uppercase font-bold flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-[#10b981]" />
+                        <span>Coordenadas Tácticas de Detección (DMS):</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        {gpsAccuracy && (
+                          <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/30 font-bold">
+                            ±{Math.round(gpsAccuracy)}m GNSS
+                          </span>
+                        )}
+                        <span className="text-[9px] font-mono text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/30">
+                          ENLACE CFI ACTIVO
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={coordinates}
+                        onChange={(e) => setCoordinates(e.target.value)}
+                        placeholder='19°13&apos;10"S 68°35&apos;50"W'
+                        className="flex-1 bg-[#111] border border-[#222] focus:border-[#10b981] rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={acquireCurrentLocationOnce}
+                        disabled={isLocatingDevice}
+                        className={`px-3 py-2 rounded-lg font-mono text-xs flex items-center gap-1.5 font-bold transition-all shadow-md active:scale-95 cursor-pointer whitespace-nowrap ${
+                          isLocatingDevice
+                            ? 'bg-emerald-800 text-emerald-200 animate-pulse'
+                            : 'bg-emerald-600 hover:bg-emerald-500 text-black'
+                        }`}
+                        title="Obtiene la posición geográfica real del dispositivo y la sincroniza con el CFI y Mando"
+                      >
+                        <Navigation className={`w-3.5 h-3.5 ${isLocatingDevice ? 'animate-spin' : ''}`} />
+                        <span>{isLocatingDevice ? 'Fijando GPS...' : 'GPS en Vivo'}</span>
+                      </button>
+                    </div>
+
+                    {/* Quick tactical telemetry actions */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[#1a2333]/60 text-[10px] font-mono">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const liveCoords = `${customLat} ${customLon}`;
+                            setCoordinates(liveCoords);
+                            playTacticalBeep(900, 0.05);
+                          }}
+                          className="text-[#10b981] hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <RefreshCw className="w-2.5 h-2.5" />
+                          <span>Copiar GPS Terminal</span>
+                        </button>
+                        <span className="text-[#334155]">|</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onUpdateUnitCoordinates(selectedPatrol, coordinates);
+                            playTacticalBeep(1100, 0.15);
+                            setSuccessBanner(`POSICIÓN TRANSMITIDA: ${selectedPatrol} reportada en ${coordinates} a la CFI y Mando LCC.`);
+                            setTimeout(() => setSuccessBanner(null), 4000);
+                          }}
+                          className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer font-bold"
+                          title="Envía de inmediato estas coordenadas a la Central de Fusión (CFI) y al Mando LCC"
+                        >
+                          <Radio className="w-3 h-3 text-cyan-400 animate-pulse" />
+                          <span>Transmitir Posición Inmediata</span>
+                        </button>
+                      </div>
+
+                      <label className="flex items-center gap-1.5 cursor-pointer text-slate-400 hover:text-slate-200">
+                        <input
+                          type="checkbox"
+                          checked={isRealtimeAutoSync}
+                          onChange={(e) => setIsRealtimeAutoSync(e.target.checked)}
+                          className="w-3 h-3 rounded bg-[#111] border-[#333] text-emerald-500 focus:ring-0 cursor-pointer"
+                        />
+                        <span>Auto-Actualizar con Movimiento</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Observed Object / Event Details */}
+                  <div>
+                    <label className="text-[10px] text-[#888] uppercase block mb-1.5 font-bold">
+                      Objeto o Evento Observado (Detalle Doctrinal):
+                    </label>
+                    <textarea
+                      value={reportDetails}
+                      onChange={(e) => setReportDetails(e.target.value)}
+                      placeholder="Describa actividad sospechosa, vehículos no autorizados, cantidad de personas, dirección de desplazamiento, armamento o bultos observados..."
+                      rows={4}
+                      className="w-full bg-[#111] border border-[#222] focus:border-[#10b981] rounded-lg p-3 text-white text-xs font-mono focus:outline-none leading-relaxed resize-none"
+                      required
+                    />
+                  </div>
+
+                  {/* Submit Button to Central de Fusión */}
+                  <button
+                    type="submit"
+                    className="w-full bg-[#10b981] hover:bg-[#10b981]/90 text-black font-mono font-bold text-xs py-3 rounded-lg flex items-center justify-center gap-2 transition-all shadow-md active:scale-98 cursor-pointer uppercase tracking-wider"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>Transmitir Reporte Crudo a Central de Fusión (CFI)</span>
+                  </button>
+                </form>
+              </div>
+
+              {/* Right Column: Tactical Multimedia, FLIR & Camera Acquisition */}
+              <div className="lg:col-span-5 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg space-y-4 flex flex-col justify-between">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3">
+                    <div className="flex items-center gap-2">
+                      <Camera className="w-4 h-4 text-[#10b981]" />
+                      <h4 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                        Adquisición Óptica / Térmica FLIR
+                      </h4>
+                    </div>
+                    {customPhoto && (
+                      <span className="text-[10px] font-mono text-[#10b981] bg-[#10b981]/10 px-2 py-0.5 rounded border border-[#10b981]/30">
+                        EVIDENCIA LISTA
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Media Mode Selector */}
+                  <div className="space-y-1.5 text-xs font-mono">
+                    <label className="text-[10px] text-[#888] uppercase block font-bold">
+                      Modo de Entrada Multimedia:
+                    </label>
+                    <select
+                      value={multimediaPreset}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setMultimediaPreset(val);
+                        if (val === 'custom-camera') {
+                          startCamera();
+                        } else {
+                          stopCamera();
+                        }
+                      }}
+                      className="w-full bg-[#111] border border-[#222] focus:border-[#10b981] rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none"
+                    >
+                      <option value="multimedia-thermal">Preset Térmico FLIR (Frontera Noche)</option>
+                      <option value="multimedia-drone">Preset Óptico VANT (Caravana 4x4)</option>
+                      <option value="multimedia-night">Preset Visor Nocturno (Cruce No Habilitado)</option>
+                      <option value="custom-camera">Cámara Táctica / Sensor FLIR en Vivo</option>
+                      <option value="custom-upload">Subir Archivo / Evidencia de Terreno</option>
+                      <option value="none">Sin Adjunto Multimedia</option>
+                    </select>
+                  </div>
+
+                  {/* Camera / FLIR Live View Display */}
+                  {multimediaPreset === 'custom-camera' && (
+                    <div className="space-y-2">
+                      <div className="relative bg-black rounded-lg overflow-hidden border border-[#222] aspect-video flex items-center justify-center">
+                        {cameraActive ? (
+                          isSimulatingCamera ? (
+                            <canvas
+                              ref={simCanvasRef}
+                              width={380}
+                              height={240}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <video
+                              ref={videoRef}
+                              autoPlay
+                              playsInline
+                              muted
+                              className="w-full h-full object-cover"
+                            />
+                          )
+                        ) : (
+                          <div className="text-center p-4 space-y-2">
+                            <VideoOff className="w-8 h-8 text-[#555] mx-auto" />
+                            <p className="text-[11px] font-mono text-[#777]">Cámara táctica en espera</p>
+                          </div>
+                        )}
+
+                        {cameraActive && (
+                          <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/70 border border-red-500/40 text-[9px] font-mono text-red-400">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                            REC // HUD ACTIVO
+                          </div>
+                        )}
+                      </div>
+
+                      {cameraError && (
+                        <p className="text-[10px] font-mono text-amber-400 bg-amber-500/10 p-2 rounded border border-amber-500/20">
+                          {cameraError}
+                        </p>
+                      )}
+
+                      <div className="flex gap-2">
+                        {cameraActive ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={capturePhoto}
+                              className="flex-1 bg-[#10b981] hover:bg-[#10b981]/90 text-black font-mono font-bold text-xs py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                            >
+                              <Crosshair className="w-3.5 h-3.5" />
+                              <span>Capturar Fotograma</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={stopCamera}
+                              className="px-3 bg-[#222] hover:bg-[#333] text-[#aaa] font-mono text-xs py-2 rounded-lg transition-colors cursor-pointer"
+                            >
+                              Detener
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={startCamera}
+                            className="w-full bg-[#10b981]/20 hover:bg-[#10b981]/30 text-[#10b981] border border-[#10b981]/40 font-mono font-bold text-xs py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <Video className="w-3.5 h-3.5" />
+                            <span>Activar Sensor / Cámara</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* File Upload Dropzone */}
+                  {multimediaPreset === 'custom-upload' && (
+                    <div
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      className={`border-2 border-dashed rounded-lg p-6 text-center transition-all cursor-pointer ${
+                        dragOver 
+                          ? 'border-[#10b981] bg-[#10b981]/10' 
+                          : 'border-[#222] hover:border-[#333] bg-[#0d0d0d]'
+                      }`}
+                      onClick={() => document.getElementById('tactical-file-input')?.click()}
+                    >
+                      <input
+                        id="tactical-file-input"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                      <Upload className="w-6 h-6 text-[#777] mx-auto mb-2" />
+                      <p className="text-xs font-mono text-white font-bold mb-1">
+                        Arrastre o seleccione evidencia fotográfica
+                      </p>
+                      <p className="text-[10px] font-mono text-[#666]">
+                        Formatos JPG, PNG, WEBP // Máx 15MB con compresión automática
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Captured / Uploaded Image Preview */}
+                  {customPhoto && (
+                    <div className="relative rounded-lg overflow-hidden border border-[#10b981]/40 bg-black">
+                      <img
+                        src={customPhoto}
+                        alt="Evidencia táctica capturada"
+                        className="w-full h-32 object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end justify-between p-2">
+                        <span className="text-[10px] font-mono text-[#10b981] font-bold">
+                          FOTOGRAMA REGISTRADO
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCustomPhoto(null);
+                            playTacticalBeep(300, 0.1);
+                          }}
+                          className="bg-red-500/80 hover:bg-red-600 text-white p-1 rounded transition-colors cursor-pointer"
+                          title="Eliminar fotograma"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Tactical Telemetry Quick-Bar */}
+                <div className="pt-3 border-t border-[#1a1a1a] flex items-center justify-between text-[10px] font-mono text-[#666]">
+                  <span>Sincronización: Canales VHF CAD-C2</span>
+                  <span className="text-[#10b981]">ENLACE ACTIVO</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: ASSIGNED ORDERS (OOA) */}
+          {activePatrolTab === 'ORDERS' && (
+            <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg space-y-4 animate-fade-in">
+              <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3">
+                <div className="flex items-center gap-2">
+                  <Navigation className="w-4 h-4 text-[#10b981]" />
+                  <div>
+                    <h4 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                      Órdenes de Operaciones Asignadas (OOA) // {selectedPatrol}
+                    </h4>
+                    <p className="text-[10px] font-mono text-[#777]">
+                      Misiones directas emitidas por el Comando Conjunto para esta unidad.
+                    </p>
+                  </div>
+                </div>
+                <span className="text-xs font-mono px-2.5 py-1 rounded bg-[#111] border border-[#222] text-[#aaa]">
+                  {patrolOrders.length} orden(es) asignada(s)
+                </span>
+              </div>
+
+              {patrolOrders.length === 0 ? (
+                <div className="text-center py-10 space-y-3 bg-[#0d0d0d] rounded-lg border border-[#1a1a1a]">
+                  <CheckCircle2 className="w-10 h-10 text-[#10b981] mx-auto" />
+                  <h5 className="text-sm font-mono font-bold text-white">SIN ÓRDENES PENDIENTES</h5>
+                  <p className="text-xs font-mono text-[#777] max-w-sm mx-auto">
+                    La patrulla {selectedPatrol} mantiene su patrón de patrullaje habitual en su sector asignado.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {patrolOrders.map(order => (
+                    <div
+                      key={order.id}
+                      className="bg-[#111] border border-[#222] hover:border-[#333] rounded-lg p-4 space-y-3 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <span className="text-[10px] font-mono text-[#666] block">ID: {order.id}</span>
+                          <h5 className="text-xs font-mono font-bold text-white uppercase">
+                            {order.codeName || 'Misión Táctica'}
+                          </h5>
+                        </div>
+                        <span className={`text-[9px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
+                          order.status === 'IN_PROGRESS'
+                            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
+                            : order.status === 'RECEIVED'
+                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                            : order.status === 'COMPLETED'
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                            : 'bg-[#222] text-[#888]'
+                        }`}>
+                          {order.status}
+                        </span>
+                      </div>
+
+                      <p className="text-xs font-mono text-[#aaa] leading-relaxed bg-[#0a0a0a] p-2.5 rounded border border-[#1a1a1a]">
+                        {order.objective || 'Interdicción y control de paso clandestino.'}
+                      </p>
+
+                      <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-[#777]">
+                        <div>
+                          <span>Emisor:</span> <b className="text-amber-400">{order.issuer || 'CEO-LCC'}</b>
+                        </div>
+                        <div>
+                          <span>Coordenadas:</span> <b className="text-white">{order.coordinates || 'Sector Asignado'}</b>
+                        </div>
+                      </div>
+
+                      {/* Action buttons based on status */}
+                      <div className="flex gap-2 pt-1 border-t border-[#1f1f1f]">
+                        {order.status === 'ISSUED' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onConfirmOrder(order.id, 'RECEIVED');
+                              playTacticalBeep(900, 0.1);
+                              setSuccessBanner(`ORDEN RECIBIDA: ${selectedPatrol} confirmó acuse de recibo de ${order.id}.`);
+                              setTimeout(() => setSuccessBanner(null), 3000);
+                            }}
+                            className="flex-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-mono font-bold py-1.5 rounded transition-all cursor-pointer"
+                          >
+                            Confirmar Recepción
+                          </button>
+                        )}
+
+                        {order.status === 'RECEIVED' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onConfirmOrder(order.id, 'IN_PROGRESS');
+                              playTacticalBeep(1100, 0.1);
+                              setSuccessBanner(`DESPLIEGUE INICIADO: ${selectedPatrol} comenzó interdicción en sector.`);
+                              setTimeout(() => setSuccessBanner(null), 3000);
+                            }}
+                            className="flex-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 text-[11px] font-mono font-bold py-1.5 rounded transition-all cursor-pointer"
+                          >
+                            Iniciar Interdicción
+                          </button>
+                        )}
+
+                        {order.status === 'IN_PROGRESS' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onConfirmOrder(order.id, 'COMPLETED');
+                              playTacticalBeep(1200, 0.15);
+                              setSuccessBanner(`MISIÓN CUMPLIDA: Orden ${order.id} ejecutada por ${selectedPatrol}.`);
+                              setTimeout(() => setSuccessBanner(null), 3000);
+                            }}
+                            className="flex-1 bg-[#10b981]/20 hover:bg-[#10b981]/30 text-[#10b981] border border-[#10b981]/40 text-[11px] font-mono font-bold py-1.5 rounded transition-all cursor-pointer"
+                          >
+                            Confirmar Misión Cumplida
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: GPS SATELITAL & MOVIMIENTO TÁCTICO */}
+          {activePatrolTab === 'GPS' && (
+            <div className="bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-5 shadow-lg space-y-4 animate-fade-in">
+              <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3">
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-blue-400" />
+                  <div>
+                    <h4 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                      Telemetría y Posicionamiento Satelital GPS // {selectedPatrol}
+                    </h4>
+                    <p className="text-[10px] font-mono text-[#777]">
+                      Receptor GNSS de precisión militar y simulador de patrullaje en el teatro de operaciones.
+                    </p>
+                  </div>
+                </div>
+                {gpsAccuracy && (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/30">
+                    Precisión Satelital: ±{Math.round(gpsAccuracy)}m
+                  </span>
+                )}
+              </div>
+
+              {/* Coordinates Edit & Sync Form */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-mono text-[#888] uppercase block mb-1">
+                    Latitud Geodésica (DMS):
+                  </label>
+                  <input
+                    type="text"
+                    value={customLat}
+                    onChange={(e) => setCustomLat(e.target.value)}
+                    placeholder='19°13&apos;10"S'
+                    className="w-full bg-[#111] border border-[#222] focus:border-blue-500 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-mono text-[#888] uppercase block mb-1">
+                    Longitud Geodésica (DMS):
+                  </label>
+                  <input
+                    type="text"
+                    value={customLon}
+                    onChange={(e) => setCustomLon(e.target.value)}
+                    placeholder='68°35&apos;50"W'
+                    className="w-full bg-[#111] border border-[#222] focus:border-blue-500 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* GPS Action Controls */}
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPatrolForEarth(selectedUnitDetails);
+                    setIsGoogleEarthModalOpen(true);
+                  }}
+                  className="bg-[#0a1628] hover:bg-[#112440] text-cyan-300 hover:text-white border border-cyan-500/50 font-mono font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.25)]"
+                  title="Visualizar la patrulla en Google Earth 3D en tiempo real con modelado orográfico y satelital"
+                >
+                  <Globe className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                  <span>Visualizar en Google Earth 3D</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleUpdateGPS}
+                  className="bg-[#10b981] hover:bg-[#10b981]/90 text-black font-mono font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Sincronizar Coordenadas</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={isTrackingGPS ? stopRealTimeGPSTracking : startRealTimeGPSTracking}
+                  className={`font-mono text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer border ${
+                    isTrackingGPS
+                      ? 'bg-blue-500 text-white border-blue-400 shadow-md shadow-blue-500/20'
+                      : 'bg-[#111] hover:bg-[#1a1a1a] text-blue-400 border-blue-500/40'
+                  }`}
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>{isTrackingGPS ? 'Detener GPS en Vivo' : 'Activar GPS Satelital Real'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={isSimulatingMovement ? stopSimulatedMovement : startSimulatedMovement}
+                  className={`font-mono text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer border ${
+                    isSimulatingMovement
+                      ? 'bg-amber-500 text-black border-amber-400 shadow-md shadow-amber-500/20'
+                      : 'bg-[#111] hover:bg-[#1a1a1a] text-amber-400 border-amber-500/40'
+                  }`}
+                >
+                  <Navigation className="w-3.5 h-3.5" />
+                  <span>{isSimulatingMovement ? 'Detener Patrullaje Simulado' : 'Simular Movimiento de Patrulla'}</span>
+                </button>
+              </div>
+
+              {/* Terminal Telemetry Log */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-mono text-[#888] uppercase block">
+                  Consola de Telemetría Táctica en Vivo:
+                </label>
+                <div className="bg-black rounded-lg border border-[#1a1a1a] p-3 font-mono text-[11px] text-[#10b981] h-36 overflow-y-auto space-y-1 select-all">
+                  {trackingLog.length === 0 ? (
+                    <span className="text-[#555]">Receptor GNSS en reposo. Presione &apos;Activar GPS&apos; o &apos;Simular Movimiento&apos; para registrar telemetría.</span>
+                  ) : (
+                    trackingLog.map((entry, idx) => (
+                      <div key={idx} className="leading-tight">
+                        {entry}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: COMPREHENSIVE FUSION DASHBOARD (OPTIONAL EXTENSION) */}
+          {activePatrolTab === 'DASHBOARD' && (
+            <div className="animate-fade-in">
+              <PatrolOperationalDashboard
+                patrol={selectedUnitDetails}
+                rawAlerts={rawAlerts}
+                clans={clans}
+                actionableIntel={actionableIntel}
+                expedientes={expedientes}
+                activeOrders={activeOrders}
+                onLockPatrol={handleLockPatrol}
+                onOpenEditPatrol={handleOpenEditPatrol}
+                onTriggerSOS={() => setSosConfirmModal(true)}
+                onAddExpediente={onAddExpediente}
+                onPromoteToIntel={onPromoteToIntel}
+                onUpdateAlertStatus={onUpdateAlertStatus}
+                onConfirmOrder={onConfirmOrder}
+                onSendFieldReport={onSendFieldReport}
+                onUpdateUnitCoordinates={onUpdateUnitCoordinates}
+              />
+            </div>
+          )}
+        </div>
       )}
 
       {/* Modals & Dialogs */}
@@ -1308,6 +1983,15 @@ export default function TacticalView({
           </div>
         </div>
       )}
+
+      {/* Real-time Patrol Location in Google Earth 3D Modal */}
+      <GoogleEarthPatrolModal
+        isOpen={isGoogleEarthModalOpen}
+        onClose={() => setIsGoogleEarthModalOpen(false)}
+        selectedPatrol={selectedPatrolForEarth || selectedUnitDetails || null}
+        allPatrols={tacticalUnits}
+        onSelectPatrol={(patrol) => setSelectedPatrolForEarth(patrol)}
+      />
     </div>
   );
 }

@@ -202,9 +202,13 @@ export interface ModuleBackgroundConfig {
   imageUrl: string;
   dataUrl?: string; // base64 cached offline
   opacity: number; // 0.1 to 1.0 (default 0.80)
-  blur: number; // 0 to 6px (default 0)
+  blur: number; // 0 to 15px (default 0)
+  brightness?: number; // 0.4 to 1.5 (default 1)
+  contrast?: number; // 0.5 to 1.5 (default 1)
   contrastOverlay: boolean; // default true
   fitMode: 'cover' | 'contain' | 'tile';
+  opticalFilter?: 'none' | 'nvg' | 'amber' | 'red' | 'stealth' | 'cyan';
+  gridOverlay?: boolean;
   customFileName?: string;
   updatedAt: string;
   updatedBy?: string;

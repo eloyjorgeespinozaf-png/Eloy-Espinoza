@@ -14,7 +14,7 @@ export default function CodeViewer({}: CodeViewerProps) {
     { name: "src/components/TacticalP2PMesh.tsx", label: "Malla Descentrada P2P S-6", path: "src/components/TacticalP2PMesh.tsx" },
     { name: "src/components/OfficialCrest.tsx", label: "Escudo Oficial Nacional", path: "src/components/OfficialCrest.tsx" },
     { name: "src/components/SystemArchitectureDiagram.tsx", label: "Diagrama de Arquitectura", path: "src/components/SystemArchitectureDiagram.tsx" },
-    { name: "src/components/InteractiveChartCreator.tsx", label: "Creador de Gráficos de Rutas", path: "src/components/InteractiveChartCreator.tsx" },
+    { name: "src/components/InterdictionAlertTracker.tsx", label: "Alerta y Seguimiento de Interdicción", path: "src/components/InterdictionAlertTracker.tsx" },
     { name: "src/services/DeviceAuthService.ts", label: "Servicio de Autenticación de Dispositivo", path: "src/services/DeviceAuthService.ts" },
     { name: "src/components/SecureElement.tsx", label: "Componente de Blindaje de Elemento Seguro", path: "src/components/SecureElement.tsx" }
   ];

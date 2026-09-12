@@ -27,9 +27,10 @@ import {
   ArrowRight,
   ShieldCheck,
   Radar,
-  Download
+  Download,
+  Palette
 } from 'lucide-react';
-import { MilitaryRole } from '../types';
+import { TacticalModuleId, MilitaryRole, ModuleBackgroundConfig, ModuleBackgroundsMap } from '../types';
 import { useAuth, PRESET_CREDENTIALS, PRESET_USERS } from '../context/AuthContext';
 import { playSyntheticBeep } from '../utils/audio';
 import { GamerFontSelector } from './GamerFontSelector';
@@ -39,12 +40,32 @@ import {
   FullDashboardBackgroundControl, 
   useFullDashboardBackground 
 } from './FullDashboardBackground';
+import { TacticalBackgroundEditorModal } from './TacticalBackgroundEditorModal';
+import OfficialCrest from './OfficialCrest';
+import HeaderTopRightLogo from './HeaderTopRightLogo';
+import PIILCCLogo from './PIILCCLogo';
 
 interface MilitaryLoginViewProps {
   onLoginSuccess?: (role: MilitaryRole) => void;
+  moduleBackgrounds?: ModuleBackgroundsMap;
+  onUpdateModuleBackground?: (
+    moduleId: TacticalModuleId,
+    updates: Partial<ModuleBackgroundConfig>,
+    imageBase64?: string
+  ) => Promise<void>;
+  onResetModuleBackground?: (moduleId: TacticalModuleId) => Promise<void>;
+  onApplyToAllModules?: (sourceModuleId: TacticalModuleId) => Promise<void>;
+  onBatchImportModules?: (importedMap: ModuleBackgroundsMap) => void;
 }
 
-export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({ onLoginSuccess }) => {
+export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({ 
+  onLoginSuccess,
+  moduleBackgrounds,
+  onUpdateModuleBackground,
+  onResetModuleBackground,
+  onApplyToAllModules,
+  onBatchImportModules
+}) => {
   const { loginWithCredentials, login } = useAuth();
   const fullBgState = useFullDashboardBackground();
 
@@ -58,6 +79,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({ onLoginSuc
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [cryptoHash, setCryptoHash] = useState<string>('AES256-SHA512-SEC-INIT');
   const [showInstallModal, setShowInstallModal] = useState<boolean>(false);
+  const [showBackgroundModal, setShowBackgroundModal] = useState<boolean>(false);
 
   // Rotate simulated crypto hash every few seconds for high-tech military immersion
   useEffect(() => {
@@ -222,16 +244,15 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({ onLoginSuc
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_50%_40%,rgba(16,36,25,0.25)_0%,rgba(5,9,12,0.95)_75%)]" />
 
       {/* Top Security & Classification Banner */}
-      <header className="relative z-10 w-full border-b border-[#1e2a22] bg-[#0a1014]/90 backdrop-blur-md px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
-        <div className="flex items-center gap-2.5">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping opacity-75" />
-          <span className="text-emerald-400 font-bold tracking-widest uppercase text-[11px]">
-            C4ISR-LCC // SEGURIDAD OPERACIONAL
-          </span>
-          <span className="hidden sm:inline-block text-[#3f5244]">|</span>
-          <span className="hidden sm:inline-block text-[#708275] text-[10px]">
-            DIRECTIVA DOCTRINAL MIL-STD-188-220
-          </span>
+      <header className="relative z-10 w-full border-b border-[#1e2a22] bg-[#0a1014]/95 backdrop-blur-md px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+        <div className="flex items-center gap-3">
+          <PIILCCLogo variant="header" size={38} />
+          <div className="hidden lg:flex flex-col text-[10px] text-[#869b8b]">
+            <span className="text-emerald-400 font-bold tracking-widest uppercase text-[11px] font-mono">
+              PII-LCC // SEGURIDAD OPERACIONAL
+            </span>
+            <span>DIRECTIVA DOCTRINAL MIL-STD-188-220 // SEC-DEF</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-2.5">
@@ -246,6 +267,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({ onLoginSuc
             updateSettings={fullBgState.updateSettings}
             uploadDashboardImage={fullBgState.uploadDashboardImage}
             resetToDefault={fullBgState.resetToDefault}
+            onOpenFullModal={() => setShowBackgroundModal(true)}
           />
 
           {/* Videogame Font Selector in Login Screen */}
@@ -271,6 +293,11 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({ onLoginSuc
           >
             {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
           </button>
+
+          <div className="h-6 w-px bg-[#1e2a22]"></div>
+
+          {/* Top-Right Intact ECEME Graphic */}
+          <HeaderTopRightLogo size={36} />
         </div>
       </header>
 
@@ -543,10 +570,45 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({ onLoginSuc
         </div>
       </footer>
 
+      {/* Floating Tactical Background Editor Action Button (Accessible on both PC and Mobile) */}
+      <button
+        type="button"
+        id="floating-btn-edit-tactical-bg"
+        onClick={() => {
+          setShowBackgroundModal(true);
+          playSyntheticBeep(880, 0.08);
+        }}
+        className="fixed bottom-14 right-4 z-40 flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-500/70 text-emerald-300 hover:text-white shadow-[0_0_20px_rgba(16,185,129,0.35)] backdrop-blur-md transition-all active:scale-95 cursor-pointer text-xs font-mono font-bold"
+        title="Editar Fondo Táctico de la Interfaz (Imagen, Opacidad, Filtros, Iluminación)"
+      >
+        <Palette className="w-4 h-4 text-emerald-400 animate-pulse" />
+        <span className="hidden sm:inline">EDITAR FONDO TÁCTICO</span>
+        <span className="sm:hidden">FONDO</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 text-emerald-400 border border-emerald-500/40">
+          {Math.round(fullBgState.settings.opacity * 100)}%
+        </span>
+      </button>
+
       {/* Cross-Platform PWA & App Download Modal */}
       <AppInstallModal 
         isOpen={showInstallModal} 
         onClose={() => setShowInstallModal(false)} 
+      />
+
+      {/* Comprehensive Tactical Background Editor Modal */}
+      <TacticalBackgroundEditorModal
+        isOpen={showBackgroundModal}
+        onClose={() => setShowBackgroundModal(false)}
+        globalSettings={fullBgState.settings}
+        activeGlobalImageSrc={fullBgState.activeImageSrc}
+        onUpdateGlobalSettings={fullBgState.updateSettings}
+        onUploadGlobalImage={fullBgState.uploadDashboardImage}
+        onResetGlobal={fullBgState.resetToDefault}
+        moduleBackgrounds={moduleBackgrounds}
+        onUpdateModuleBackground={onUpdateModuleBackground}
+        onResetModuleBackground={onResetModuleBackground}
+        onApplyToAllModules={onApplyToAllModules}
+        onBatchImportModules={onBatchImportModules}
       />
     </div>
   );

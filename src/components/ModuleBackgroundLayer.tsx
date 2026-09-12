@@ -36,8 +36,27 @@ export const ModuleBackgroundLayer: React.FC<ModuleBackgroundLayerProps> = ({
 
   const opacity = config?.opacity !== undefined ? config.opacity : 0.80;
   const blur = config?.blur || 0;
+  const brightness = config?.brightness ?? 1;
+  const contrast = config?.contrast ?? 1;
   const fitMode = config?.fitMode || 'cover';
   const contrastOverlay = config?.contrastOverlay !== false;
+  const opticalFilter = config?.opticalFilter || 'none';
+  const gridOverlay = config?.gridOverlay ?? true;
+
+  // Construct tactical CSS filter
+  const baseFilter = `blur(${blur}px) brightness(${brightness}) contrast(${contrast})`;
+  let finalFilter = baseFilter;
+  if (opticalFilter === 'stealth') {
+    finalFilter = `${baseFilter} grayscale(100%)`;
+  } else if (opticalFilter === 'nvg') {
+    finalFilter = `${baseFilter} hue-rotate(85deg) saturate(220%)`;
+  } else if (opticalFilter === 'amber') {
+    finalFilter = `${baseFilter} sepia(100%) saturate(300%) hue-rotate(5deg)`;
+  } else if (opticalFilter === 'red') {
+    finalFilter = `${baseFilter} sepia(100%) saturate(450%) hue-rotate(325deg)`;
+  } else if (opticalFilter === 'cyan') {
+    finalFilter = `${baseFilter} hue-rotate(160deg) saturate(180%)`;
+  }
 
   return (
     <div 
@@ -61,11 +80,26 @@ export const ModuleBackgroundLayer: React.FC<ModuleBackgroundLayerProps> = ({
         }`}
         style={{
           opacity,
-          filter: blur > 0 ? `blur(${blur}px)` : 'none'
+          filter: finalFilter
         }}
       />
 
-      {/* 2. Tactical Contrast Layer - Harmonizes with Dark Military UI */}
+      {/* 2. Optical Tint Layer if filter is active */}
+      {opticalFilter !== 'none' && (
+        <div 
+          className="absolute inset-0 pointer-events-none transition-colors duration-300"
+          style={{
+            backgroundColor: 
+              opticalFilter === 'nvg' ? 'rgba(16, 185, 129, 0.12)' :
+              opticalFilter === 'amber' ? 'rgba(245, 158, 11, 0.12)' :
+              opticalFilter === 'red' ? 'rgba(239, 68, 68, 0.16)' :
+              opticalFilter === 'cyan' ? 'rgba(6, 182, 212, 0.12)' : 'transparent',
+            mixBlendMode: 'color-dodge'
+          }}
+        />
+      )}
+
+      {/* 3. Tactical Contrast Layer - Harmonizes with Dark Military UI */}
       {contrastOverlay && (
         <>
           {/* Radial Vignette */}
@@ -81,6 +115,20 @@ export const ModuleBackgroundLayer: React.FC<ModuleBackgroundLayerProps> = ({
           <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-black/85 via-black/40 to-transparent" />
           <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/95 via-black/60 to-transparent" />
         </>
+      )}
+
+      {/* 4. Tactical Radar Grid Overlay */}
+      {gridOverlay && (
+        <div 
+          className="absolute inset-0 pointer-events-none opacity-20"
+          style={{
+            backgroundImage: `
+              linear-gradient(to right, rgba(16, 185, 129, 0.15) 1px, transparent 1px),
+              linear-gradient(to bottom, rgba(16, 185, 129, 0.15) 1px, transparent 1px)
+            `,
+            backgroundSize: '24px 24px'
+          }}
+        />
       )}
 
       {/* 3. Subtle Module Watermark Indicator Badge (Bottom Left) */}

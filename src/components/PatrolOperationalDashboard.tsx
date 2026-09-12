@@ -56,6 +56,7 @@ import {
   Users
 } from 'lucide-react';
 import { playSyntheticBeep, playChime } from '../utils/audio';
+import { formatToMilitaryDMS } from '../utils/geo';
 
 interface PatrolOperationalDashboardProps {
   patrol: TacticalUnit;
@@ -162,6 +163,42 @@ export function PatrolOperationalDashboard({
   });
   const [isSimulatingGps, setIsSimulatingGps] = useState<boolean>(false);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
+  const [isLocatingDevice, setIsLocatingDevice] = useState<boolean>(false);
+
+  // Captura inmediata de ubicación actual del dispositivo y sincronización en tiempo real con CFI y Mando
+  const acquireDashboardGpsLocation = () => {
+    if (!navigator.geolocation) {
+      setSuccessBanner("SISTEMA GNSS: Geolocalización no soportada en este navegador.");
+      return;
+    }
+    setIsLocatingDevice(true);
+    playSyntheticBeep(800, 0.08);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        const formatted = formatToMilitaryDMS(latitude, longitude);
+        setReportCoordinates(formatted);
+        const parts = formatted.split(/\s+/);
+        if (parts[0]) setTelemetryLat(parts[0]);
+        if (parts[1]) setTelemetryLon(parts[1]);
+        setIsLocatingDevice(false);
+
+        // Transmisión inmediata a Central de Fusión y Mando
+        onUpdateUnitCoordinates(patrol.name, formatted);
+
+        playSyntheticBeep(1200, 0.2);
+        setSuccessBanner(`POSICIÓN GPS EN VIVO TRANSMITIDA: ${patrol.name} fijada en ${formatted} (±${Math.round(accuracy)}m). Sincronizada con CFI.`);
+        setTimeout(() => setSuccessBanner(null), 4000);
+      },
+      (err) => {
+        setIsLocatingDevice(false);
+        setSuccessBanner(`ERROR GPS: ${err.message || "No se pudo adquirir posición."}`);
+        setTimeout(() => setSuccessBanner(null), 4000);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
 
   // Pending alerts count
   const pendingAlerts = rawAlerts.filter(a => a.status === 'PENDING');
@@ -1215,10 +1252,15 @@ ${recommendedAction}
                 </div>
               </div>
 
-              <div>
-                <label className="text-[10px] font-mono text-[#94a3b8] uppercase block mb-1">
-                  Coordenadas Georreferenciadas (MGRS / Geográficas):
-                </label>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-mono text-[#94a3b8] uppercase block">
+                    Coordenadas Georreferenciadas de Detección (DMS / MGRS):
+                  </label>
+                  <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                    ENLACE CFI EN VIVO
+                  </span>
+                </div>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -1228,10 +1270,29 @@ ${recommendedAction}
                   />
                   <button
                     type="button"
+                    onClick={acquireDashboardGpsLocation}
+                    disabled={isLocatingDevice}
+                    className={`px-3 py-2 text-xs font-mono rounded-lg flex items-center gap-1.5 font-bold transition-all shadow-md active:scale-95 cursor-pointer whitespace-nowrap ${
+                      isLocatingDevice
+                        ? 'bg-emerald-800 text-emerald-200 animate-pulse'
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-black'
+                    }`}
+                    title="Obtiene la posición geográfica real del dispositivo y la transmite a la CFI y al Mando"
+                  >
+                    <Navigation className={`w-3.5 h-3.5 ${isLocatingDevice ? 'animate-spin' : ''}`} />
+                    <span>{isLocatingDevice ? 'Fijando...' : 'GPS en Vivo'}</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => {
-                      if (patrol.coordinates) setReportCoordinates(patrol.coordinates);
+                      if (patrol.coordinates) {
+                        setReportCoordinates(patrol.coordinates);
+                        onUpdateUnitCoordinates(patrol.name, patrol.coordinates);
+                        playSyntheticBeep(900, 0.05);
+                      }
                     }}
                     className="px-3 py-2 bg-[#1e2738] text-white text-xs font-mono rounded-lg hover:bg-[#283548] cursor-pointer"
+                    title="Sincronizar con última posición asignada a la patrulla"
                   >
                     GPS Patrulla
                   </button>

@@ -85,6 +85,12 @@ export const TACTICAL_MODULES_LIST: TacticalModuleMeta[] = [
 
 export const PRESET_TACTICAL_WALLPAPERS = [
   {
+    id: 'preset-pii-lcc-oficial',
+    name: 'PII-LCC Sistema Táctico (Oficial 3D)',
+    url: '/PII-LCC-NEGRO.jpg',
+    description: 'Emblema oficial PII-LCC con arquitectura táctica en fondo oscuro de alta resolución.'
+  },
+  {
     id: 'preset-c4isr-warroom',
     name: 'Sala de Guerra C4ISR (INTERFAZ)',
     url: '/INTERFAZ.jpg',

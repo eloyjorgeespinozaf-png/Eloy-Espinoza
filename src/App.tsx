@@ -19,7 +19,7 @@ import HorizontalFlowSimulator from './components/HorizontalFlowSimulator';
 import StrategicView from './components/StrategicView';
 import OperationalView from './components/OperationalView';
 import TacticalView from './components/TacticalView';
-import InteractiveChartCreator from './components/InteractiveChartCreator';
+import InterdictionAlertTracker from './components/InterdictionAlertTracker';
 import SystemArchitectureDiagram from './components/SystemArchitectureDiagram';
 import TacticalP2PMesh from './components/TacticalP2PMesh';
 import OfficialCrest from './components/OfficialCrest';
@@ -33,6 +33,7 @@ import { useGamingFont } from './utils/fontTheme';
 import { FullDashboardBackground, FullDashboardBackgroundControl, useFullDashboardBackground } from './components/FullDashboardBackground';
 import { ModuleBackgroundLayer } from './components/ModuleBackgroundLayer';
 import { ModuleBackgroundModal } from './components/ModuleBackgroundModal';
+import { TacticalBackgroundEditorModal } from './components/TacticalBackgroundEditorModal';
 import { 
   loadModuleBackgroundsLocal, 
   saveModuleBackgroundLocal, 
@@ -45,7 +46,7 @@ import {
 } from './services/ModuleBackgroundService';
 import { AppInstallModal } from './components/AppInstallModal';
 
-import { Shield, Radio, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2, Smartphone, Laptop, Image as ImageIcon } from 'lucide-react';
+import { Shield, Radio, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2, Smartphone, Laptop, Image as ImageIcon, Palette } from 'lucide-react';
 import { useAuth, PRESET_USERS } from './context/AuthContext';
 import { safeStorage } from './utils/storage';
 import { playSyntheticBeep, playChime } from './utils/audio';
@@ -98,6 +99,7 @@ export default function App() {
   // Per-Module Backgrounds State (IndexedDB + Server Synced)
   const [moduleBackgrounds, setModuleBackgrounds] = useState<ModuleBackgroundsMap>(createDefaultModuleBackgrounds);
   const [showModuleBgModal, setShowModuleBgModal] = useState<boolean>(false);
+  const [showTacticalBgModal, setShowTacticalBgModal] = useState<boolean>(false);
 
   const [isInstalledDevice, setIsInstalledDevice] = useState<boolean>(() => {
     const isStandalone = typeof window !== 'undefined' && Boolean(
@@ -481,6 +483,12 @@ export default function App() {
       moduleId,
       updatedAt: new Date().toISOString()
     };
+
+    if (imageBase64) {
+      updated.dataUrl = imageBase64;
+    } else if (updates.imageUrl && !updates.dataUrl && !imageBase64) {
+      delete updated.dataUrl;
+    }
 
     setModuleBackgrounds(prev => ({
       ...prev,
@@ -1162,6 +1170,11 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
         onLoginSuccess={(role) => {
           handleSetRoleAttempt(role);
         }} 
+        moduleBackgrounds={moduleBackgrounds}
+        onUpdateModuleBackground={handleUpdateModuleBackground}
+        onResetModuleBackground={handleResetModuleBackground}
+        onApplyToAllModules={handleApplyToAllModules}
+        onBatchImportModules={handleBatchImportBackgrounds}
       />
     );
   }
@@ -1181,7 +1194,7 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
       <ModuleBackgroundLayer 
         activeModuleId={activeModuleId} 
         config={moduleBackgrounds[activeModuleId]} 
-        onOpenManager={() => setShowModuleBgModal(true)} 
+        onOpenManager={() => setShowTacticalBgModal(true)} 
       />
 
       {/* Tactical Grid Overlay Background */}
@@ -1252,19 +1265,22 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
               </button>
             </div>
 
-            {/* Per-Module Backgrounds Customizer Trigger */}
+            {/* Unified Tactical Background Customizer Trigger */}
             <button
               type="button"
-              id="btn-module-bg-manager"
-              onClick={() => setShowModuleBgModal(true)}
-              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border font-mono text-xs transition-all cursor-pointer bg-blue-950/40 border-blue-500/60 text-blue-300 shadow-[0_0_14px_rgba(59,130,246,0.2)] hover:border-blue-400 hover:bg-blue-900/50 active:scale-95"
-              title="Personalizar fondo exclusivo para cada módulo (Persistente entre PC y Móvil)"
+              id="btn-tactical-bg-manager"
+              onClick={() => {
+                setShowTacticalBgModal(true);
+                playSyntheticBeep(880, 0.08);
+              }}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border font-mono text-xs transition-all cursor-pointer bg-emerald-950/60 hover:bg-emerald-900/80 border-emerald-500/60 hover:border-emerald-400 text-emerald-300 shadow-[0_0_14px_rgba(16,185,129,0.2)] active:scale-95"
+              title="Personalizar y Editar Fondo Táctico (Fondo de Interfaz y Fondos de Módulos)"
             >
-              <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
+              <Palette className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
               <div className="flex flex-col text-left leading-none">
-                <span className="text-[10px] font-bold text-blue-300 tracking-wider">FONDO MÓDULO</span>
-                <span className="text-[9px] text-blue-400/80 font-mono truncate max-w-[110px]">
-                  {activeModuleMeta?.badge || 'CONFIGURAR'}
+                <span className="text-[10px] font-bold text-white tracking-wider">FONDO TÁCTICO</span>
+                <span className="text-[9px] text-emerald-400/90 font-mono truncate max-w-[120px]">
+                  {Math.round(fullBgState.settings.opacity * 100)}% • {activeModuleMeta?.badge || 'MODULAR'}
                 </span>
               </div>
             </button>
@@ -1446,8 +1462,8 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
 
             <div className="h-8 w-px bg-zinc-800/80"></div>
 
-            {/* Top Right Transparent Image */}
-            <HeaderTopRightLogo size={56} />
+            {/* Top-Right Intact ECEME Graphic ("SER ANTES QUE PARECER") */}
+            <HeaderTopRightLogo size={46} />
           </div>
 
         </div>
@@ -1822,6 +1838,8 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                       rawAlerts={rawAlerts}
                       clans={clans}
                       actionableIntel={actionableIntel}
+                      tacticalUnits={tacticalUnits}
+                      onUpdateUnitCoordinates={handleUpdateUnitCoordinates}
                       expedientes={expedientes}
                       onAddExpediente={handleAddExpediente}
                       onPromoteToIntel={handlePromoteToIntel}
@@ -1834,39 +1852,38 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                   )}
 
                   {(currentRole === 'ROL_BUSQUEDA' || currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && (
-                    <TacticalView 
-                      activeOrders={activeOrders}
-                      tacticalUnits={tacticalUnits}
-                      currentRole={currentRole}
-                      rawAlerts={rawAlerts}
-                      clans={clans}
-                      actionableIntel={actionableIntel}
-                      expedientes={expedientes}
-                      onAddExpediente={handleAddExpediente}
-                      onPromoteToIntel={handlePromoteToIntel}
-                      onUpdateAlertStatus={handleUpdateAlertStatus}
-                      onConfirmOrder={handleConfirmOrder}
-                      onSendFieldReport={handleSendFieldReport}
-                      onUpdateUnitCoordinates={handleUpdateUnitCoordinates}
-                      onAddTacticalUnit={handleAddTacticalUnit}
-                      onUpdateTacticalUnit={handleUpdateTacticalUnit}
-                      onDeleteTacticalUnit={handleDeleteTacticalUnit}
-                    />
+                    <>
+                      <TacticalView 
+                        activeOrders={activeOrders}
+                        tacticalUnits={tacticalUnits}
+                        currentRole={currentRole}
+                        rawAlerts={rawAlerts}
+                        clans={clans}
+                        actionableIntel={actionableIntel}
+                        expedientes={expedientes}
+                        onAddExpediente={handleAddExpediente}
+                        onPromoteToIntel={handlePromoteToIntel}
+                        onUpdateAlertStatus={handleUpdateAlertStatus}
+                        onConfirmOrder={handleConfirmOrder}
+                        onSendFieldReport={handleSendFieldReport}
+                        onUpdateUnitCoordinates={handleUpdateUnitCoordinates}
+                        onAddTacticalUnit={handleAddTacticalUnit}
+                        onUpdateTacticalUnit={handleUpdateTacticalUnit}
+                        onDeleteTacticalUnit={handleDeleteTacticalUnit}
+                      />
+
+                      {/* Ventana de Alerta de Interdicción y Seguimiento del Mando LCC */}
+                      <InterdictionAlertTracker 
+                        tacticalUnits={tacticalUnits}
+                        activeOrders={activeOrders}
+                        rawAlerts={rawAlerts}
+                        onConfirmOrder={handleConfirmOrder}
+                        onAddOrderUpdate={handleAppendOrderUpdate}
+                        onCreateOrder={handleCreateOrder}
+                      />
+                    </>
                   )}
                 </div>
-
-                {/* Dynamic Joint Route Analysis Custom Chart Maker (Eliminado en Módulos Activos Asignados / Órganos de Búsqueda) */}
-                {currentRole !== 'ROL_BUSQUEDA' && currentRole !== 'ROL_TERRENO' && currentRole !== 'ROL_PATRULLA' && (
-                  <InteractiveChartCreator 
-                    initialData={initialChartData} 
-                    tacticalUnits={tacticalUnits}
-                    activeOrders={activeOrders}
-                    rawAlerts={rawAlerts}
-                    onConfirmOrder={handleConfirmOrder}
-                    onAddOrderUpdate={handleAppendOrderUpdate}
-                    onCreateOrder={handleCreateOrder}
-                  />
-                )}
               </ErrorBoundary>
             )}
 
@@ -2291,7 +2308,7 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
         onDownloadMobilePackage={downloadMobileApp}
       />
 
-      {/* Interactive Per-Module Background Manager Modal (Persistent across PC & Mobile) */}
+      {/* Interactive Per-Module Background Manager Modal (Legacy) */}
       <ModuleBackgroundModal
         isOpen={showModuleBgModal}
         onClose={() => setShowModuleBgModal(false)}
@@ -2301,6 +2318,23 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
         onResetBackground={handleResetModuleBackground}
         onApplyToAll={handleApplyToAllModules}
         onBatchImport={handleBatchImportBackgrounds}
+      />
+
+      {/* Comprehensive Unified Tactical Background Editor Modal (Interface & Modules) */}
+      <TacticalBackgroundEditorModal
+        isOpen={showTacticalBgModal}
+        onClose={() => setShowTacticalBgModal(false)}
+        globalSettings={fullBgState.settings}
+        activeGlobalImageSrc={fullBgState.activeImageSrc}
+        onUpdateGlobalSettings={fullBgState.updateSettings}
+        onUploadGlobalImage={fullBgState.uploadDashboardImage}
+        onResetGlobal={fullBgState.resetToDefault}
+        activeModuleId={activeModuleId}
+        moduleBackgrounds={moduleBackgrounds}
+        onUpdateModuleBackground={handleUpdateModuleBackground}
+        onResetModuleBackground={handleResetModuleBackground}
+        onApplyToAllModules={handleApplyToAllModules}
+        onBatchImportModules={handleBatchImportBackgrounds}
       />
 
     </div>

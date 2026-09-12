@@ -5,8 +5,10 @@
 
 import React, { useState } from 'react';
 import { AutomatedOrder, Clan, ActionableIntel, TacticalUnit, RawAlert, G2RegistryRecord } from '../types';
-import { Shield, Zap, TrendingUp, AlertTriangle, Play, MapPin, Send, Eye, RefreshCw, Layers, CheckCircle, Radio, Camera, Maximize2, ExternalLink } from 'lucide-react';
+import { Shield, Zap, TrendingUp, AlertTriangle, Play, MapPin, Send, Eye, RefreshCw, Layers, CheckCircle, Radio, Camera, Maximize2, ExternalLink, Navigation, Compass, Globe } from 'lucide-react';
 import { TacticalPhotoViewerModal } from './fusion/TacticalPhotoViewerModal';
+import { PatrolTrackingRadar } from './PatrolTrackingRadar';
+import GoogleEarthPatrolModal from './GoogleEarthPatrolModal';
 
 interface StrategicViewProps {
   activeOrders: AutomatedOrder[];
@@ -106,6 +108,9 @@ export default function StrategicView({
   const [assignedUnit, setAssignedUnit] = useState<string>('');
   const [customObjective, setCustomObjective] = useState<string>('');
   const [activeHotspot, setActiveHotspot] = useState<string | null>(null);
+  const [showPatrolRadar, setShowPatrolRadar] = useState<boolean>(false);
+  const [isGoogleEarthModalOpen, setIsGoogleEarthModalOpen] = useState<boolean>(false);
+  const [selectedPatrolForEarth, setSelectedPatrolForEarth] = useState<TacticalUnit | null>(null);
 
   // Modal inspection state for analyzed photograph
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState<boolean>(false);
@@ -358,14 +363,56 @@ export default function StrategicView({
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-[#3b82f6] animate-ping" />
                 <h3 className="text-sm font-mono font-bold text-white uppercase">
-                  Centro de Situación // Mapa Vectorial de la Frontera
+                  {showPatrolRadar ? 'Centro de Situación // Radar GNSS de Patrullas' : 'Centro de Situación // Mapa Vectorial de la Frontera'}
                 </h3>
               </div>
-              <span className="text-[10px] font-mono text-[#666]">PROYECCIÓN TÁCTICA 2D</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPatrolForEarth(tacticalUnits[0] || null);
+                    setIsGoogleEarthModalOpen(true);
+                  }}
+                  className="text-[10px] font-mono px-2.5 py-1 rounded flex items-center gap-1.5 transition-all cursor-pointer font-bold border bg-[#091526] hover:bg-[#0e213b] text-cyan-300 hover:text-white border-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.25)]"
+                  title="Visualizar ubicación actual de las patrullas en Google Earth 3D en tiempo real"
+                >
+                  <Globe className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                  <span>Google Earth 3D ({tacticalUnits.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowPatrolRadar(prev => !prev)}
+                  className={`text-[10px] font-mono px-2.5 py-1 rounded flex items-center gap-1.5 transition-all cursor-pointer font-bold border ${
+                    showPatrolRadar
+                      ? 'bg-emerald-600 text-black border-emerald-400 shadow-md'
+                      : 'bg-[#111] hover:bg-[#1a1a1a] text-emerald-400 border-emerald-500/40'
+                  }`}
+                  title="Alternar entre mapa vectorial y radar de telemetría de patrullas"
+                >
+                  <Compass className={`w-3.5 h-3.5 ${showPatrolRadar ? 'animate-spin' : ''}`} />
+                  <span>{showPatrolRadar ? 'Ver Mapa Vectorial' : `Radar GNSS (${tacticalUnits.length})`}</span>
+                </button>
+                <span className="text-[10px] font-mono text-[#666]">ENLACE LCC</span>
+              </div>
             </div>
 
-            {/* Simulated Vector Cyber Map */}
-            <div className="relative aspect-[4/3] bg-[#111] border border-[#222] rounded-lg overflow-hidden flex items-center justify-center">
+            {showPatrolRadar ? (
+              <div className="mb-2">
+                <PatrolTrackingRadar
+                  tacticalUnits={tacticalUnits}
+                  rawAlerts={rawAlerts}
+                  actionableIntel={actionableIntel}
+                  title="CEO-LCC // SEGUIMIENTO CONTINUO DE TELEMETRÍA Y POSICIONES GNSS"
+                  onOpenGoogleEarth={(unit) => {
+                    setSelectedPatrolForEarth(unit);
+                    setIsGoogleEarthModalOpen(true);
+                  }}
+                />
+              </div>
+            ) : (
+              /* Simulated Vector Cyber Map */
+              <div className="relative aspect-[4/3] bg-[#111] border border-[#222] rounded-lg overflow-hidden flex items-center justify-center">
               {/* Radar sweeps animation overlay */}
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.02)_0%,transparent_70%)] animate-pulse pointer-events-none" />
               
@@ -402,10 +449,19 @@ export default function StrategicView({
                 {tacticalUnits.map((unit, idx) => {
                   const { x, y } = getUnitMapPosition(unit.coordinates, idx);
                   return (
-                    <g key={unit.id} className="cursor-pointer">
+                    <g 
+                      key={unit.id} 
+                      className="cursor-pointer group"
+                      onClick={() => {
+                        setSelectedPatrolForEarth(unit);
+                        setIsGoogleEarthModalOpen(true);
+                      }}
+                    >
+                      <title>{`${unit.name} (${unit.coordinates}) - Clic para visualizar en Google Earth 3D`}</title>
                       <polygon points={`${x},${y-7} ${x-6},${y+5} ${x+6},${y+5}`} fill="#10b981" />
                       <circle cx={x} cy={y} r="12" stroke="#10b981" strokeWidth="1" strokeDasharray="2 2" fill="none" className="animate-pulse" />
                       <text x={x + 10} y={y + 3} fill="#10b981" fontSize="8" fontFamily="monospace" fontWeight="bold">{unit.name}</text>
+                      <text x={x + 10} y={y + 11} fill="#38bdf8" fontSize="6.5" fontFamily="monospace">Google Earth 3D ↗</text>
                     </g>
                   );
                 })}
@@ -495,11 +551,55 @@ export default function StrategicView({
                 </div>
               )}
             </div>
+            )}
           </div>
 
-          <div className="mt-4 bg-[#111] p-3 border border-[#1a1a1a] rounded-lg flex items-center justify-between text-xs font-mono">
+          {/* Real-Time Patrols Telemetry & Google Earth Bar */}
+          <div className="mt-4 bg-[#0d1322] p-3 border border-cyan-500/30 rounded-lg space-y-2 text-xs font-mono">
+            <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2">
+              <span className="text-cyan-400 font-bold flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Patrullas en Tiempo Real // Visualización Google Earth 3D</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedPatrolForEarth(tacticalUnits[0] || null);
+                  setIsGoogleEarthModalOpen(true);
+                }}
+                className="text-[10px] bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 px-2 py-0.5 rounded flex items-center gap-1 cursor-pointer font-bold"
+              >
+                <Maximize2 className="w-3 h-3" />
+                <span>Abrir Visor 3D</span>
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {tacticalUnits.slice(0, 4).map(u => (
+                <div key={u.id} className="bg-[#070b14] p-2 rounded border border-white/5 flex items-center justify-between">
+                  <div className="truncate mr-2">
+                    <span className="text-white font-bold block truncate">{u.name}</span>
+                    <span className="text-[10px] text-emerald-400 font-mono">{u.coordinates}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedPatrolForEarth(u);
+                      setIsGoogleEarthModalOpen(true);
+                    }}
+                    className="bg-[#0b172a] hover:bg-cyan-900/60 border border-cyan-500/40 text-cyan-300 hover:text-white px-2 py-1 rounded text-[10px] flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                    title={`Ver ${u.name} en Google Earth 3D`}
+                  >
+                    <Globe className="w-3 h-3 text-cyan-400" />
+                    <span>Earth</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-2 bg-[#111] p-2.5 border border-[#1a1a1a] rounded-lg flex items-center justify-between text-xs font-mono">
             <span className="text-[#666]">Última Actualización Satelital:</span>
-            <span className="text-[#10b981]">Canal Seguro 4-E (Sincronizado)</span>
+            <span className="text-[#10b981]">Canal Seguro GNSS RTK (Sincronizado en Vivo)</span>
           </div>
         </div>
 
@@ -833,6 +933,15 @@ export default function StrategicView({
           sourceContext="STRATEGIC_OOA"
         />
       )}
+
+      {/* MODAL TÁCTICO DE VISUALIZACIÓN GOOGLE EARTH 3D EN TIEMPO REAL */}
+      <GoogleEarthPatrolModal
+        isOpen={isGoogleEarthModalOpen}
+        onClose={() => setIsGoogleEarthModalOpen(false)}
+        selectedPatrol={selectedPatrolForEarth}
+        allPatrols={tacticalUnits}
+        onSelectPatrol={(patrol) => setSelectedPatrolForEarth(patrol)}
+      />
     </div>
   );
 }

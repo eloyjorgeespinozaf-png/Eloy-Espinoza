@@ -6,9 +6,11 @@
  * Implementa procesamiento e ingesta automática a Expedientes Operativos
  */
 
-import React, { useState, useEffect } from 'react';
-import { RawAlert, Clan, ActionableIntel, G2RegistryRecord } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { RawAlert, Clan, ActionableIntel, G2RegistryRecord, TacticalUnit } from '../types';
 import { initialG2Records } from '../utils/g2Records';
+import { calculateDistanceKm } from '../utils/geo';
+import { PatrolTrackingRadar } from './PatrolTrackingRadar';
 import { G2DoctrinalViewer } from './fusion/G2DoctrinalViewer';
 import { SearchOrganAlertViewer } from './fusion/SearchOrganAlertViewer';
 import { NewG2RecordModal } from './fusion/NewG2RecordModal';
@@ -33,13 +35,20 @@ import {
   ShieldAlert,
   Clock,
   ExternalLink,
-  Camera
+  Camera,
+  Navigation,
+  Compass,
+  Crosshair,
+  Globe
 } from 'lucide-react';
+import GoogleEarthPatrolModal from './GoogleEarthPatrolModal';
 
 interface OperationalViewProps {
   rawAlerts: RawAlert[];
   clans: Clan[];
   actionableIntel: ActionableIntel[];
+  tacticalUnits?: TacticalUnit[];
+  onUpdateUnitCoordinates?: (unitName: string, newCoords: string) => void;
   expedientes?: G2RegistryRecord[];
   onAddExpediente?: (record: G2RegistryRecord) => void;
   onPromoteToIntel: (
@@ -56,15 +65,23 @@ export default function OperationalView({
   rawAlerts = [],
   clans = [],
   actionableIntel = [],
+  tacticalUnits = [],
+  onUpdateUnitCoordinates,
   expedientes,
   onAddExpediente,
   onPromoteToIntel,
   onUpdateAlertStatus,
   onSimulateRawAlert
 }: OperationalViewProps) {
-  // Mode toggle: Expedientes vs Alertas S-2
-  const [activeFeedTab, setActiveFeedTab] = useState<'G2' | 'S2'>('G2');
+  // Mode toggle: Expedientes vs Alertas S-2 vs Patrullas en Terreno
+  const [activeFeedTab, setActiveFeedTab] = useState<'G2' | 'S2' | 'PATROLS'>('G2');
   const [alertFilterStatus, setAlertFilterStatus] = useState<'PENDING' | 'ALL' | 'PROCESSED'>('PENDING');
+  
+  // Real-time Patrol Tracking Radar Drawer / State
+  const [isPatrolRadarOpen, setIsPatrolRadarOpen] = useState<boolean>(false);
+  const [selectedPatrolForFocus, setSelectedPatrolForFocus] = useState<string | null>(null);
+  const [isGoogleEarthModalOpen, setIsGoogleEarthModalOpen] = useState<boolean>(false);
+  const [selectedPatrolForEarth, setSelectedPatrolForEarth] = useState<TacticalUnit | null>(null);
   
   // Expedientes repository state
   const [g2Records, setG2Records] = useState<G2RegistryRecord[]>(() => {
@@ -516,6 +533,29 @@ ${recommendedAction}
     clan.knownRoutes.some(r => r.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
+  const filteredPatrols = tacticalUnits.filter(u =>
+    u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    u.commander.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (u.coordinates && u.coordinates.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
+
+  // Calculate nearest patrol to currently selected alert's detection coordinates
+  const nearestPatrolToAlert = useMemo(() => {
+    if (!selectedAlert || !tacticalUnits || tacticalUnits.length === 0) return null;
+    let minDistance: number | null = null;
+    let closestUnit: TacticalUnit | null = null;
+
+    tacticalUnits.forEach(u => {
+      const dist = calculateDistanceKm(selectedAlert.coordinates, u.coordinates);
+      if (dist !== null && (minDistance === null || dist < minDistance)) {
+        minDistance = dist;
+        closestUnit = u;
+      }
+    });
+
+    return closestUnit && minDistance !== null ? { unit: closestUnit, distanceKm: minDistance } : null;
+  }, [selectedAlert, tacticalUnits]);
+
   const activeClanDetails = clans.find(c => c.id === selectedClanId) || clans[0];
 
   return (
@@ -541,8 +581,36 @@ ${recommendedAction}
           </div>
         </div>
 
-        {/* Action buttons: Simulation & Manual Record */}
+        {/* Action buttons: Simulation & Manual Record & Patrol Radar */}
         <div className="flex items-center gap-2 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedPatrolForEarth(tacticalUnits[0] || null);
+              setIsGoogleEarthModalOpen(true);
+            }}
+            className="flex-1 sm:flex-initial text-xs font-mono py-2 px-3 rounded-lg flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 cursor-pointer font-bold border bg-[#0a1628] hover:bg-[#112440] text-cyan-300 hover:text-white border-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.25)]"
+            title="Visualizar ubicación actual de las patrullas en Google Earth 3D en tiempo real"
+          >
+            <Globe className="w-4 h-4 text-cyan-400 animate-pulse" />
+            <span>Google Earth 3D ({tacticalUnits.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsPatrolRadarOpen(prev => !prev)}
+            className={`flex-1 sm:flex-initial text-xs font-mono py-2 px-3 rounded-lg flex items-center justify-center gap-2 transition-all shadow-md active:scale-95 cursor-pointer font-bold border ${
+              isPatrolRadarOpen
+                ? 'bg-emerald-600 text-black border-emerald-400'
+                : 'bg-[#0d1626] hover:bg-[#15233c] text-emerald-300 border-emerald-500/40'
+            }`}
+            title="Abre el Radar Táctico de telemetría y seguimiento de patrullas en tiempo real"
+          >
+            <Compass className={`w-4 h-4 ${isPatrolRadarOpen ? 'animate-spin' : ''}`} />
+            <span>Radar Patrullas</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+          </button>
+
           <button
             type="button"
             onClick={handleSimulateFieldReport}
@@ -550,7 +618,7 @@ ${recommendedAction}
             title="Simula la llegada de un reporte táctico desde un sensor o patrulla en frontera"
           >
             <Radio className="w-4 h-4 text-cyan-400 animate-pulse" />
-            <span>Simular Transmisión Órgano S-2</span>
+            <span>Simular Órgano S-2</span>
           </button>
 
           <button
@@ -563,6 +631,24 @@ ${recommendedAction}
           </button>
         </div>
       </div>
+
+      {/* Embedded Real-Time Patrol Tracking Radar */}
+      {isPatrolRadarOpen && (
+        <div className="animate-fade-in">
+          <PatrolTrackingRadar
+            tacticalUnits={tacticalUnits}
+            rawAlerts={rawAlerts}
+            actionableIntel={actionableIntel}
+            selectedUnitName={selectedPatrolForFocus}
+            onSelectUnit={(name) => setSelectedPatrolForFocus(name)}
+            onOpenGoogleEarth={(unit) => {
+              setSelectedPatrolForEarth(unit);
+              setIsGoogleEarthModalOpen(true);
+            }}
+            title="CENTRO DE FUSIÓN (CFI) // RADAR DE SEGUIMIENTO DE PATRULLAS EN VIVO"
+          />
+        </div>
+      )}
 
       {/* SUCCESS BANNER: Newly Implemented Expediente Notice */}
       {justImplementedExpediente && (
@@ -631,7 +717,7 @@ ${recommendedAction}
         {/* LEFT COLUMN: Expedientes Repository & Search Organ Alerts */}
         <div className="lg:col-span-4 bg-[#0a0d14] border border-[#1e2738] rounded-xl p-4 shadow-xl flex flex-col justify-between text-left">
           <div>
-            {/* Feed Tabs Switcher */}
+            {/* Feed Tabs Switcher: Expedientes vs Alertas S-2 vs Patrullas Activas */}
             <div className="flex items-center justify-between border-b border-[#1e2738] pb-3 mb-3">
               <div className="flex gap-1.5 w-full">
                 <button
@@ -642,13 +728,13 @@ ${recommendedAction}
                       handleSelectG2(g2Records[0]);
                     }
                   }}
-                  className={`flex-1 py-1.5 px-2 rounded text-[11px] font-mono font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  className={`flex-1 py-1.5 px-2 rounded text-[10px] font-mono font-bold flex items-center justify-center gap-1 transition-all cursor-pointer ${
                     activeFeedTab === 'G2'
                       ? 'bg-[#f97316] text-white shadow-md'
                       : 'bg-[#121722] text-[#94a3b8] hover:text-white border border-[#22293a]'
                   }`}
                 >
-                  <FolderOpen className="w-3.5 h-3.5" />
+                  <FolderOpen className="w-3 h-3" />
                   <span>EXPEDIENTES ({g2Records.length})</span>
                 </button>
 
@@ -661,19 +747,34 @@ ${recommendedAction}
                       handleSelectAlert(firstPending);
                     }
                   }}
-                  className={`flex-1 py-1.5 px-2 rounded text-[11px] font-mono font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer relative ${
+                  className={`flex-1 py-1.5 px-2 rounded text-[10px] font-mono font-bold flex items-center justify-center gap-1 transition-all cursor-pointer relative ${
                     activeFeedTab === 'S2'
                       ? 'bg-cyan-600 text-white shadow-md'
                       : 'bg-[#121722] text-[#94a3b8] hover:text-white border border-[#22293a]'
                   }`}
                 >
-                  <Radio className="w-3.5 h-3.5" />
+                  <Radio className="w-3 h-3" />
                   <span>ÓRGANOS S-2</span>
                   {pendingAlerts.length > 0 && (
-                    <span className="bg-[#f97316] text-white text-[9px] px-1.5 rounded-full font-bold animate-pulse">
+                    <span className="bg-[#f97316] text-white text-[8px] px-1 rounded-full font-bold animate-pulse">
                       {pendingAlerts.length}
                     </span>
                   )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveFeedTab('PATROLS');
+                  }}
+                  className={`flex-1 py-1.5 px-2 rounded text-[10px] font-mono font-bold flex items-center justify-center gap-1 transition-all cursor-pointer relative ${
+                    activeFeedTab === 'PATROLS'
+                      ? 'bg-emerald-600 text-black shadow-md'
+                      : 'bg-[#121722] text-emerald-400 hover:text-white border border-emerald-500/30'
+                  }`}
+                >
+                  <Navigation className="w-3 h-3" />
+                  <span>PATRULLAS ({tacticalUnits.length})</span>
                 </button>
               </div>
             </div>
@@ -684,11 +785,17 @@ ${recommendedAction}
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder={isG2Selected ? "Buscar expediente, rubro o vector..." : "Buscar alerta S-2, sensor..."}
+                placeholder={
+                  activeFeedTab === 'G2'
+                    ? "Buscar expediente, rubro o vector..."
+                    : activeFeedTab === 'S2'
+                    ? "Buscar alerta S-2, sensor..."
+                    : "Buscar patrulla, comandante o coordenadas..."
+                }
                 className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-3 py-1.5 text-xs font-mono placeholder:text-[#64748b] focus:outline-none focus:border-[#f97316]"
               />
 
-              {isG2Selected ? (
+              {activeFeedTab === 'G2' ? (
                 /* Rubro Filter Chips for Expedientes */
                 <div className="flex flex-wrap gap-1">
                   {(['ALL', 'MILITAR', 'ECONOMICO', 'POLITICO', 'PSICOSOCIAL'] as const).map((r) => (
@@ -706,7 +813,7 @@ ${recommendedAction}
                     </button>
                   ))}
                 </div>
-              ) : (
+              ) : activeFeedTab === 'S2' ? (
                 /* Status Filter Chips for S-2 Alerts */
                 <div className="flex gap-1">
                   {(['PENDING', 'ALL', 'PROCESSED'] as const).map((st) => (
@@ -724,12 +831,21 @@ ${recommendedAction}
                     </button>
                   ))}
                 </div>
+              ) : (
+                /* Patrol Status Banner */
+                <div className="flex items-center justify-between text-[10px] font-mono bg-emerald-950/40 border border-emerald-500/30 p-1.5 rounded text-emerald-300">
+                  <span>TELEMETRÍA EN TIEMPO REAL</span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    GPS / GNSS ACTIVO
+                  </span>
+                </div>
               )}
             </div>
 
             {/* List View Container */}
             <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
-              {isG2Selected ? (
+              {activeFeedTab === 'G2' ? (
                 filteredG2.length === 0 ? (
                   <div className="text-center py-12 border border-dashed border-[#1e2738] rounded-lg text-[#64748b] text-xs font-mono">
                     No se encontraron expedientes con los filtros actuales.
@@ -780,7 +896,7 @@ ${recommendedAction}
                     );
                   })
                 )
-              ) : (
+              ) : activeFeedTab === 'S2' ? (
                 filteredAlerts.length === 0 ? (
                   <div className="text-center py-12 border border-dashed border-[#1e2738] rounded-lg text-[#64748b] text-xs font-mono">
                     No hay alertas de órganos de búsqueda en esta vista.
@@ -819,6 +935,90 @@ ${recommendedAction}
                         <div className="flex items-center justify-between text-[9px] font-mono text-[#64748b] pt-1 border-t border-[#1e2738]">
                           <span>Coord: {alert.coordinates}</span>
                           <span>{new Date(alert.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )
+              ) : (
+                /* PATROLS LIST VIEW WITH REAL-TIME COORDINATES */
+                filteredPatrols.length === 0 ? (
+                  <div className="text-center py-12 border border-dashed border-[#1e2738] rounded-lg text-[#64748b] text-xs font-mono">
+                    No se encontraron patrullas desplegadas.
+                  </div>
+                ) : (
+                  filteredPatrols.map((unit) => {
+                    const isFocus = selectedPatrolForFocus === unit.name;
+                    return (
+                      <div
+                        key={unit.id}
+                        className={`p-3 rounded-lg border text-left transition-all ${
+                          isFocus
+                            ? 'bg-emerald-950/30 border-emerald-500'
+                            : 'bg-[#0f1420] border-[#1e2738] hover:border-emerald-500/40'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-xs font-mono font-bold text-white flex items-center gap-1.5">
+                            <Navigation className="w-3.5 h-3.5 text-emerald-400" />
+                            {unit.name}
+                          </span>
+                          <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                            unit.status === 'INTERCEPTING'
+                              ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse'
+                              : unit.status === 'PATROLLING'
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                              : 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/30'
+                          }`}>
+                            {unit.status}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1 mb-2">
+                          <div className="text-[11px] font-mono text-[#cbd5e1] flex items-center justify-between">
+                            <span className="text-[#888]">Cdo:</span>
+                            <span className="font-bold text-slate-200">{unit.commander}</span>
+                          </div>
+                          <div className="bg-[#111827] px-2 py-1 rounded border border-[#1e293b] flex items-center justify-between">
+                            <span className="text-[9px] font-mono text-[#64748b] flex items-center gap-1">
+                              <MapPin className="w-3 h-3 text-emerald-400" />
+                              GPS:
+                            </span>
+                            <span className="text-[10px] font-mono text-emerald-300 font-bold">
+                              {unit.coordinates || 'NO FIJADA'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1 border-t border-[#1e2738] text-[9px] font-mono">
+                          <span className="text-[#64748b]">
+                            Combustible: <strong className="text-slate-300">{unit.fuel}%</strong> | Bat: <strong className="text-slate-300">{unit.battery}%</strong>
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPatrolForEarth(unit);
+                                setIsGoogleEarthModalOpen(true);
+                              }}
+                              className="text-cyan-300 hover:text-white bg-cyan-950/40 hover:bg-cyan-900/60 border border-cyan-500/40 px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                              title={`Ver ${unit.name} en Google Earth 3D`}
+                            >
+                              <Globe className="w-3 h-3 text-cyan-400" />
+                              <span>Earth 3D</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPatrolForFocus(unit.name);
+                                setIsPatrolRadarOpen(true);
+                              }}
+                              className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Crosshair className="w-3 h-3" />
+                              <span>Ver en Radar</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -879,14 +1079,65 @@ ${recommendedAction}
                 
                 {/* CASE A: Search Organ Alert Selected -> Render Full S-2 Inspector */}
                 {!isG2Selected && selectedAlert && (
-                  <SearchOrganAlertViewer
-                    alert={selectedAlert}
-                    selectedIdeas={selectedIdeas}
-                    onToggleIdea={toggleIdea}
-                    onInjectIdeas={handleInjectIdeasIntoAction}
-                    onQuickProcessToExpediente={() => handleProcessAlertToExpediente(selectedAlert)}
-                    nextExpedienteId={nextExpedienteId}
-                  />
+                  <div className="space-y-3">
+                    <SearchOrganAlertViewer
+                      alert={selectedAlert}
+                      selectedIdeas={selectedIdeas}
+                      onToggleIdea={toggleIdea}
+                      onInjectIdeas={handleInjectIdeasIntoAction}
+                      onQuickProcessToExpediente={() => handleProcessAlertToExpediente(selectedAlert)}
+                      nextExpedienteId={nextExpedienteId}
+                    />
+
+                    {/* Proximity Card: Real-time nearest patrol to detection coordinates */}
+                    {nearestPatrolToAlert && (
+                      <div className="bg-[#0b1322] border border-emerald-500/40 rounded-lg p-3 text-left">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[10px] font-mono font-bold text-emerald-300 uppercase flex items-center gap-1.5">
+                            <Navigation className="w-3.5 h-3.5 text-emerald-400" />
+                            PATRULLA MÁS CERCANA AL VECTOR DE DETECCIÓN
+                          </span>
+                          <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/30 font-bold">
+                            {nearestPatrolToAlert.distanceKm.toFixed(1)} KM DE DISTANCIA
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs font-mono">
+                          <div>
+                            <span className="text-white font-bold">{nearestPatrolToAlert.unit.name}</span>
+                            <span className="text-[#888] ml-2">Cdo: {nearestPatrolToAlert.unit.commander}</span>
+                            <div className="text-[10px] text-emerald-400 mt-0.5">
+                              GPS Actual: {nearestPatrolToAlert.unit.coordinates}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPatrolForEarth(nearestPatrolToAlert.unit);
+                                setIsGoogleEarthModalOpen(true);
+                              }}
+                              className="px-2.5 py-1.5 bg-[#0a1628] hover:bg-[#112440] text-cyan-300 hover:text-white border border-cyan-500/50 font-mono font-bold text-[10px] rounded flex items-center gap-1 cursor-pointer transition-all shadow"
+                              title="Visualizar patrulla más cercana en Google Earth 3D"
+                            >
+                              <Globe className="w-3 h-3 text-cyan-400" />
+                              <span>Google Earth 3D</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPatrolForFocus(nearestPatrolToAlert.unit.name);
+                                setIsPatrolRadarOpen(true);
+                              }}
+                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-black font-mono font-bold text-[10px] rounded flex items-center gap-1 cursor-pointer transition-all shadow"
+                            >
+                              <Crosshair className="w-3 h-3" />
+                              <span>Seguir en Radar</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {/* CASE B: Expediente Selected -> Render Cartographic & Doctrinal Viewer */}
@@ -1281,6 +1532,15 @@ ${recommendedAction}
           alert={selectedAlert}
         />
       )}
+
+      {/* Real-time Patrol Location in Google Earth 3D Modal */}
+      <GoogleEarthPatrolModal
+        isOpen={isGoogleEarthModalOpen}
+        onClose={() => setIsGoogleEarthModalOpen(false)}
+        selectedPatrol={selectedPatrolForEarth}
+        allPatrols={tacticalUnits}
+        onSelectPatrol={(patrol) => setSelectedPatrolForEarth(patrol)}
+      />
     </div>
   );
 }
