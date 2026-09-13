@@ -22,7 +22,7 @@ export const ModuleBackgroundLayer: React.FC<ModuleBackgroundLayerProps> = ({
   onOpenManager
 }) => {
   const moduleMeta = TACTICAL_MODULES_LIST.find(m => m.id === activeModuleId);
-  const fallbackUrl = moduleMeta?.defaultPresetImage || '/INTERFAZ.jpg';
+  const fallbackUrl = moduleMeta?.defaultPresetImage || (activeModuleId === 'MOD_CEO' ? '/INTERFAZ.jpg' : '/dashboard-room.svg');
 
   const [activeSrc, setActiveSrc] = useState<string>(() => {
     return config?.dataUrl || config?.imageUrl || fallbackUrl;
@@ -33,6 +33,10 @@ export const ModuleBackgroundLayer: React.FC<ModuleBackgroundLayerProps> = ({
     const nextSrc = config?.dataUrl || config?.imageUrl || fallbackUrl;
     setActiveSrc(nextSrc);
   }, [config?.dataUrl, config?.imageUrl, fallbackUrl, activeModuleId]);
+
+  // If background is explicitly disabled, or no image is set, do not render
+  if (config?.enabled === false) return null;
+  if (!activeSrc || !activeSrc.trim()) return null;
 
   const opacity = config?.opacity !== undefined ? config.opacity : 0.80;
   const blur = config?.blur || 0;
@@ -65,24 +69,26 @@ export const ModuleBackgroundLayer: React.FC<ModuleBackgroundLayerProps> = ({
       id={`module-bg-layer-${activeModuleId}`}
     >
       {/* 1. Dynamic Per-Module Background Image with Smooth Fade */}
-      <img
-        key={`${activeModuleId}-${activeSrc}`}
-        src={activeSrc}
-        alt={`Fondo Táctico Asignado - ${moduleMeta?.name || activeModuleId}`}
-        referrerPolicy="no-referrer"
-        onError={() => {
-          if (activeSrc !== fallbackUrl) {
-            setActiveSrc(fallbackUrl);
-          }
-        }}
-        className={`w-full h-full transition-all duration-700 ease-out ${
-          fitMode === 'contain' ? 'object-contain object-center' : 'object-cover object-center'
-        }`}
-        style={{
-          opacity,
-          filter: finalFilter
-        }}
-      />
+      {Boolean(activeSrc && activeSrc.trim() !== '') && (
+        <img
+          key={`${activeModuleId}-${activeSrc}`}
+          src={activeSrc}
+          alt={`Fondo Táctico Asignado - ${moduleMeta?.name || activeModuleId}`}
+          referrerPolicy="no-referrer"
+          onError={() => {
+            if (fallbackUrl && activeSrc !== fallbackUrl) {
+              setActiveSrc(fallbackUrl);
+            }
+          }}
+          className={`w-full h-full transition-all duration-700 ease-out ${
+            fitMode === 'contain' ? 'object-contain object-center' : 'object-cover object-center'
+          }`}
+          style={{
+            opacity,
+            filter: finalFilter
+          }}
+        />
+      )}
 
       {/* 2. Optical Tint Layer if filter is active */}
       {opticalFilter !== 'none' && (

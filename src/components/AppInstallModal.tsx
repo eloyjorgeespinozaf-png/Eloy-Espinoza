@@ -41,11 +41,14 @@ export const AppInstallModal: React.FC<AppInstallModalProps> = ({
 
   if (!isOpen) return null;
 
-  const currentAppUrl = typeof window !== 'undefined' ? window.location.href : 'https://ais-pre-w5xoplsdxtpt7onky6idvp-174948198274.us-west2.run.app';
+  const currentAppUrl = typeof window !== 'undefined' ? window.location.href : '/';
+  const currentAppOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
   const handleCopyLink = () => {
     try {
-      navigator.clipboard.writeText(currentAppUrl);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(currentAppUrl).catch(e => console.warn('Clipboard write failed:', e));
+      }
       setCopiedUrl(true);
       playSyntheticBeep(880, 0.1);
       setTimeout(() => setCopiedUrl(false), 3000);
@@ -103,22 +106,23 @@ exit
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     playSyntheticBeep(920, 0.12);
   };
 
   // Helper to generate a Windows Desktop Shortcut (.url file)
   const downloadWindowsShortcut = () => {
+    const iconUrl = `${currentAppOrigin}/pwa-192x192.png`;
     const urlFileContent = `[InternetShortcut]
 URL=${currentAppUrl}
 IconIndex=0
-IconFile=https://ais-pre-w5xoplsdxtpt7onky6idvp-174948198274.us-west2.run.app/pwa-192x192.png
+IconFile=${iconUrl}
 HotKey=0
 IDList=
 [{000214A0-0000-0000-C000-000000000046}]
 Prop3=19,0
 [InternetShortcut.A]
-IconFile=https://ais-pre-w5xoplsdxtpt7onky6idvp-174948198274.us-west2.run.app/pwa-192x192.png
+IconFile=${iconUrl}
 `;
     const blob = new Blob([urlFileContent], { type: 'application/internet-shortcut' });
     const url = URL.createObjectURL(blob);
@@ -128,7 +132,7 @@ IconFile=https://ais-pre-w5xoplsdxtpt7onky6idvp-174948198274.us-west2.run.app/pw
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     playSyntheticBeep(920, 0.12);
   };
 
@@ -152,7 +156,7 @@ Categories=Office;Security;System;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     playSyntheticBeep(920, 0.12);
   };
 
@@ -411,12 +415,14 @@ Categories=Office;Security;System;
               <div className="bg-[#090e17] border border-cyan-900/50 rounded-xl p-4 sm:p-5 flex flex-col md:flex-row items-center gap-6">
                 {/* QR Code Container */}
                 <div className="shrink-0 flex flex-col items-center bg-[#050505] p-3 rounded-xl border border-emerald-500/50 shadow-[0_0_20px_rgba(16,185,129,0.15)]">
-                  <img
-                    src={qrCodeImageUrl}
-                    alt="Código QR para abrir en Celular"
-                    className="w-44 h-44 rounded-lg bg-black object-contain"
-                    loading="lazy"
-                  />
+                  {Boolean(qrCodeImageUrl && qrCodeImageUrl.trim() !== '') && (
+                    <img
+                      src={qrCodeImageUrl}
+                      alt="Código QR para abrir en Celular"
+                      className="w-44 h-44 rounded-lg bg-black object-contain"
+                      loading="lazy"
+                    />
+                  )}
                   <span className="text-[10px] text-emerald-400 font-bold mt-2 tracking-wider flex items-center gap-1">
                     <QrCode className="w-3.5 h-3.5" />
                     ESCANEAR CON LA CÁMARA

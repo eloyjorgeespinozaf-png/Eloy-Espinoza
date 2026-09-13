@@ -45,11 +45,30 @@ import {
   TACTICAL_MODULES_LIST 
 } from './services/ModuleBackgroundService';
 import { AppInstallModal } from './components/AppInstallModal';
+import { TacticalUpdateManager } from './components/TacticalUpdateManager';
+import GoogleEarthPatrolModal from './components/GoogleEarthPatrolModal';
+import UserManagementModal from './components/UserManagementModal';
+import ClanManagementModal from './components/ClanManagementModal';
+import DataStorageManagerModal from './components/DataStorageManagerModal';
+import SupabaseSyncModal from './components/SupabaseSyncModal';
+import { requestDeviceLocation, getCachedDeviceLocation, detectDevicePlatform } from './utils/deviceLocation';
+import { generateDeviceRealLocationKml, downloadKmlFile } from './utils/geo';
 
-import { Shield, Radio, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2, Smartphone, Laptop, Image as ImageIcon, Palette } from 'lucide-react';
+import { Shield, Radio, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2, Smartphone, Laptop, Image as ImageIcon, Palette, Globe, Crown, Database, HardDrive, Users, Save, Cloud } from 'lucide-react';
 import { useAuth, PRESET_USERS } from './context/AuthContext';
 import { safeStorage } from './utils/storage';
-import { playSyntheticBeep, playChime } from './utils/audio';
+import { 
+  playSyntheticBeep, 
+  playChime, 
+  playCyberClick, 
+  playCyberModuleTransition, 
+  playCyberAccessGranted, 
+  playCyberDenied, 
+  playCyberAlert 
+} from './utils/audio';
+
+// Safe localStorage helper to prevent DOMException/SecurityError in private browsing or iframe environments
+const safeLocalStorage = safeStorage;
 
 export default function App() {
   const { fontPreset } = useGamingFont();
@@ -67,7 +86,18 @@ export default function App() {
   } = useAuth();
 
   const [selectedLoginRole, setSelectedLoginRole] = useState<MilitaryRole>('ROL_PATRULLA');
-  const [rawAlerts, setRawAlerts] = useState<RawAlert[]>(initialRawAlerts);
+  const [rawAlerts, setRawAlerts] = useState<RawAlert[]>(() => {
+    try {
+      const saved = safeLocalStorage.getItem('PII_LCC_RAW_ALERTS');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn('Failed to parse cached raw alerts:', e);
+    }
+    return initialRawAlerts;
+  });
   const [expedientes, setExpedientes] = useState<G2RegistryRecord[]>(() => {
     try {
       const saved = safeStorage.getItem('pii_lcc_expedientes');
@@ -77,12 +107,45 @@ export default function App() {
     }
     return initialG2Records;
   });
-  const [clans, setClans] = useState<Clan[]>(initialClans);
-  const [actionableIntel, setActionableIntel] = useState<ActionableIntel[]>(initialActionableIntel);
-  const [activeOrders, setActiveOrders] = useState<AutomatedOrder[]>(initialOrders);
+  const [clans, setClans] = useState<Clan[]>(() => {
+    try {
+      const saved = safeLocalStorage.getItem('PII_LCC_CLANS');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn('Failed to parse cached clans:', e);
+    }
+    return initialClans;
+  });
+  const [actionableIntel, setActionableIntel] = useState<ActionableIntel[]>(() => {
+    try {
+      const saved = safeLocalStorage.getItem('PII_LCC_ACTIONABLE_INTEL');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn('Failed to parse cached actionable intel:', e);
+    }
+    return initialActionableIntel;
+  });
+  const [activeOrders, setActiveOrders] = useState<AutomatedOrder[]>(() => {
+    try {
+      const saved = safeLocalStorage.getItem('PII_LCC_ACTIVE_ORDERS');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn('Failed to parse cached active orders:', e);
+    }
+    return initialOrders;
+  });
   const [tacticalUnits, setTacticalUnits] = useState<TacticalUnit[]>(() => {
     try {
-      const saved = localStorage.getItem('PII_LCC_TACTICAL_UNITS');
+      const saved = safeLocalStorage.getItem('PII_LCC_TACTICAL_UNITS');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -100,6 +163,95 @@ export default function App() {
   const [moduleBackgrounds, setModuleBackgrounds] = useState<ModuleBackgroundsMap>(createDefaultModuleBackgrounds);
   const [showModuleBgModal, setShowModuleBgModal] = useState<boolean>(false);
   const [showTacticalBgModal, setShowTacticalBgModal] = useState<boolean>(false);
+  const [showGlobalGoogleEarthModal, setShowGlobalGoogleEarthModal] = useState<boolean>(false);
+
+  // Administrative User Management, Clan Intelligence, Data Storage and Supabase Modals
+  const [showUserManagementModal, setShowUserManagementModal] = useState<boolean>(false);
+  const [showClanManagementModal, setShowClanManagementModal] = useState<boolean>(false);
+  const [showDataStorageModal, setShowDataStorageModal] = useState<boolean>(false);
+  const [showSupabaseModal, setShowSupabaseModal] = useState<boolean>(false);
+
+  // Clan persistence and modification handlers
+  const handleSaveClan = useCallback((clanToSave: Clan) => {
+    setClans(prev => {
+      const idx = prev.findIndex(c => c.id === clanToSave.id);
+      let updated: Clan[];
+      if (idx >= 0) {
+        updated = [...prev];
+        updated[idx] = clanToSave;
+      } else {
+        updated = [clanToSave, ...prev];
+      }
+      safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
+  const handleDeleteClan = useCallback((clanId: string) => {
+    setClans(prev => {
+      const updated = prev.filter(c => c.id !== clanId);
+      safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
+  const handleBatchImportClans = useCallback((importedClans: Clan[]) => {
+    setClans(importedClans);
+    safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(importedClans));
+  }, []);
+
+  const handleRestoreAllData = useCallback((data: {
+    clans?: Clan[];
+    rawAlerts?: RawAlert[];
+    expedientes?: G2RegistryRecord[];
+    actionableIntel?: ActionableIntel[];
+    activeOrders?: AutomatedOrder[];
+    tacticalUnits?: TacticalUnit[];
+  }) => {
+    if (data.clans && Array.isArray(data.clans)) {
+      setClans(data.clans);
+      safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(data.clans));
+    }
+    if (data.rawAlerts && Array.isArray(data.rawAlerts)) {
+      setRawAlerts(data.rawAlerts);
+      safeLocalStorage.setItem('PII_LCC_RAW_ALERTS', JSON.stringify(data.rawAlerts));
+    }
+    if (data.expedientes && Array.isArray(data.expedientes)) {
+      setExpedientes(data.expedientes);
+      safeStorage.setItem('pii_lcc_expedientes', JSON.stringify(data.expedientes));
+    }
+    if (data.actionableIntel && Array.isArray(data.actionableIntel)) {
+      setActionableIntel(data.actionableIntel);
+      safeLocalStorage.setItem('PII_LCC_ACTIONABLE_INTEL', JSON.stringify(data.actionableIntel));
+    }
+    if (data.activeOrders && Array.isArray(data.activeOrders)) {
+      setActiveOrders(data.activeOrders);
+      safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(data.activeOrders));
+    }
+    if (data.tacticalUnits && Array.isArray(data.tacticalUnits)) {
+      setTacticalUnits(data.tacticalUnits);
+      safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(data.tacticalUnits));
+    }
+
+    // Sync restored state with server
+    try {
+      fetch('/api/backup/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tacticalState: {
+            rawAlerts: data.rawAlerts,
+            clans: data.clans,
+            actionableIntel: data.actionableIntel,
+            activeOrders: data.activeOrders,
+            tacticalUnits: data.tacticalUnits
+          }
+        })
+      }).catch(() => {});
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const [isInstalledDevice, setIsInstalledDevice] = useState<boolean>(() => {
     const isStandalone = typeof window !== 'undefined' && Boolean(
@@ -127,22 +279,19 @@ export default function App() {
   const [notificationsSoundEnabled, setNotificationsSoundEnabled] = useState<boolean>(true);
   const prevAlertIdsRef = useRef<Set<string>>(new Set());
 
-  // Function to play crisp military confirmation sound upon report validation
+  // Function to play futuristic cybernetic confirmation sound upon report validation
   const playValidationSound = () => {
     try {
-      playSyntheticBeep(523.25, 0.12, 'sine', 0.05);
-      setTimeout(() => playSyntheticBeep(659.25, 0.12, 'sine', 0.05), 80);
-      setTimeout(() => playSyntheticBeep(783.99, 0.15, 'sine', 0.05), 160);
-      setTimeout(() => playSyntheticBeep(1046.50, 0.25, 'triangle', 0.06), 240);
+      playCyberAccessGranted(0.09);
     } catch (e) {
       console.warn('[PII-LCC Audio] Validation sound blocked or failed:', e);
     }
   };
 
-  // Function to play warning chime on new alert
+  // Function to play futuristic cybernetic warning chime on new alert
   const playNotificationChime = () => {
     try {
-      playChime(800, 1100, 0.2);
+      playCyberAlert(960, 0.1);
     } catch (e) {
       console.warn('[PII-LCC Audio] Tone restricted or failed:', e);
     }
@@ -177,9 +326,6 @@ export default function App() {
       rawAlerts.forEach(a => prevAlertIdsRef.current.add(a.id));
     }
   }, [rawAlerts, notificationsSoundEnabled]);
-
-  // Safe localStorage helper to prevent DOMException/SecurityError in private browsing or iframe environments
-  const safeLocalStorage = safeStorage;
 
   // Automatic OTA update tracking
   const APP_VERSION = 'v2.4.0-CAD';
@@ -235,6 +381,10 @@ export default function App() {
   };
 
   useEffect(() => {
+    // Purge legacy global background storage so old global overlay never reappears
+    safeLocalStorage.removeItem('ceo_lcc_dashboard_full_bg_config_v5');
+    safeLocalStorage.removeItem('ceo_lcc_dashboard_full_bg_config_v6');
+
     if (safeLocalStorage.getItem('PII_LCC_JUST_UPDATED') === 'true') {
       setJustUpdatedToast(true);
       safeLocalStorage.removeItem('PII_LCC_JUST_UPDATED');
@@ -254,13 +404,25 @@ export default function App() {
     if (!state) return;
     const { version: serverVersion, rawAlerts: incomingAlerts, clans: incomingClans, actionableIntel: incomingIntel, activeOrders: incomingOrders, tacticalUnits: incomingUnits, auditLogs: incomingLogs, changelog } = state;
     
-    if (incomingAlerts) setRawAlerts(incomingAlerts);
-    if (incomingClans) setClans(incomingClans);
-    if (incomingIntel) setActionableIntel(incomingIntel);
-    if (incomingOrders) setActiveOrders(incomingOrders);
+    if (incomingAlerts) {
+      setRawAlerts(incomingAlerts);
+      safeLocalStorage.setItem('PII_LCC_RAW_ALERTS', JSON.stringify(incomingAlerts));
+    }
+    if (incomingClans) {
+      setClans(incomingClans);
+      safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(incomingClans));
+    }
+    if (incomingIntel) {
+      setActionableIntel(incomingIntel);
+      safeLocalStorage.setItem('PII_LCC_ACTIONABLE_INTEL', JSON.stringify(incomingIntel));
+    }
+    if (incomingOrders) {
+      setActiveOrders(incomingOrders);
+      safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(incomingOrders));
+    }
     if (incomingUnits) {
       setTacticalUnits(incomingUnits);
-      try { localStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(incomingUnits)); } catch (e) {}
+      safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(incomingUnits));
     }
 
     if (state.moduleBackgrounds) {
@@ -268,6 +430,10 @@ export default function App() {
         ...prev,
         ...state.moduleBackgrounds
       }));
+    }
+
+    if (state.fullDashboardBackground) {
+      window.dispatchEvent(new CustomEvent('full-dashboard-bg-update', { detail: { settings: state.fullDashboardBackground } }));
     }
 
     if (incomingLogs && incomingLogs.length > 0) {
@@ -362,6 +528,15 @@ export default function App() {
                 }));
               }
               return;
+            }
+
+            if (type === 'FULL_DASHBOARD_BG_UPDATE' && payload?.settings) {
+              window.dispatchEvent(new CustomEvent('full-dashboard-bg-update', { detail: { settings: payload.settings } }));
+              return;
+            }
+
+            if (type === 'SYSTEM_UPGRADE_ALERT' && payload) {
+              window.dispatchEvent(new CustomEvent('system-upgrade-alert', { detail: payload }));
             }
 
             if (type === 'INIT' || type === 'STATE_UPDATE' || type === 'SYSTEM_UPGRADE_ALERT') {
@@ -463,11 +638,15 @@ export default function App() {
     });
   }, []);
   
+  // Administrator oversight state: CEO-LCC Mando can inspect any Search Organ
+  const [adminSupervisedOrgan, setAdminSupervisedOrgan] = useState<MilitaryRole | null>(null);
+
   // Current active role equals user's role if logged in, or selectedLoginRole otherwise
   const currentRole = isAuthenticated && user ? user.role : selectedLoginRole;
 
   // Resolve current active tactical module based on active tab and operator role
-  const activeModuleId: TacticalModuleId = resolveActiveModuleId(activeWorkspaceTab, currentRole);
+  const effectiveModuleRole = currentRole === 'ROL_CEO' && adminSupervisedOrgan ? adminSupervisedOrgan : currentRole;
+  const activeModuleId: TacticalModuleId = resolveActiveModuleId(activeWorkspaceTab, effectiveModuleRole);
   const activeModuleMeta = TACTICAL_MODULES_LIST.find(m => m.id === activeModuleId);
 
   // Handlers for Module Backgrounds management with cross-device sync
@@ -875,7 +1054,7 @@ export default function App() {
     if (!validateBackendPermission('ROL_PATRULLA', `Actualizar Posición GPS de la Unidad: ${unitName}`, newCoords)) return;
     setTacticalUnits(prev => {
       const next = prev.map(unit => unit.name === unitName ? { ...unit, coordinates: newCoords, lastReportTime: 'Hace un momento' } : unit);
-      try { localStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next)); } catch (e) {}
+      safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
       return next;
     });
     sendWsMessage('UPDATE_UNIT_COORDINATES', { unitName, newCoords });
@@ -885,7 +1064,7 @@ export default function App() {
     if (!validateBackendPermission('ROL_BUSQUEDA', `Desplegar Nueva Patrulla Táctica: ${unit.name}`, unit.coordinates)) return;
     setTacticalUnits(prev => {
       const next = [...prev, unit];
-      try { localStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next)); } catch (e) {}
+      safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
       return next;
     });
     sendWsMessage('ADD_TACTICAL_UNIT', { unit, userId: currentRole, role: currentRole });
@@ -895,7 +1074,7 @@ export default function App() {
     if (!validateBackendPermission('ROL_BUSQUEDA', `Actualizar Datos de Patrulla: ${unit.name}`, unit.coordinates)) return;
     setTacticalUnits(prev => {
       const next = prev.map(u => u.id === unit.id ? unit : u);
-      try { localStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next)); } catch (e) {}
+      safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
       return next;
     });
     sendWsMessage('UPDATE_TACTICAL_UNIT', { unitId: unit.id, updates: unit, userId: currentRole, role: currentRole });
@@ -905,13 +1084,19 @@ export default function App() {
     if (!validateBackendPermission('ROL_BUSQUEDA', `Replegar Patrulla Táctica ID: ${unitId}`, '19°13\'10"S 68°35\'50"W')) return;
     setTacticalUnits(prev => {
       const next = prev.filter(u => u.id !== unitId);
-      try { localStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next)); } catch (e) {}
+      safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
       return next;
     });
     sendWsMessage('DELETE_TACTICAL_UNIT', { unitId, userId: currentRole, role: currentRole });
   };
 
   const handleSetRoleAttempt = (role: MilitaryRole) => {
+    if (currentRole === 'ROL_CEO') {
+      setAdminSupervisedOrgan(role === 'ROL_CEO' ? null : role);
+      playCyberModuleTransition(role);
+      return;
+    }
+    playCyberModuleTransition(role);
     login(role);
   };
 
@@ -1161,6 +1346,45 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
     };
     setAuditLogs(prev => [latestLog, ...prev]);
     sendWsMessage('LOG_AUDIT_ACTION', { logEntry: latestLog });
+  };
+
+  const downloadRealDeviceKmlFromApp = async () => {
+    setShowDownloadMenu(false);
+    playSyntheticBeep(950, 0.12);
+    try {
+      const loc = await requestDeviceLocation();
+      const kml = generateDeviceRealLocationKml({
+        lat: loc.lat,
+        lon: loc.lon,
+        accuracy: loc.accuracy,
+        altitude: loc.altitude,
+        speed: loc.speed,
+        heading: loc.heading,
+        operatorName: user ? user.name : 'Operador Táctico PII-LCC',
+        role: currentRole,
+        devicePlatform: detectDevicePlatform(),
+        timestamp: loc.isoTime
+      });
+      downloadKmlFile(`PII-LCC_Ubicacion_Real_Dispositivo_${loc.isoTime.substring(0, 10)}`, kml);
+      playCyberAccessGranted();
+    } catch (err) {
+      console.warn('GPS location request error, falling back to cached:', err);
+      const cached = getCachedDeviceLocation();
+      const lat = cached?.lat || -19.219444;
+      const lon = cached?.lon || -68.597222;
+      const kml = generateDeviceRealLocationKml({
+        lat,
+        lon,
+        accuracy: cached?.accuracy || null,
+        altitude: cached?.altitude || null,
+        operatorName: user ? user.name : 'Operador Táctico PII-LCC',
+        role: currentRole,
+        devicePlatform: detectDevicePlatform(),
+        timestamp: new Date().toISOString()
+      });
+      downloadKmlFile(`PII-LCC_Ubicacion_Real_Dispositivo_${new Date().toISOString().substring(0, 10)}`, kml);
+      playCyberAccessGranted();
+    }
   };
 
   // If operator has not authenticated into an organ terminal, display military login interface
@@ -1460,6 +1684,12 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
               )}
             </div>
 
+            {/* Tactical Version, Update Monitor & Cloud Sync */}
+            <TacticalUpdateManager 
+              currentVersion={appVersion}
+              onOpenInstallModal={() => setShowInstallModal(true)}
+            />
+
             <div className="h-8 w-px bg-zinc-800/80"></div>
 
             {/* Top-Right Intact ECEME Graphic ("SER ANTES QUE PARECER") */}
@@ -1502,30 +1732,96 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
           {/* Identity HUD Card */}
           <div className="flex items-center gap-3 bg-[#0a0a0a] border border-[#1a1a1a] p-3 rounded-lg max-w-sm w-full md:w-80">
             <div className={`p-2.5 rounded ${
-              currentRole === 'ROL_CEO' ? 'bg-[#3b82f6]/10 text-[#3b82f6] border border-[#3b82f6]/20' :
+              currentRole === 'ROL_CEO' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.2)]' :
               currentRole === 'ROL_FUSION' ? 'bg-[#f97316]/10 text-[#f97316] border border-[#f97316]/20' :
               currentRole === 'ROL_BUSQUEDA' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' :
               'bg-[#10b981]/10 text-[#10b981] border border-[#10b981]/20'
             }`}>
-              <UserIcon className="w-4 h-4" />
+              {currentRole === 'ROL_CEO' ? <Crown className="w-4 h-4 text-blue-400" /> : <UserIcon className="w-4 h-4" />}
             </div>
             <div className="text-left font-mono flex-1">
               <span className="text-[9px] text-[#666] uppercase block leading-none">Operador Militar Activo:</span>
               <span className="text-xs font-bold text-white block mt-0.5">
-                {currentRole === 'ROL_CEO' && 'GRAL. E. MARTÍNEZ (CEO)'}
+                {currentRole === 'ROL_CEO' && 'GRAL. E. MARTÍNEZ (ADMIN)'}
                 {currentRole === 'ROL_FUSION' && 'TTE. CNEL. S. ROJAS (CFI)'}
                 {currentRole === 'ROL_BUSQUEDA' && 'MY. R. VARGAS (S-2)'}
                 {(currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && 'CB1. F. VALENZUELA (PATRULLA)'}
               </span>
               <span className="text-[9px] text-slate-500 flex items-center gap-1 mt-0.5">
-                {currentRole === 'ROL_CEO' && '3. CEO-LCC MANDO'}
-                {currentRole === 'ROL_FUSION' && '2. CFI DE BRIGADA'}
-                {currentRole === 'ROL_BUSQUEDA' && '1. ÓRGANOS DE BÚSQUEDA'}
-                {(currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && '4. UNIDADES DE TERRENO'}
+                {currentRole === 'ROL_CEO' && (
+                  <span className="text-blue-400 font-bold flex items-center gap-1">
+                    👑 CEO-LCC MANDO (ADMIN)
+                  </span>
+                )}
+                {currentRole === 'ROL_FUSION' && 'ÓRGANO DE FUSIÓN (CFI)'}
+                {currentRole === 'ROL_BUSQUEDA' && 'ÓRGANO DE BÚSQUEDA S-2'}
+                {(currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && 'ÓRGANO DE BÚSQUEDA EN TERRENO'}
               </span>
             </div>
             {isAuthenticated && (
               <div className="flex items-center gap-1.5 relative">
+                {/* Admin-Only User Management Button (CEO-LCC Mando) */}
+                {(currentRole === 'ROL_CEO' || user?.isAdmin) && (
+                  <button
+                    onClick={() => {
+                      setShowUserManagementModal(true);
+                      playCyberClick('laser', 0.08);
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-950/70 hover:bg-blue-900 text-blue-300 hover:text-white border border-blue-500/70 shadow-[0_0_12px_rgba(59,130,246,0.3)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap"
+                    title="Módulo de Administración de Usuarios, Órganos de Búsqueda y Claves Criptográficas (CEO-LCC Mando)"
+                  >
+                    <Crown className="w-3.5 h-3.5 text-blue-400" />
+                    <span className="hidden sm:inline">Gestión Usuarios</span>
+                    <span className="sm:hidden">Usuarios</span>
+                    <span className="text-[9px] bg-blue-600 text-white px-1 py-0.2 rounded font-black">ADMIN</span>
+                  </button>
+                )}
+
+                {/* Clan Intelligence Database & Expansion Button (Accessible to all modules) */}
+                <button
+                  onClick={() => {
+                    setShowClanManagementModal(true);
+                    playCyberClick('laser', 0.08);
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700 hover:border-emerald-500/60 transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap"
+                  title="Base de Datos e Incremento de Clanes y Rutas Ilícitas"
+                >
+                  <Database className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="hidden lg:inline">Clanes ({clans.length})</span>
+                  <span className="lg:hidden">Clanes</span>
+                </button>
+
+                {/* Centralized Data Storage & Backup Persistence Button */}
+                <button
+                  onClick={() => {
+                    setShowDataStorageModal(true);
+                    playCyberClick('laser', 0.08);
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 hover:text-white border border-emerald-600/70 shadow-[0_0_10px_rgba(16,185,129,0.2)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap"
+                  title="Almacenamiento, Respaldo y Persistencia Integral de Datos Generados en PII-LCC"
+                >
+                  <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="hidden md:inline">Almacenamiento</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping hidden sm:inline-block" />
+                </button>
+
+                {/* Supabase Cloud Integration Button */}
+                <button
+                  onClick={() => {
+                    setShowSupabaseModal(true);
+                    playCyberClick('laser', 0.08);
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 hover:text-white border border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.3)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap"
+                  title="Integración y Sincronización con Base de Datos Supabase (PostgreSQL Cloud)"
+                >
+                  <Cloud className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                  <span className="hidden xl:inline">Supabase BD</span>
+                  <span className="xl:hidden">Supabase</span>
+                  <span className="text-[9px] bg-emerald-500/30 text-emerald-300 px-1 py-0.2 rounded border border-emerald-500/40 font-mono">
+                    CLOUD
+                  </span>
+                </button>
+
                 <button
                   onClick={() => toggleInstalledDevice(!isInstalledDevice)}
                   className={`flex items-center justify-center p-2 rounded border transition-all cursor-pointer ${
@@ -1582,6 +1878,37 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                           <span className="text-[8px] bg-emerald-700 text-white px-1 rounded uppercase">PWA</span>
                         </p>
                         <p className="text-[9px] text-zinc-400 font-normal">Acceso directo y código QR</p>
+                      </div>
+                    </button>
+
+                    {/* Generación de KML con Ubicación Real para Google Earth */}
+                    <button
+                      onClick={downloadRealDeviceKmlFromApp}
+                      className="w-full text-left px-2 py-2 bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-300 rounded flex items-center gap-2 transition-all cursor-pointer border border-cyan-700/60 mt-1 mb-1"
+                      title="Genera y descarga el archivo KML con la posición real capturada por el GPS del dispositivo"
+                    >
+                      <Globe className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                      <div>
+                        <p className="font-bold leading-tight flex items-center gap-1">
+                          GPS Real // KML Google Earth
+                          <span className="text-[8px] bg-cyan-700 text-white px-1 rounded uppercase">KML</span>
+                        </p>
+                        <p className="text-[9px] text-zinc-400 font-normal">Ubicación actual y real del dispositivo</p>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowGlobalGoogleEarthModal(true);
+                        setShowDownloadMenu(false);
+                      }}
+                      className="w-full text-left px-2 py-2 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-white rounded flex items-center gap-2 transition-all cursor-pointer mt-1"
+                      title="Abre el visor 3D interactivo de Google Earth con la ubicación real del dispositivo"
+                    >
+                      <Globe className="w-3.5 h-3.5 text-cyan-500" />
+                      <div>
+                        <p className="font-bold leading-tight">Visor Google Earth 3D</p>
+                        <p className="text-[9px] text-zinc-500 font-normal">Telemetría satelital 3D en vivo</p>
                       </div>
                     </button>
                     <button
@@ -1658,9 +1985,9 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
             {currentRole === 'ROL_BUSQUEDA' && (
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-yellow-500/10 border border-yellow-500/30 text-xs font-mono font-bold text-yellow-400">
                 <Radio className="w-4 h-4 animate-pulse text-yellow-400" />
-                <span className="text-[#888] font-normal uppercase text-[10px]">MÓDULO EXCLUSIVO:</span>
-                <span className="text-white">1. ÓRGANOS DE BÚSQUEDA (S-2)</span>
-                <span className="text-[9px] bg-yellow-950/70 text-yellow-300 px-2 py-0.5 rounded border border-yellow-800/40">ACTIVO</span>
+                <span className="text-[#888] font-normal uppercase text-[10px]">ÓRGANO DE BÚSQUEDA:</span>
+                <span className="text-white">1. BÚSQUEDA S-2 (SENSORES)</span>
+                <span className="text-[9px] bg-yellow-950/70 text-yellow-300 px-2 py-0.5 rounded border border-yellow-800/40">SUBORDINADO</span>
                 <button
                   type="button"
                   onClick={() => setShowModuleBgModal(true)}
@@ -1676,9 +2003,9 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
             {currentRole === 'ROL_FUSION' && (
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-[#f97316]/10 border border-[#f97316]/30 text-xs font-mono font-bold text-[#f97316]">
                 <Shield className="w-4 h-4 text-[#f97316]" />
-                <span className="text-[#888] font-normal uppercase text-[10px]">MÓDULO EXCLUSIVO:</span>
-                <span className="text-white">2. CENTRAL DE FUSIÓN (CFI)</span>
-                <span className="text-[9px] bg-orange-950/70 text-orange-300 px-2 py-0.5 rounded border border-orange-800/40">ACTIVO</span>
+                <span className="text-[#888] font-normal uppercase text-[10px]">ÓRGANO:</span>
+                <span className="text-white">2. ÓRGANO DE FUSIÓN (CFI)</span>
+                <span className="text-[9px] bg-orange-950/70 text-orange-300 px-2 py-0.5 rounded border border-orange-800/40">SUBORDINADO</span>
                 <button
                   type="button"
                   onClick={() => setShowModuleBgModal(true)}
@@ -1692,11 +2019,31 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
             )}
 
             {currentRole === 'ROL_CEO' && (
-              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-[#3b82f6]/10 border border-[#3b82f6]/30 text-xs font-mono font-bold text-[#3b82f6]">
-                <Zap className="w-4 h-4 text-[#3b82f6]" />
-                <span className="text-[#888] font-normal uppercase text-[10px]">MÓDULO EXCLUSIVO:</span>
-                <span className="text-white">3. MANDO ESTRATÉGICO (CEO-LCC)</span>
-                <span className="text-[9px] bg-blue-950/70 text-blue-300 px-2 py-0.5 rounded border border-blue-800/40">ACTIVO</span>
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-blue-500/10 border border-blue-500/40 text-xs font-mono font-bold text-blue-400">
+                <Crown className="w-4 h-4 text-blue-400" />
+                <span className="text-[#888] font-normal uppercase text-[10px]">ROL:</span>
+                <span className="text-white">CEO-LCC MANDO (ADMINISTRADOR)</span>
+                {adminSupervisedOrgan && adminSupervisedOrgan !== 'ROL_CEO' ? (
+                  <span className="text-[9px] bg-amber-950/70 text-amber-300 px-2 py-0.5 rounded border border-amber-800/40 animate-pulse">
+                    SUPERVISANDO: {adminSupervisedOrgan === 'ROL_BUSQUEDA' ? 'BÚSQUEDA S-2' : adminSupervisedOrgan === 'ROL_FUSION' ? 'FUSIÓN CFI' : 'TERRENO'}
+                  </span>
+                ) : (
+                  <span className="text-[9px] bg-blue-950/70 text-blue-300 px-2 py-0.5 rounded border border-blue-800/40 font-bold">
+                    CONTROL TOTAL
+                  </span>
+                )}
+                {adminSupervisedOrgan && adminSupervisedOrgan !== 'ROL_CEO' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdminSupervisedOrgan(null);
+                      playCyberClick('laser', 0.08);
+                    }}
+                    className="ml-1 text-[9px] bg-blue-900/70 hover:bg-blue-800 text-white px-2 py-0.5 rounded border border-blue-600 transition-all cursor-pointer font-bold"
+                  >
+                    Volver al Mando
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setShowModuleBgModal(true)}
@@ -1712,9 +2059,9 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
             {(currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && (
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-xs font-mono font-bold text-emerald-400">
                 <Navigation className="w-4 h-4 text-emerald-400" />
-                <span className="text-[#888] font-normal uppercase text-[10px]">MÓDULO EXCLUSIVO:</span>
-                <span className="text-white">4. UNIDADES DE TERRENO (PATRULLAS)</span>
-                <span className="text-[9px] bg-emerald-950/70 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800/40">ACTIVO</span>
+                <span className="text-[#888] font-normal uppercase text-[10px]">ÓRGANO DE BÚSQUEDA:</span>
+                <span className="text-white">3. BÚSQUEDA EN TERRENO</span>
+                <span className="text-[9px] bg-emerald-950/70 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800/40">SUBORDINADO</span>
                 <button
                   type="button"
                   onClick={() => setShowModuleBgModal(true)}
@@ -1753,12 +2100,22 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
               tacticalUnits={tacticalUnits}
               currentRole={currentRole}
               onSetRole={handleSetRoleAttempt}
+              adminInspectedRole={adminSupervisedOrgan}
+              onAdminInspectOrgan={(role) => {
+                if (currentRole === 'ROL_CEO') {
+                  setAdminSupervisedOrgan(role === 'ROL_CEO' ? null : role);
+                  playCyberClick('laser', 0.08);
+                }
+              }}
             />
 
             {/* Workspace Interactive Navigation Tabs */}
             <div className="flex border-b border-zinc-900 mb-6 mt-4 gap-6 font-mono text-xs overflow-x-auto whitespace-nowrap scrollbar-none">
               <button
-                onClick={() => setActiveWorkspaceTab('OPERATIONS')}
+                onClick={() => {
+                  playCyberModuleTransition('OPERATIONS');
+                  setActiveWorkspaceTab('OPERATIONS');
+                }}
                 className={`pb-3 relative font-bold uppercase transition-all tracking-wider flex items-center gap-2 cursor-pointer ${
                   activeWorkspaceTab === 'OPERATIONS'
                     ? 'text-white'
@@ -1772,7 +2129,10 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                 )}
               </button>
               <button
-                onClick={() => setActiveWorkspaceTab('ARCHITECTURE')}
+                onClick={() => {
+                  playCyberModuleTransition('ARCHITECTURE');
+                  setActiveWorkspaceTab('ARCHITECTURE');
+                }}
                 className={`pb-3 relative font-bold uppercase transition-all tracking-wider flex items-center gap-2 cursor-pointer ${
                   activeWorkspaceTab === 'ARCHITECTURE'
                     ? 'text-white'
@@ -1786,7 +2146,10 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                 )}
               </button>
               <button
-                onClick={() => setActiveWorkspaceTab('P2P_MESH')}
+                onClick={() => {
+                  playCyberModuleTransition('P2P_MESH');
+                  setActiveWorkspaceTab('P2P_MESH');
+                }}
                 className={`pb-3 relative font-bold uppercase transition-all tracking-wider flex items-center gap-2 cursor-pointer ${
                   activeWorkspaceTab === 'P2P_MESH'
                     ? 'text-white'
@@ -1800,7 +2163,10 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                 )}
               </button>
               <button
-                onClick={() => setActiveWorkspaceTab('CODE_VIEWER')}
+                onClick={() => {
+                  playCyberModuleTransition('CODE_VIEWER');
+                  setActiveWorkspaceTab('CODE_VIEWER');
+                }}
                 className={`pb-3 relative font-bold uppercase transition-all tracking-wider flex items-center gap-2 cursor-pointer ${
                   activeWorkspaceTab === 'CODE_VIEWER'
                     ? 'text-white'
@@ -1818,8 +2184,116 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
             {activeWorkspaceTab === 'OPERATIONS' && (
               <ErrorBoundary>
                 {/* Active Role Dashboard View */}
-                <div className="animate-fade-in">
+                <div className="animate-fade-in space-y-4">
+                  {/* Administrator Control Ribbon for CEO-LCC */}
                   {currentRole === 'ROL_CEO' && (
+                    <div className="bg-[#0b1320] border border-blue-900/60 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-lg bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 shrink-0">
+                          <Crown className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                              CONSOLA DE ADMINISTRADOR GENERAL // CEO-LCC MANDO
+                            </span>
+                            <span className="text-[10px] font-mono bg-blue-950 text-blue-300 border border-blue-600/40 px-2 py-0.5 rounded font-bold">
+                              CONTROL SUPREMO
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-zinc-400 font-mono">
+                            {adminSupervisedOrgan && adminSupervisedOrgan !== 'ROL_CEO'
+                              ? `Supervisando en vivo el ${adminSupervisedOrgan === 'ROL_BUSQUEDA' ? 'Órgano de Búsqueda S-2' : adminSupervisedOrgan === 'ROL_FUSION' ? 'Órgano de Fusión CFI' : 'Órgano de Terreno'}. Tiene facultades completas de administración.`
+                              : 'Supervisión centralizada del sistema. Puede inspeccionar y operar directamente en cualquiera de los órganos de búsqueda subordinados.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Quick Organ Navigation Buttons */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAdminSupervisedOrgan(null);
+                            playCyberClick('laser', 0.08);
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            !adminSupervisedOrgan || adminSupervisedOrgan === 'ROL_CEO'
+                              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25 border border-blue-400/60'
+                              : 'bg-black/60 text-zinc-400 hover:text-white border border-zinc-800 hover:border-zinc-700'
+                          }`}
+                        >
+                          <Crown className="w-3.5 h-3.5" />
+                          <span>Mando Central (Admin)</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAdminSupervisedOrgan('ROL_BUSQUEDA');
+                            playCyberClick('laser', 0.08);
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            adminSupervisedOrgan === 'ROL_BUSQUEDA'
+                              ? 'bg-yellow-500 text-black shadow-md shadow-yellow-500/25 border border-yellow-300 font-extrabold'
+                              : 'bg-black/60 text-zinc-400 hover:text-white border border-zinc-800 hover:border-zinc-700'
+                          }`}
+                        >
+                          <Radio className="w-3.5 h-3.5" />
+                          <span>1. Búsqueda S-2</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAdminSupervisedOrgan('ROL_FUSION');
+                            playCyberClick('laser', 0.08);
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            adminSupervisedOrgan === 'ROL_FUSION'
+                              ? 'bg-[#f97316] text-white shadow-md shadow-orange-500/25 border border-orange-300'
+                              : 'bg-black/60 text-zinc-400 hover:text-white border border-zinc-800 hover:border-zinc-700'
+                          }`}
+                        >
+                          <Shield className="w-3.5 h-3.5" />
+                          <span>2. Fusión CFI</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAdminSupervisedOrgan('ROL_TERRENO');
+                            playCyberClick('laser', 0.08);
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            adminSupervisedOrgan === 'ROL_TERRENO' || adminSupervisedOrgan === 'ROL_PATRULLA'
+                              ? 'bg-emerald-500 text-black shadow-md shadow-emerald-500/25 border border-emerald-300 font-extrabold'
+                              : 'bg-black/60 text-zinc-400 hover:text-white border border-zinc-800 hover:border-zinc-700'
+                          }`}
+                        >
+                          <Navigation className="w-3.5 h-3.5" />
+                          <span>3. Terreno (GPS)</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Subordinated Search Organ Badge when NOT in CEO Role */}
+                  {currentRole !== 'ROL_CEO' && (
+                    <div className="bg-[#0b1016] border border-zinc-800/80 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Shield className="w-4 h-4 text-blue-400" />
+                        <span className="font-bold text-white">ÓRGANO DE BÚSQUEDA SUBORDINADO:</span>
+                        <span className="text-zinc-400">Canal directo al Administrador General (CEO-LCC Mando)</span>
+                      </div>
+                      <span className="text-[10px] bg-blue-950/60 text-blue-300 px-2 py-0.5 rounded border border-blue-800/40">
+                        REPORTE Y TRANSMISIÓN AUTOMÁTICA ACTIVA
+                      </span>
+                    </div>
+                  )}
+
+                  {/* CEO in Central Command View */}
+                  {currentRole === 'ROL_CEO' && (!adminSupervisedOrgan || adminSupervisedOrgan === 'ROL_CEO') && (
                     <StrategicView 
                       activeOrders={activeOrders}
                       clans={clans}
@@ -1833,7 +2307,8 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                     />
                   )}
 
-                  {currentRole === 'ROL_FUSION' && (
+                  {/* Operational View: when CEO is supervising ROL_FUSION OR when currentRole is ROL_FUSION */}
+                  {(currentRole === 'ROL_FUSION' || (currentRole === 'ROL_CEO' && adminSupervisedOrgan === 'ROL_FUSION')) && (
                     <OperationalView 
                       rawAlerts={rawAlerts}
                       clans={clans}
@@ -1848,15 +2323,19 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                         setRawAlerts(prev => [alert, ...prev]);
                         sendWsMessage('SEND_FIELD_REPORT', { report: alert });
                       }}
+                      onSaveClan={handleSaveClan}
+                      onDeleteClan={handleDeleteClan}
+                      onBatchImportClans={handleBatchImportClans}
                     />
                   )}
 
-                  {(currentRole === 'ROL_BUSQUEDA' || currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && (
+                  {/* Search Organ S-2: when CEO is supervising ROL_BUSQUEDA OR when currentRole is ROL_BUSQUEDA */}
+                  {(currentRole === 'ROL_BUSQUEDA' || (currentRole === 'ROL_CEO' && adminSupervisedOrgan === 'ROL_BUSQUEDA')) && (
                     <>
                       <TacticalView 
                         activeOrders={activeOrders}
                         tacticalUnits={tacticalUnits}
-                        currentRole={currentRole}
+                        currentRole="ROL_BUSQUEDA"
                         rawAlerts={rawAlerts}
                         clans={clans}
                         actionableIntel={actionableIntel}
@@ -1872,7 +2351,39 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                         onDeleteTacticalUnit={handleDeleteTacticalUnit}
                       />
 
-                      {/* Ventana de Alerta de Interdicción y Seguimiento del Mando LCC */}
+                      <InterdictionAlertTracker 
+                        tacticalUnits={tacticalUnits}
+                        activeOrders={activeOrders}
+                        rawAlerts={rawAlerts}
+                        onConfirmOrder={handleConfirmOrder}
+                        onAddOrderUpdate={handleAppendOrderUpdate}
+                        onCreateOrder={handleCreateOrder}
+                      />
+                    </>
+                  )}
+
+                  {/* Tactical Terrain Patrols: when CEO is supervising ROL_TERRENO OR when currentRole is ROL_TERRENO/ROL_PATRULLA */}
+                  {((currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') || (currentRole === 'ROL_CEO' && (adminSupervisedOrgan === 'ROL_TERRENO' || adminSupervisedOrgan === 'ROL_PATRULLA'))) && (
+                    <>
+                      <TacticalView 
+                        activeOrders={activeOrders}
+                        tacticalUnits={tacticalUnits}
+                        currentRole="ROL_TERRENO"
+                        rawAlerts={rawAlerts}
+                        clans={clans}
+                        actionableIntel={actionableIntel}
+                        expedientes={expedientes}
+                        onAddExpediente={handleAddExpediente}
+                        onPromoteToIntel={handlePromoteToIntel}
+                        onUpdateAlertStatus={handleUpdateAlertStatus}
+                        onConfirmOrder={handleConfirmOrder}
+                        onSendFieldReport={handleSendFieldReport}
+                        onUpdateUnitCoordinates={handleUpdateUnitCoordinates}
+                        onAddTacticalUnit={handleAddTacticalUnit}
+                        onUpdateTacticalUnit={handleUpdateTacticalUnit}
+                        onDeleteTacticalUnit={handleDeleteTacticalUnit}
+                      />
+
                       <InterdictionAlertTracker 
                         tacticalUnits={tacticalUnits}
                         activeOrders={activeOrders}
@@ -2113,7 +2624,7 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                 </div>
               </div>
 
-              {alert.mediaUrl && (
+              {Boolean(alert.mediaUrl && alert.mediaUrl.trim() !== '') && (
                 <div className="rounded overflow-hidden border border-zinc-800 bg-black/50 aspect-video relative flex items-center justify-center max-h-[110px] mt-1">
                   {alert.mediaUrl.startsWith('data:') ? (
                     <img
@@ -2335,6 +2846,60 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
         onResetModuleBackground={handleResetModuleBackground}
         onApplyToAllModules={handleApplyToAllModules}
         onBatchImportModules={handleBatchImportBackgrounds}
+      />
+
+      {/* Global Google Earth 3D & Real Device KML Modal */}
+      <GoogleEarthPatrolModal
+        isOpen={showGlobalGoogleEarthModal}
+        onClose={() => setShowGlobalGoogleEarthModal(false)}
+        allPatrols={tacticalUnits}
+        onUpdatePatrolCoordinates={handleUpdateUnitCoordinates}
+        initialMode="DEVICE_REAL_LOCATION"
+      />
+
+      {/* User Management & Cryptographic Key Management Modal (Admin CEO-LCC) */}
+      {(currentRole === 'ROL_CEO' || user?.isAdmin) && (
+        <UserManagementModal
+          isOpen={showUserManagementModal}
+          onClose={() => setShowUserManagementModal(false)}
+        />
+      )}
+
+      {/* Clan Intelligence & Network Expansion Modal */}
+      <ClanManagementModal
+        isOpen={showClanManagementModal}
+        onClose={() => setShowClanManagementModal(false)}
+        clans={clans}
+        onSaveClan={handleSaveClan}
+        onDeleteClan={handleDeleteClan}
+        onBatchImportClans={handleBatchImportClans}
+      />
+
+      {/* Centralized Data Storage, Backup, and Persistence Modal */}
+      <DataStorageManagerModal
+        isOpen={showDataStorageModal}
+        onClose={() => setShowDataStorageModal(false)}
+        clans={clans}
+        rawAlerts={rawAlerts}
+        expedientes={expedientes}
+        actionableIntel={actionableIntel}
+        activeOrders={activeOrders}
+        tacticalUnits={tacticalUnits}
+        onOpenSupabaseModal={() => setShowSupabaseModal(true)}
+        onRestoreAllData={handleRestoreAllData}
+      />
+
+      {/* Supabase Cloud Database Integration & Sync Modal */}
+      <SupabaseSyncModal
+        isOpen={showSupabaseModal}
+        onClose={() => setShowSupabaseModal(false)}
+        clans={clans}
+        rawAlerts={rawAlerts}
+        expedientes={expedientes}
+        actionableIntel={actionableIntel}
+        activeOrders={activeOrders}
+        tacticalUnits={tacticalUnits}
+        onRestoreAllData={handleRestoreAllData}
       />
 
     </div>

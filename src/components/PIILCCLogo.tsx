@@ -51,13 +51,15 @@ export default function PIILCCLogo({ variant = 'header', className = '', size }:
             title="PII-LCC Sistema Táctico (Click para ampliar gráfico intacto)"
           >
             {/* 100% UNMODIFIED GRAPHIC: Preserves original shape, aspect ratio, and colors */}
-            <img
-              src={sources[srcIndex]}
-              onError={handleImgError}
-              alt="PII-LCC Sistema Táctico - Plataforma Integrada de Inteligencia"
-              className="w-full h-full object-contain select-none pointer-events-none"
-              loading="eager"
-            />
+            {sources[srcIndex] && (
+              <img
+                src={sources[srcIndex]}
+                onError={handleImgError}
+                alt="PII-LCC Sistema Táctico - Plataforma Integrada de Inteligencia"
+                className="w-full h-full object-contain select-none pointer-events-none"
+                loading="eager"
+              />
+            )}
 
             {/* Tactical Corner Accents */}
             <div className="absolute top-0.5 left-0.5 w-1.5 h-1.5 border-t border-l border-[#d4af37]/60 pointer-events-none" />
@@ -120,12 +122,14 @@ export default function PIILCCLogo({ variant = 'header', className = '', size }:
 
               {/* Full Original Graphic Intact Display */}
               <div className="w-full relative aspect-[1600/873] rounded-xl overflow-hidden border border-[#3b3223] bg-black shadow-2xl flex items-center justify-center">
-                <img
-                  src={sources[srcIndex]}
-                  onError={handleImgError}
-                  alt="PII-LCC Sistema Táctico - Gráfico Original Completo"
-                  className="w-full h-full object-contain select-none"
-                />
+                {sources[srcIndex] && (
+                  <img
+                    src={sources[srcIndex]}
+                    onError={handleImgError}
+                    alt="PII-LCC Sistema Táctico - Gráfico Original Completo"
+                    className="w-full h-full object-contain select-none"
+                  />
+                )}
               </div>
 
               {/* Modal Footer */}
@@ -178,12 +182,14 @@ export default function PIILCCLogo({ variant = 'header', className = '', size }:
           title="PII-LCC Sistema Táctico (Click para ampliar)"
         >
           {/* Unmodified Graphic */}
-          <img
-            src={sources[srcIndex]}
-            onError={handleImgError}
-            alt="PII-LCC Sistema Táctico"
-            className="w-full h-full object-contain"
-          />
+          {sources[srcIndex] && (
+            <img
+              src={sources[srcIndex]}
+              onError={handleImgError}
+              alt="PII-LCC Sistema Táctico"
+              className="w-full h-full object-contain"
+            />
+          )}
 
           {/* Subtle corner brackets */}
           <div className="absolute top-2 left-2 w-3 h-3 border-t-2 border-l-2 border-[#d4af37]/60 pointer-events-none" />
@@ -237,12 +243,14 @@ export default function PIILCCLogo({ variant = 'header', className = '', size }:
             </div>
 
             <div className="w-full relative aspect-[1600/873] rounded-xl overflow-hidden border border-[#3b3223] bg-black shadow-2xl flex items-center justify-center">
-              <img
-                src={sources[srcIndex]}
-                onError={handleImgError}
-                alt="PII-LCC Sistema Táctico - Gráfico Original Completo"
-                className="w-full h-full object-contain select-none"
-              />
+              {sources[srcIndex] && (
+                <img
+                  src={sources[srcIndex]}
+                  onError={handleImgError}
+                  alt="PII-LCC Sistema Táctico - Gráfico Original Completo"
+                  className="w-full h-full object-contain select-none"
+                />
+              )}
             </div>
 
             <div className="w-full flex flex-wrap items-center justify-between gap-3 text-xs font-mono pt-2 border-t border-[#232a22]">

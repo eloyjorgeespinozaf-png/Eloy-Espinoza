@@ -39,9 +39,15 @@ import {
   Navigation,
   Compass,
   Crosshair,
-  Globe
+  Globe,
+  Edit3,
+  Smartphone,
+  Truck,
+  ShieldCheck,
+  PlusCircle
 } from 'lucide-react';
 import GoogleEarthPatrolModal from './GoogleEarthPatrolModal';
+import ClanManagementModal from './ClanManagementModal';
 
 interface OperationalViewProps {
   rawAlerts: RawAlert[];
@@ -59,6 +65,9 @@ interface OperationalViewProps {
   ) => void;
   onUpdateAlertStatus: (id: string, status: 'PROCESSED' | 'DISMISSED') => void;
   onSimulateRawAlert?: (alert: RawAlert) => void;
+  onSaveClan?: (clan: Clan) => void;
+  onDeleteClan?: (id: string) => void;
+  onBatchImportClans?: (clans: Clan[]) => void;
 }
 
 export default function OperationalView({
@@ -71,12 +80,19 @@ export default function OperationalView({
   onAddExpediente,
   onPromoteToIntel,
   onUpdateAlertStatus,
-  onSimulateRawAlert
+  onSimulateRawAlert,
+  onSaveClan,
+  onDeleteClan,
+  onBatchImportClans
 }: OperationalViewProps) {
   // Mode toggle: Expedientes vs Alertas S-2 vs Patrullas en Terreno
   const [activeFeedTab, setActiveFeedTab] = useState<'G2' | 'S2' | 'PATROLS'>('G2');
   const [alertFilterStatus, setAlertFilterStatus] = useState<'PENDING' | 'ALL' | 'PROCESSED'>('PENDING');
   
+  // Clan Intelligence Management State
+  const [isClanManagementOpen, setIsClanManagementOpen] = useState<boolean>(false);
+  const [clanModalInitialId, setClanModalInitialId] = useState<string | null>(null);
+
   // Real-time Patrol Tracking Radar Drawer / State
   const [isPatrolRadarOpen, setIsPatrolRadarOpen] = useState<boolean>(false);
   const [selectedPatrolForFocus, setSelectedPatrolForFocus] = useState<string | null>(null);
@@ -1409,6 +1425,25 @@ ${recommendedAction}
             {/* Tab: Clans */}
             {rightTab === 'CLANS' && (
               <div className="space-y-3">
+                {/* Clan Management Header Controls */}
+                <div className="flex items-center justify-between pb-1 border-b border-[#1e2738]/60">
+                  <span className="text-[10px] font-mono text-[#94a3b8] font-bold uppercase">
+                    Base de Datos ({clans.length} Clanes)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClanModalInitialId(null);
+                      setIsClanManagementOpen(true);
+                    }}
+                    className="flex items-center gap-1 text-[10px] font-mono font-bold bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 hover:text-white px-2 py-0.5 rounded border border-emerald-600/60 transition-all cursor-pointer shadow-sm"
+                    title="Dar de alta e incrementar un nuevo clan en la base de datos"
+                  >
+                    <Plus className="w-3 h-3 text-emerald-400" />
+                    <span>+ Incrementar Clan</span>
+                  </button>
+                </div>
+
                 <div className="space-y-1.5 max-h-[190px] overflow-y-auto pr-1">
                   {filteredClans.map((clan) => (
                     <div
@@ -1422,16 +1457,36 @@ ${recommendedAction}
                     >
                       <div className="flex justify-between items-center">
                         <span className="text-xs font-mono font-bold text-white truncate">{clan.name}</span>
-                        <span className={`text-[8px] font-mono font-bold px-1 rounded ${
-                          clan.threatLevel === 'CRITICAL' ? 'bg-red-500/20 text-red-400' :
-                          clan.threatLevel === 'HIGH' ? 'bg-orange-500/20 text-orange-400' :
-                          'bg-yellow-500/20 text-yellow-400'
-                        }`}>
-                          {clan.threatLevel}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[8px] font-mono font-bold px-1 rounded ${
+                            clan.threatLevel === 'CRITICAL' ? 'bg-red-500/20 text-red-400' :
+                            clan.threatLevel === 'HIGH' ? 'bg-orange-500/20 text-orange-400' :
+                            'bg-yellow-500/20 text-yellow-400'
+                          }`}>
+                            {clan.threatLevel}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setClanModalInitialId(clan.id);
+                              setIsClanManagementOpen(true);
+                            }}
+                            className="text-[#64748b] hover:text-emerald-400 p-0.5"
+                            title="Editar / Incrementar datos de este clan"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="text-[9px] font-mono text-[#64748b] mt-0.5">
-                        {clan.membersCount} integrantes // Activo: {clan.lastActive}
+                      <div className="text-[9px] font-mono text-[#64748b] mt-0.5 flex items-center justify-between">
+                        <span>{clan.membersCount} integrantes // Activo: {clan.lastActive}</span>
+                        {clan.interceptedPhones && clan.interceptedPhones.length > 0 && (
+                          <span className="text-emerald-400 text-[8px] flex items-center gap-0.5">
+                            <Smartphone className="w-2.5 h-2.5" />
+                            {clan.interceptedPhones.length} telfs
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1441,8 +1496,22 @@ ${recommendedAction}
                 {activeClanDetails && (
                   <div className="bg-[#121722] border border-[#22293a] rounded-lg p-3 space-y-2 text-xs font-mono">
                     <div className="border-b border-[#1e2738] pb-1 flex justify-between items-center">
-                      <span className="font-bold text-white">{activeClanDetails.name}</span>
-                      <span className="text-[9px] text-[#10b981]">VECTOR CONTRASTADO</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-white">{activeClanDetails.name}</span>
+                        <span className="text-[9px] text-[#10b981]">VECTOR CONTRASTADO</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setClanModalInitialId(activeClanDetails.id);
+                          setIsClanManagementOpen(true);
+                        }}
+                        className="text-[9px] font-mono text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-950/40 border border-emerald-800/50 hover:bg-emerald-900/60 transition-colors cursor-pointer"
+                        title="Incrementar información de este clan en la base de datos"
+                      >
+                        <Edit3 className="w-2.5 h-2.5" />
+                        <span>Incrementar Info</span>
+                      </button>
                     </div>
 
                     <div>
@@ -1473,6 +1542,33 @@ ${recommendedAction}
                         ))}
                       </div>
                     </div>
+
+                    {/* Extended Intelligence Data (Phones, Frequencies, Vehicles) */}
+                    {(activeClanDetails.interceptedPhones?.length || activeClanDetails.interceptedFrequencies?.length || activeClanDetails.vehicles?.length) ? (
+                      <div className="pt-2 border-t border-[#1e2738] space-y-1.5 text-[10px]">
+                        {activeClanDetails.interceptedPhones && activeClanDetails.interceptedPhones.length > 0 && (
+                          <div className="flex items-start gap-1">
+                            <Smartphone className="w-3 h-3 text-emerald-400 mt-0.5 shrink-0" />
+                            <span className="text-zinc-400">Celulares: </span>
+                            <span className="text-emerald-300 font-bold">{activeClanDetails.interceptedPhones.join(', ')}</span>
+                          </div>
+                        )}
+                        {activeClanDetails.interceptedFrequencies && activeClanDetails.interceptedFrequencies.length > 0 && (
+                          <div className="flex items-start gap-1">
+                            <Radio className="w-3 h-3 text-amber-400 mt-0.5 shrink-0" />
+                            <span className="text-zinc-400">VHF/UHF: </span>
+                            <span className="text-amber-300 font-bold">{activeClanDetails.interceptedFrequencies.join(', ')}</span>
+                          </div>
+                        )}
+                        {activeClanDetails.vehicles && activeClanDetails.vehicles.length > 0 && (
+                          <div className="flex items-start gap-1">
+                            <Truck className="w-3 h-3 text-cyan-400 mt-0.5 shrink-0" />
+                            <span className="text-zinc-400">Vehículos: </span>
+                            <span className="text-cyan-300 font-bold">{activeClanDetails.vehicles.join(', ')}</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -1540,6 +1636,23 @@ ${recommendedAction}
         selectedPatrol={selectedPatrolForEarth}
         allPatrols={tacticalUnits}
         onSelectPatrol={(patrol) => setSelectedPatrolForEarth(patrol)}
+      />
+
+      {/* Clan Management & Information Increment Modal */}
+      <ClanManagementModal
+        isOpen={isClanManagementOpen}
+        onClose={() => setIsClanManagementOpen(false)}
+        clans={clans}
+        onSaveClan={(clan) => {
+          if (onSaveClan) onSaveClan(clan);
+        }}
+        onDeleteClan={(id) => {
+          if (onDeleteClan) onDeleteClan(id);
+        }}
+        onBatchImportClans={(imported) => {
+          if (onBatchImportClans) onBatchImportClans(imported);
+        }}
+        initialSelectedClanId={clanModalInitialId || undefined}
       />
     </div>
   );

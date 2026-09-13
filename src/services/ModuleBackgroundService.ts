@@ -79,7 +79,7 @@ export const TACTICAL_MODULES_LIST: TacticalModuleMeta[] = [
     badge: 'AUDITORÍA',
     color: '#ec4899',
     description: 'Inspección de código fuente y criptografía militar CAD-C2.',
-    defaultPresetImage: '/INTERFAZ.jpg'
+    defaultPresetImage: '/interfaz-room.svg'
   }
 ];
 
@@ -134,11 +134,12 @@ export function createDefaultModuleBackgrounds(): ModuleBackgroundsMap {
     map[mod.id] = {
       moduleId: mod.id,
       moduleName: mod.name,
-      imageUrl: mod.defaultPresetImage,
+      imageUrl: mod.defaultPresetImage || '/interfaz-room.svg',
       opacity: 0.80,
       blur: 0,
       contrastOverlay: true,
       fitMode: 'cover',
+      enabled: true,
       updatedAt: new Date().toISOString(),
       updatedBy: 'SISTEMA_DOCTRINAL'
     };
@@ -280,7 +281,16 @@ export async function fetchServerModuleBackgrounds(): Promise<ModuleBackgroundsM
     if (!res.ok) return null;
     const data = await res.json();
     if (data && data.backgrounds) {
-      return data.backgrounds as ModuleBackgroundsMap;
+      const backgrounds = data.backgrounds as ModuleBackgroundsMap;
+      // Automatically cache all configurations into local IndexedDB and localStorage
+      // so installed PWAs and offline devices retain all published modifications!
+      Object.keys(backgrounds).forEach(modId => {
+        const bg = backgrounds[modId];
+        if (bg) {
+          saveModuleBackgroundLocal(bg).catch(e => console.warn('Local cache sync non-blocking:', e));
+        }
+      });
+      return backgrounds;
     }
   } catch (err) {
     console.warn('Server fetch module-backgrounds non-blocking:', err);

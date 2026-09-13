@@ -20,6 +20,7 @@ import { G2DoctrinalViewer } from './fusion/G2DoctrinalViewer';
 import { SearchOrganAlertViewer } from './fusion/SearchOrganAlertViewer';
 import { NewG2RecordModal } from './fusion/NewG2RecordModal';
 import { TacticalPhotoViewerModal } from './fusion/TacticalPhotoViewerModal';
+import GoogleEarthPatrolModal from './GoogleEarthPatrolModal';
 import {
   TrendingUp,
   Database,
@@ -53,7 +54,8 @@ import {
   Check,
   Navigation,
   Key,
-  Users
+  Users,
+  Globe
 } from 'lucide-react';
 import { playSyntheticBeep, playChime } from '../utils/audio';
 import { formatToMilitaryDMS } from '../utils/geo';
@@ -164,6 +166,7 @@ export function PatrolOperationalDashboard({
   const [isSimulatingGps, setIsSimulatingGps] = useState<boolean>(false);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
   const [isLocatingDevice, setIsLocatingDevice] = useState<boolean>(false);
+  const [showGoogleEarthModal, setShowGoogleEarthModal] = useState<boolean>(false);
 
   // Captura inmediata de ubicación actual del dispositivo y sincronización en tiempo real con CFI y Mando
   const acquireDashboardGpsLocation = () => {
@@ -1296,6 +1299,18 @@ ${recommendedAction}
                   >
                     GPS Patrulla
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowGoogleEarthModal(true);
+                      playSyntheticBeep(950, 0.08);
+                    }}
+                    className="px-3 py-2 bg-[#0a1628] hover:bg-[#112440] text-cyan-300 hover:text-white border border-cyan-500/50 text-xs font-mono rounded-lg flex items-center gap-1.5 font-bold cursor-pointer transition-all shadow-[0_0_10px_rgba(6,182,212,0.25)] whitespace-nowrap"
+                    title="Abrir en Google Earth 3D y Generar KML con la ubicación real del dispositivo"
+                  >
+                    <Globe className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                    <span>Google Earth (KML)</span>
+                  </button>
                 </div>
               </div>
 
@@ -1340,7 +1355,7 @@ ${recommendedAction}
 
             <div className="space-y-3">
               <div className="aspect-video bg-black rounded-lg border border-[#1e2738] relative overflow-hidden flex items-center justify-center">
-                {capturedPhotoUrl ? (
+                {Boolean(capturedPhotoUrl && capturedPhotoUrl.trim() !== '') ? (
                   <img src={capturedPhotoUrl} alt="Captura de patrulla" className="w-full h-full object-cover" />
                 ) : (
                   <div className="text-center p-4 space-y-2">
@@ -1357,7 +1372,8 @@ ${recommendedAction}
                 <button
                   type="button"
                   onClick={() => {
-                    setCapturedPhotoUrl('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="250" viewBox="0 0 400 250"><rect width="400" height="250" fill="%23051014"/><text x="50%25" y="45%25" dominant-baseline="middle" text-anchor="middle" fill="%2310b981" font-family="monospace" font-size="14">FLIR TERMAL RECORD - PATRULLA ' + encodeURIComponent(patrol.name) + '</text><text x="50%25" y="60%25" dominant-baseline="middle" text-anchor="middle" fill="%2394a3b8" font-family="monospace" font-size="11">COORD: ' + encodeURIComponent(reportCoordinates) + '</text></svg>');
+                    const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="250" viewBox="0 0 400 250"><rect width="400" height="250" fill="#051014"/><text x="50%" y="45%" dominant-baseline="middle" text-anchor="middle" fill="#10b981" font-family="monospace" font-size="14">FLIR TERMAL RECORD - PATRULLA ${patrol.name}</text><text x="50%" y="60%" dominant-baseline="middle" text-anchor="middle" fill="#94a3b8" font-family="monospace" font-size="11">COORD: ${reportCoordinates}</text></svg>`;
+                    setCapturedPhotoUrl(`data:image/svg+xml;utf8,${encodeURIComponent(svgContent)}`);
                     playSyntheticBeep(780, 0.1);
                   }}
                   className="flex-1 bg-[#1e2738] hover:bg-[#283548] text-white text-xs font-mono py-2 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer"
@@ -1643,6 +1659,16 @@ ${recommendedAction}
           sourceContext="TACTICAL"
         />
       )}
+
+      {/* Google Earth 3D & Real Device KML Modal */}
+      <GoogleEarthPatrolModal
+        isOpen={showGoogleEarthModal}
+        onClose={() => setShowGoogleEarthModal(false)}
+        selectedPatrol={patrol}
+        allPatrols={[patrol]}
+        onUpdatePatrolCoordinates={onUpdateUnitCoordinates}
+        initialMode="DEVICE_REAL_LOCATION"
+      />
     </div>
   );
 }

@@ -28,11 +28,22 @@ import {
   ShieldCheck,
   Radar,
   Download,
-  Palette
+  Palette,
+  Crown,
+  Smartphone,
+  PhoneCall,
+  Users
 } from 'lucide-react';
 import { TacticalModuleId, MilitaryRole, ModuleBackgroundConfig, ModuleBackgroundsMap } from '../types';
 import { useAuth, PRESET_CREDENTIALS, PRESET_USERS } from '../context/AuthContext';
-import { playSyntheticBeep } from '../utils/audio';
+import { 
+  playSyntheticBeep, 
+  playCyberClick, 
+  playCyberModuleTransition, 
+  playCyberAccessGranted, 
+  playCyberDenied, 
+  setAudioMuted 
+} from '../utils/audio';
 import { GamerFontSelector } from './GamerFontSelector';
 import { AppInstallModal } from './AppInstallModal';
 import { 
@@ -41,6 +52,7 @@ import {
   useFullDashboardBackground 
 } from './FullDashboardBackground';
 import { TacticalBackgroundEditorModal } from './TacticalBackgroundEditorModal';
+import { TacticalUpdateManager } from './TacticalUpdateManager';
 import OfficialCrest from './OfficialCrest';
 import HeaderTopRightLogo from './HeaderTopRightLogo';
 import PIILCCLogo from './PIILCCLogo';
@@ -66,12 +78,12 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
   onApplyToAllModules,
   onBatchImportModules
 }) => {
-  const { loginWithCredentials, login } = useAuth();
+  const { loginWithCredentials, login, users } = useAuth();
   const fullBgState = useFullDashboardBackground();
 
   const [selectedRole, setSelectedRole] = useState<MilitaryRole>('ROL_CEO');
-  const [username, setUsername] = useState<string>('ceo.mando');
-  const [password, setPassword] = useState<string>('mando2026');
+  const [username, setUsername] = useState<string>('admin.ceo');
+  const [password, setPassword] = useState<string>('71200004');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
   const [authStep, setAuthStep] = useState<string>('');
@@ -95,16 +107,35 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
     setSelectedRole(role);
     setErrorMessage(null);
 
-    const cred = PRESET_CREDENTIALS.find(c => c.role === role);
-    if (cred) {
-      setUsername(cred.username);
-      setPassword(cred.defaultPassword);
+    // Look first in dynamic users registered by CEO-LCC Mando
+    const registeredUser = users.find(u => {
+      if (role === 'ROL_TERRENO') return u.role === 'ROL_TERRENO' || u.role === 'ROL_PATRULLA';
+      return u.role === role;
+    });
+
+    if (registeredUser) {
+      setUsername(registeredUser.username);
+      setPassword(registeredUser.cellphone || registeredUser.password);
+    } else {
+      const cred = PRESET_CREDENTIALS.find(c => c.role === role);
+      if (cred) {
+        setUsername(cred.username);
+        setPassword(cred.defaultPassword);
+      }
     }
 
     if (soundEnabled) {
-      playSyntheticBeep(440, 0.1, 'sine', 0.06);
+      playCyberClick('laser', 0.08);
     }
   };
+
+  // Filter dynamic users registered for this specific military role/organ
+  const activeOrganUsers = users.filter(u => {
+    if (selectedRole === 'ROL_TERRENO') {
+      return u.role === 'ROL_TERRENO' || u.role === 'ROL_PATRULLA';
+    }
+    return u.role === selectedRole;
+  });
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,13 +143,13 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
 
     if (!username.trim()) {
       setErrorMessage('INGRESE IDENTIFICADOR DE OPERADOR MILITAR.');
-      if (soundEnabled) playSyntheticBeep(200, 0.25, 'sawtooth', 0.1);
+      if (soundEnabled) playCyberDenied(0.12);
       return;
     }
 
     if (!password) {
       setErrorMessage('INGRESE CONTRASEÑA CRIPTOGRÁFICA DE LA ESTACIÓN.');
-      if (soundEnabled) playSyntheticBeep(200, 0.25, 'sawtooth', 0.1);
+      if (soundEnabled) playCyberDenied(0.12);
       return;
     }
 
@@ -126,19 +157,19 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
     setAuthStep('VERIFICANDO FIRMA CRIPTOGRÁFICA...');
 
     if (soundEnabled) {
-      playSyntheticBeep(520, 0.1, 'sine', 0.08);
+      playCyberClick('toggle', 0.09);
     }
 
     setTimeout(() => {
       setAuthStep('VALIDANDO PROTOCOLO C4ISR // NIVEL DOCTRINAL...');
-      if (soundEnabled) playSyntheticBeep(660, 0.1, 'sine', 0.08);
+      if (soundEnabled) playCyberClick('laser', 0.09);
 
       setTimeout(() => {
         const res = loginWithCredentials(username, password, selectedRole);
         if (res.success) {
           setAuthStep('AUTORIZACIÓN CONFIRMADA. DESPLEGANDO TERMINAL...');
           if (soundEnabled) {
-            playSyntheticBeep(880, 0.2, 'sine', 0.1);
+            playCyberAccessGranted(0.11);
           }
           setTimeout(() => {
             setIsAuthenticating(false);
@@ -147,7 +178,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
         } else {
           setIsAuthenticating(false);
           setErrorMessage(res.error || 'ERROR DE AUTENTICACIÓN. ACCESO DENEGADO.');
-          if (soundEnabled) playSyntheticBeep(160, 0.35, 'sawtooth', 0.15);
+          if (soundEnabled) playCyberDenied(0.14);
         }
       }, 400);
     }, 350);
@@ -160,7 +191,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
     setAuthStep(`ENLACE DIRECTO: AUTENTICANDO ${role}...`);
 
     if (soundEnabled) {
-      playSyntheticBeep(493.88, 0.12, 'sine', 0.08); // B4
+      playCyberModuleTransition(role, 0.11);
     }
 
     setTimeout(() => {
@@ -273,6 +304,12 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
           {/* Videogame Font Selector in Login Screen */}
           <GamerFontSelector compact />
 
+          {/* Tactical Version, Update Monitor & Cloud Sync */}
+          <TacticalUpdateManager 
+            currentVersion="v2.5.0-DOCTRINAL"
+            onOpenInstallModal={() => setShowInstallModal(true)}
+          />
+
           {/* Download & Install App button (PC & Celular) */}
           <button
             type="button"
@@ -287,7 +324,12 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
 
           <button
             type="button"
-            onClick={() => setSoundEnabled(!soundEnabled)}
+            onClick={() => {
+              const next = !soundEnabled;
+              setSoundEnabled(next);
+              setAudioMuted(!next);
+              if (next) playCyberClick('toggle');
+            }}
             className="p-1.5 rounded bg-[#131d18] border border-[#233529] text-[#869b8b] hover:text-emerald-400 transition-colors cursor-pointer"
             title={soundEnabled ? "Audio Táctico Activado" : "Audio Táctico Desactivado"}
           >
@@ -323,6 +365,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
           {PRESET_CREDENTIALS.map((cred) => {
             const isSelected = selectedRole === cred.role;
             const accent = getRoleAccentClasses(cred.role);
+            const isCeoAdmin = cred.role === 'ROL_CEO';
 
             return (
               <div
@@ -331,26 +374,35 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
                 className={`relative rounded-xl border p-4 transition-all cursor-pointer select-none text-left flex flex-col justify-between ${
                   isSelected 
                     ? `bg-[#0f181c] ${accent.border} ${accent.glow} ring-1 ring-white/10` 
-                    : 'bg-[#0a0f12]/80 border-[#1a2522] hover:border-[#2f4236] hover:bg-[#0c1417]'
+                    : isCeoAdmin
+                      ? 'bg-[#08101a]/90 border-blue-900/50 hover:border-blue-700/60 hover:bg-[#0c1624]'
+                      : 'bg-[#0a0f12]/80 border-[#1a2522] hover:border-[#2f4236] hover:bg-[#0c1417]'
                 }`}
               >
                 {/* Organ Classification Badge */}
                 <div className="flex items-center justify-between mb-3">
-                  <div className={`p-2 rounded-lg ${isSelected ? accent.bgLight : 'bg-[#141e1a] text-[#718476]'}`}>
-                    {cred.organNumber === 1 && <Radio className="w-4 h-4 text-yellow-400" />}
-                    {cred.organNumber === 2 && <Shield className="w-4 h-4 text-orange-400" />}
-                    {cred.organNumber === 3 && <Zap className="w-4 h-4 text-blue-400" />}
-                    {cred.organNumber === 4 && <Navigation className="w-4 h-4 text-emerald-400" />}
+                  <div className={`p-2 rounded-lg ${isSelected ? accent.bgLight : isCeoAdmin ? 'bg-blue-950/60 text-blue-400' : 'bg-[#141e1a] text-[#718476]'}`}>
+                    {isCeoAdmin && <Crown className="w-4 h-4 text-blue-400" />}
+                    {cred.role === 'ROL_BUSQUEDA' && <Radio className="w-4 h-4 text-yellow-400" />}
+                    {cred.role === 'ROL_FUSION' && <Shield className="w-4 h-4 text-orange-400" />}
+                    {cred.role === 'ROL_TERRENO' && <Navigation className="w-4 h-4 text-emerald-400" />}
                   </div>
 
-                  <span className="text-[10px] font-mono font-bold tracking-widest px-2 py-0.5 rounded border border-[#2a3a30] text-[#869b8b] bg-[#0d1413]">
-                    ORDEN #{cred.organNumber}
-                  </span>
+                  {isCeoAdmin ? (
+                    <span className="text-[10px] font-mono font-bold tracking-wider px-2 py-0.5 rounded border border-blue-500/50 text-blue-300 bg-blue-950/50 flex items-center gap-1">
+                      <Crown className="w-3 h-3 text-blue-400" />
+                      ADMINISTRADOR
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-mono font-bold tracking-wider px-2 py-0.5 rounded border border-[#2a3a30] text-[#869b8b] bg-[#0d1413]">
+                      ÓRGANO BÚSQUEDA #{cred.organNumber - 1 || 1}
+                    </span>
+                  )}
                 </div>
 
                 {/* Organ Content */}
                 <div className="space-y-1 mb-3">
-                  <h3 className={`text-sm font-bold font-mono tracking-tight ${isSelected ? 'text-white' : 'text-[#c0ccc4]'}`}>
+                  <h3 className={`text-sm font-bold font-mono tracking-tight ${isSelected ? 'text-white' : isCeoAdmin ? 'text-blue-100' : 'text-[#c0ccc4]'}`}>
                     {cred.title}
                   </h3>
                   <p className="text-[11px] text-[#788e80] line-clamp-2 leading-relaxed">
@@ -366,7 +418,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
                   </div>
                   <div className="flex items-center justify-between text-[#687e71]">
                     <span>AUTORIZACIÓN:</span>
-                    <span className={isSelected ? accent.text : 'text-[#7d9385]'}>{cred.clearance}</span>
+                    <span className={isSelected ? accent.text : isCeoAdmin ? 'text-blue-400' : 'text-[#7d9385]'}>{cred.clearance}</span>
                   </div>
                 </div>
 
@@ -374,7 +426,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
                 {isSelected && (
                   <div className="absolute top-2 right-2 flex items-center gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-[9px] font-mono text-emerald-400 font-bold uppercase">ACTIVO</span>
+                    <span className="text-[9px] font-mono text-emerald-400 font-bold uppercase">SELECCIONADO</span>
                   </div>
                 )}
               </div>
@@ -448,9 +500,15 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
 
               {/* Password Input */}
               <div className="space-y-1.5 text-left">
-                <label className="block text-xs font-mono font-bold text-[#b4c4ba] uppercase tracking-wider">
-                  Clave Criptográfica / Contraseña
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-mono font-bold text-[#b4c4ba] uppercase tracking-wider flex items-center gap-1.5">
+                    <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                    Clave Criptográfica (N° Celular)
+                  </label>
+                  <span className="text-[10px] font-mono text-emerald-400/80">
+                    {showPassword ? 'Visibilidad ON' : 'Visibilidad OFF'}
+                  </span>
+                </div>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#526a5c]">
                     <Key className="w-4 h-4" />
@@ -459,7 +517,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••••••"
+                    placeholder="Ej: 71200001 (N° de Celular)"
                     className="w-full pl-10 pr-10 py-2.5 rounded-lg bg-[#080d10] border border-[#213129] focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-white font-mono text-xs placeholder:text-[#42554a] outline-none transition-all"
                   />
                   <button
@@ -470,30 +528,83 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                <p className="text-[10px] text-[#6b8273] font-mono leading-tight">
+                  * Contraseña criptográfica: Número de celular asignado por el Administrador CEO-LCC Mando.
+                </p>
               </div>
             </div>
 
+            {/* Registered Operators by CEO-LCC Mando for this Organ */}
+            {activeOrganUsers.length > 0 && (
+              <div className="p-3 rounded-lg bg-[#090e11] border border-[#1b2b23] text-left space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-emerald-400" />
+                    Operadores Autorizados en este Módulo ({activeOrganUsers.length})
+                  </span>
+                  <span className="text-[9px] font-mono text-zinc-500">
+                    Haga clic para auto-completar ID y Celular
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {activeOrganUsers.map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => {
+                        setUsername(u.username);
+                        setPassword(u.cellphone || u.password);
+                        if (soundEnabled) playCyberClick('crisp', 0.08);
+                      }}
+                      className={`p-2 rounded border text-left font-mono transition-all cursor-pointer ${
+                        username === u.username
+                          ? 'bg-emerald-950/40 border-emerald-500/60 text-white shadow-sm'
+                          : 'bg-[#060a0c] border-[#18231c] hover:border-emerald-700/50 text-[#9bb0a2]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between text-[11px] font-bold">
+                        <span className="text-white truncate">{u.name}</span>
+                        {u.isAdmin && (
+                          <span className="text-[8px] bg-blue-900/60 text-blue-300 px-1 rounded">ADMIN</span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-[#71887a] mt-0.5 flex items-center justify-between">
+                        <span>{u.rank} [{u.username}]</span>
+                        <span className="text-emerald-400 font-bold flex items-center gap-0.5">
+                          <Smartphone className="w-2.5 h-2.5" />
+                          {u.cellphone || u.password}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Quick Doctrinal Credentials helper banner */}
-            <div className="p-3 rounded-lg bg-[#090e11] border border-[#1b2b23] flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+            <div className="p-2.5 rounded-lg bg-[#070b0e] border border-[#15221b] flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
               <div className="flex items-center gap-2 text-[#7f9687]">
-                <Fingerprint className="w-4 h-4 text-emerald-400" />
-                <span>Credenciales Doctrinales:</span>
+                <Fingerprint className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Credenciales Predeterminadas:</span>
                 <span className="text-white font-bold">{currentCredential.username}</span>
                 <span className="text-[#455c4e]">/</span>
                 <span className="text-emerald-400 font-bold">{currentCredential.defaultPassword}</span>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setUsername(currentCredential.username);
-                  setPassword(currentCredential.defaultPassword);
-                  if (soundEnabled) playSyntheticBeep(600, 0.1, 'sine', 0.06);
-                }}
-                className="text-[11px] text-[#93ab9c] hover:text-white font-bold underline decoration-emerald-600 underline-offset-4 cursor-pointer"
-              >
-                Auto-completar Credenciales
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUsername(currentCredential.username);
+                    setPassword(currentCredential.defaultPassword);
+                    if (soundEnabled) playCyberClick('crisp', 0.08);
+                  }}
+                  className="text-[11px] text-[#93ab9c] hover:text-white font-bold underline decoration-emerald-600 underline-offset-4 cursor-pointer"
+                >
+                  Cargar Predeterminadas
+                </button>
+              </div>
             </div>
 
             {/* Submit Button */}
@@ -576,7 +687,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
         id="floating-btn-edit-tactical-bg"
         onClick={() => {
           setShowBackgroundModal(true);
-          playSyntheticBeep(880, 0.08);
+          playCyberClick('laser', 0.09);
         }}
         className="fixed bottom-14 right-4 z-40 flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-500/70 text-emerald-300 hover:text-white shadow-[0_0_20px_rgba(16,185,129,0.35)] backdrop-blur-md transition-all active:scale-95 cursor-pointer text-xs font-mono font-bold"
         title="Editar Fondo Táctico de la Interfaz (Imagen, Opacidad, Filtros, Iluminación)"

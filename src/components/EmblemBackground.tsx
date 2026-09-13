@@ -205,17 +205,19 @@ export const EmblemBackground: React.FC<EmblemBackgroundProps> = ({
         }}
       >
         {/* The Exact Emblem Image with 100% Transparent Background */}
-        <img
-          src={currentSrc}
-          alt="Emblema Institucional Militar - Ser Antes Que Parecer"
-          referrerPolicy="no-referrer"
-          onError={() => {
-            if (currentSrc !== '/emblem-default.svg') {
-              setCurrentSrc('/emblem-default.svg');
-            }
-          }}
-          className="w-full h-auto max-h-[76vh] object-contain drop-shadow-[0_15px_30px_rgba(0,0,0,0.85)]"
-        />
+        {Boolean(currentSrc && currentSrc.trim() !== '') && (
+          <img
+            src={currentSrc}
+            alt="Emblema Institucional Militar - Ser Antes Que Parecer"
+            referrerPolicy="no-referrer"
+            onError={() => {
+              if (currentSrc !== '/emblem-default.svg') {
+                setCurrentSrc('/emblem-default.svg');
+              }
+            }}
+            className="w-full h-auto max-h-[76vh] object-contain drop-shadow-[0_15px_30px_rgba(0,0,0,0.85)]"
+          />
+        )}
       </div>
     </div>
   );

@@ -1,0 +1,86 @@
+{
+  "MOD_CEO": {
+    "moduleId": "MOD_CEO",
+    "moduleName": "3. Mando Estratégico (CEO-LCC)",
+    "imageUrl": "/INTERFAZ.jpg",
+    "opacity": 0.8,
+    "blur": 0,
+    "contrastOverlay": true,
+    "fitMode": "cover",
+    "enabled": true,
+    "updatedAt": "2026-09-12T22:38:00.000Z",
+    "updatedBy": "USER_REQUEST",
+    "customFileName": "INTERFAZ.jpg"
+  },
+  "MOD_FUSION": {
+    "moduleId": "MOD_FUSION",
+    "moduleName": "2. Central de Fusión (CFI de Brigada)",
+    "imageUrl": "/backgrounds/bg_MOD_FUSION.png?v=1789251362483",
+    "opacity": 0.8,
+    "blur": 0,
+    "contrastOverlay": true,
+    "fitMode": "cover",
+    "updatedAt": "2026-09-12T22:16:02.484Z",
+    "updatedBy": "SISTEMA_DOCTRINAL",
+    "customFileName": "CFI.jpg"
+  },
+  "MOD_BUSQUEDA": {
+    "moduleId": "MOD_BUSQUEDA",
+    "moduleName": "1. Órganos de Búsqueda (S-2)",
+    "imageUrl": "/backgrounds/bg_MOD_BUSQUEDA.png?v=1789251323328",
+    "opacity": 0.8,
+    "blur": 0,
+    "contrastOverlay": true,
+    "fitMode": "cover",
+    "updatedAt": "2026-09-12T22:15:23.328Z",
+    "updatedBy": "SISTEMA_DOCTRINAL",
+    "customFileName": "ORGANO DE BUSQUEDA.jpg"
+  },
+  "MOD_PATRULLAS": {
+    "moduleId": "MOD_PATRULLAS",
+    "moduleName": "4. Unidades de Terreno (Patrullas)",
+    "imageUrl": "/backgrounds/bg_MOD_PATRULLAS.png?v=1789251450664",
+    "opacity": 0.8,
+    "blur": 0,
+    "contrastOverlay": true,
+    "fitMode": "cover",
+    "updatedAt": "2026-09-12T22:17:30.664Z",
+    "updatedBy": "SISTEMA_DOCTRINAL",
+    "customFileName": "PII-LCC.jpg"
+  },
+  "MOD_P2P_MESH": {
+    "moduleId": "MOD_P2P_MESH",
+    "moduleName": "5. Malla Descentrada P2P (S-6)",
+    "imageUrl": "/dashboard-room.svg",
+    "opacity": 0.8,
+    "blur": 0,
+    "contrastOverlay": true,
+    "fitMode": "cover",
+    "updatedAt": "2026-09-12T22:14:17.302Z",
+    "updatedBy": "SISTEMA_DOCTRINAL"
+  },
+  "MOD_ARCHITECTURE": {
+    "moduleId": "MOD_ARCHITECTURE",
+    "moduleName": "6. Arquitectura de Sistemas (PII-LCC)",
+    "imageUrl": "/backgrounds/bg_MOD_ARCHITECTURE.png?v=1789251421490",
+    "opacity": 0.8,
+    "blur": 0,
+    "contrastOverlay": true,
+    "fitMode": "cover",
+    "updatedAt": "2026-09-12T22:17:01.490Z",
+    "updatedBy": "SISTEMA_DOCTRINAL",
+    "customFileName": "ESCUDO ECEME NEGRO.jpg"
+  },
+  "MOD_CODE_VIEWER": {
+    "moduleId": "MOD_CODE_VIEWER",
+    "moduleName": "7. Terminal de Código y Auditoría",
+    "imageUrl": "/backgrounds/bg_MOD_CODE_VIEWER.png?v=1789251429568",
+    "opacity": 0.8,
+    "blur": 0,
+    "contrastOverlay": true,
+    "fitMode": "cover",
+    "updatedAt": "2026-09-12T22:17:09.568Z",
+    "updatedBy": "SISTEMA_DOCTRINAL",
+    "customFileName": "ESCUDO ECEME NEGRO.jpg"
+  }
+}

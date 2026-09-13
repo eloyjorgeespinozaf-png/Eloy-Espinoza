@@ -223,6 +223,185 @@ export function generatePatrolKml(
 }
 
 /**
+ * Genera coordenadas de un polígono circular alrededor de un punto geodésico
+ * Utilizado para graficar el radio de precisión de incertidumbre del GPS en Google Earth
+ */
+export function generateCircleCoordinates(
+  centerLat: number,
+  centerLon: number,
+  radiusMeters: number,
+  points = 36
+): string {
+  const coords: string[] = [];
+  const earthRadius = 6378137; // metros WGS84
+  const dLat = (radiusMeters / earthRadius) * (180 / Math.PI);
+  const dLon = (radiusMeters / (earthRadius * Math.cos((centerLat * Math.PI) / 180))) * (180 / Math.PI);
+
+  for (let i = 0; i <= points; i++) {
+    const angle = (i * 360) / points;
+    const rad = (angle * Math.PI) / 180;
+    const lat = centerLat + dLat * Math.cos(rad);
+    const lon = centerLon + dLon * Math.sin(rad);
+    coords.push(`${lon.toFixed(7)},${lat.toFixed(7)},0`);
+  }
+  return coords.join(' ');
+}
+
+/**
+ * Genera un archivo KML de alta precisión con la ubicación física REAL y actual
+ * del dispositivo donde se encuentra instalada y operando la aplicación PII-LCC
+ */
+export function generateDeviceRealLocationKml(options: {
+  lat: number;
+  lon: number;
+  accuracy?: number | null;
+  altitude?: number | null;
+  speed?: number | null;
+  heading?: number | null;
+  operatorName?: string;
+  role?: string;
+  devicePlatform?: string;
+  timestamp?: string;
+}): string {
+  const {
+    lat,
+    lon,
+    accuracy,
+    altitude,
+    speed,
+    heading,
+    operatorName = 'Operador Táctico PII-LCC',
+    role = 'Órgano de Búsqueda y Operaciones',
+    devicePlatform = 'Terminal de Terreno / Dispositivo Móvil',
+    timestamp = new Date().toISOString()
+  } = options;
+
+  const dmsStr = formatToMilitaryDMS(lat, lon);
+  const accuracyStr = accuracy ? `±${Math.round(accuracy)} metros` : 'No especificada';
+  const altitudeStr = altitude ? `${Math.round(altitude)} m s.n.m.` : 'Nivel de Terreno';
+  const speedStr = speed ? `${Math.round(speed)} km/h` : 'Estacionario';
+  const headingStr = heading !== null && heading !== undefined ? `${Math.round(heading)}°` : 'N/A';
+  const localDateStr = new Date().toLocaleString('es-BO', { timeZoneName: 'short' });
+
+  const accuracyPolygonKml = accuracy && accuracy > 0 ? `
+    <Placemark>
+      <name>Radio de Precisión GNSS (${accuracyStr})</name>
+      <description>Margen de error satelital detectado por el receptor del dispositivo</description>
+      <Style>
+        <LineStyle>
+          <color>ff00ffff</color>
+          <width>2</width>
+        </LineStyle>
+        <PolyStyle>
+          <color>4400e5ff</color>
+          <fill>1</fill>
+          <outline>1</outline>
+        </PolyStyle>
+      </Style>
+      <Polygon>
+        <tessellate>1</tessellate>
+        <altitudeMode>clampToGround</altitudeMode>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              ${generateCircleCoordinates(lat, lon, accuracy)}
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>` : '';
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+  <Document>
+    <name>PII-LCC // UBICACIÓN REAL DEL DISPOSITIVO [EN VIVO]</name>
+    <description>Plataforma Integrada de Inteligencia para la LCC - Posicionamiento Satelital en Tiempo Real del Dispositivo</description>
+    
+    <Style id="deviceRealLocationStyle">
+      <IconStyle>
+        <color>ff00ff00</color>
+        <scale>1.4</scale>
+        <Icon>
+          <href>http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href>
+        </Icon>
+        <hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/>
+      </IconStyle>
+      <LabelStyle>
+        <color>ffffffff</color>
+        <scale>1.1</scale>
+      </LabelStyle>
+      <BalloonStyle>
+        <bgColor>ff100d08</bgColor>
+        <textColor>ffffffff</textColor>
+        <text><![CDATA[
+          <div style="font-family: 'Courier New', monospace; background: #080d17; color: #f1f5f9; padding: 14px; border-radius: 10px; border: 2px solid #06b6d4; max-width: 380px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #1e293b; padding-bottom: 6px; margin-bottom: 10px;">
+              <span style="color: #06b6d4; font-weight: bold; font-size: 14px;">📡 DISPOSITIVO PII-LCC EN VIVO</span>
+              <span style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">GNSS ACTIVO</span>
+            </div>
+            
+            <p style="margin: 4px 0;"><strong>TERMINAL FÍSICA:</strong> <span style="color: #38bdf8;">$[device]</span></p>
+            <p style="margin: 4px 0;"><strong>OPERADOR / MANDO:</strong> $[operator]</p>
+            <p style="margin: 4px 0;"><strong>ROL DOCTRINAL:</strong> <span style="color: #fbbf24;">$[role]</span></p>
+            
+            <div style="margin: 10px 0; padding: 8px; background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; border-radius: 6px;">
+              <p style="margin: 2px 0;"><strong>COORDENADAS DMS:</strong> <span style="color: #4ade80; font-weight: bold;">$[coordinates_dms]</span></p>
+              <p style="margin: 2px 0;"><strong>DECIMAL WGS84:</strong> <span style="color: #38bdf8;">$[lat_decimal], $[lon_decimal]</span></p>
+              <p style="margin: 2px 0;"><strong>PRECISIÓN SATELITAL:</strong> <span style="color: #f59e0b;">$[accuracy]</span></p>
+              <p style="margin: 2px 0;"><strong>ALTITUD APROX.:</strong> $[altitude]</p>
+              <p style="margin: 2px 0;"><strong>VELOCIDAD / RUMBO:</strong> $[speed] | $[heading]</p>
+            </div>
+            
+            <p style="margin: 6px 0 0 0; font-size: 10px; color: #94a3b8;">FIJACIÓN GNSS: $[timestamp] ($[local_time])</p>
+            <div style="margin-top: 10px; text-align: center;">
+              <a href="https://earth.google.com/web/@$[lat_decimal],$[lon_decimal],1200a,800d,35y,0h,55t,0r" target="_blank" style="display: inline-block; background: #0284c7; color: white; text-decoration: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 11px;">
+                ABRIR VUELO 3D EN GOOGLE EARTH WEB
+              </a>
+            </div>
+          </div>
+        ]]></text>
+      </BalloonStyle>
+    </Style>
+
+    <Placemark>
+      <name>📍 DISPOSITIVO ACTUAL PII-LCC [${operatorName}]</name>
+      <description><![CDATA[Estación física o terminal móvil donde está instalada y operando la app PII-LCC]]></description>
+      <styleUrl>#deviceRealLocationStyle</styleUrl>
+      <ExtendedData>
+        <Data name="device"><value>${devicePlatform}</value></Data>
+        <Data name="operator"><value>${operatorName}</value></Data>
+        <Data name="role"><value>${role}</value></Data>
+        <Data name="coordinates_dms"><value>${dmsStr}</value></Data>
+        <Data name="lat_decimal"><value>${lat.toFixed(6)}</value></Data>
+        <Data name="lon_decimal"><value>${lon.toFixed(6)}</value></Data>
+        <Data name="accuracy"><value>${accuracyStr}</value></Data>
+        <Data name="altitude"><value>${altitudeStr}</value></Data>
+        <Data name="speed"><value>${speedStr}</value></Data>
+        <Data name="heading"><value>${headingStr}</value></Data>
+        <Data name="timestamp"><value>${timestamp}</value></Data>
+        <Data name="local_time"><value>${localDateStr}</value></Data>
+      </ExtendedData>
+      <LookAt>
+        <longitude>${lon}</longitude>
+        <latitude>${lat}</latitude>
+        <altitude>${altitude || 1200}</altitude>
+        <heading>${heading || 0}</heading>
+        <tilt>55</tilt>
+        <range>900</range>
+        <altitudeMode>relativeToGround</altitudeMode>
+      </LookAt>
+      <Point>
+        <extrude>1</extrude>
+        <altitudeMode>relativeToGround</altitudeMode>
+        <coordinates>${lon},${lat},${altitude || 15}</coordinates>
+      </Point>
+    </Placemark>
+    ${accuracyPolygonKml}
+  </Document>
+</kml>`;
+}
+
+/**
  * Descarga en el navegador un archivo de texto/KML
  */
 export function downloadKmlFile(filename: string, kmlContent: string): void {
@@ -234,5 +413,5 @@ export function downloadKmlFile(filename: string, kmlContent: string): void {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

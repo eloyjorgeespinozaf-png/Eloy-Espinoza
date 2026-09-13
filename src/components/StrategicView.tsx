@@ -680,7 +680,7 @@ export default function StrategicView({
                   <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent_50%,rgba(0,0,0,0.4)_51%)] bg-[length:100%_4px] pointer-events-none opacity-50 z-10" />
 
                   {/* Render real photo if base64/url, or high-fidelity tactical graphic */}
-                  {activeAlertForForm.mediaUrl && (activeAlertForForm.mediaUrl.startsWith('data:') || activeAlertForForm.mediaUrl.startsWith('http')) ? (
+                  {Boolean(activeAlertForForm.mediaUrl && activeAlertForForm.mediaUrl.trim() !== '' && (activeAlertForForm.mediaUrl.startsWith('data:') || activeAlertForForm.mediaUrl.startsWith('http'))) ? (
                     <img
                       src={activeAlertForForm.mediaUrl}
                       alt={`Evidencia analizada en fusión ${activeAlertForForm.id}`}

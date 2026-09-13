@@ -29,25 +29,28 @@ export interface FullBackgroundSettings {
 
 export const DEFAULT_FULL_BG_SETTINGS: FullBackgroundSettings = {
   enabled: true,
-  opacity: 0.80,          // EXACT 80% requested by user
+  opacity: 0.80,
   blur: 0,
   brightness: 1,
   contrast: 1,
   fitMode: 'cover',
   opticalFilter: 'none',
-  gridOverlay: true,
-  contrastOverlay: true,
-  imageUrl: '/PII-LCC-NEGRO.jpg'
+  gridOverlay: false,
+  contrastOverlay: false,
+  imageUrl: '/default-interface-bg.jpg',
+  customDataUrl: '',
+  customFileName: 'PII-LCC.jpg'
 };
 
-const STORAGE_KEY = 'ceo_lcc_dashboard_full_bg_config_v5';
+const STORAGE_KEY = 'ceo_lcc_dashboard_full_bg_config_v6';
 
 export function useFullDashboardBackground() {
   const [settings, setSettings] = useState<FullBackgroundSettings>(() => {
     try {
       const saved = safeStorage.getItem(STORAGE_KEY);
       if (saved) {
-        return { ...DEFAULT_FULL_BG_SETTINGS, ...JSON.parse(saved) };
+        const parsed = JSON.parse(saved);
+        return { ...DEFAULT_FULL_BG_SETTINGS, ...parsed, enabled: true };
       }
     } catch {
       // fallback
@@ -56,7 +59,7 @@ export function useFullDashboardBackground() {
   });
 
   const [activeImageSrc, setActiveImageSrc] = useState<string>(() => {
-    return settings.customDataUrl || settings.imageUrl || '/PII-LCC-NEGRO.jpg';
+    return settings.customDataUrl || settings.imageUrl || '';
   });
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
 
@@ -74,21 +77,45 @@ export function useFullDashboardBackground() {
       return;
     }
 
-    fetch('/api/dashboard-bg-status')
+    setActiveImageSrc('');
+    setIsLoaded(true);
+  }, [settings.customDataUrl, settings.imageUrl]);
+
+  // Server state hydration and real-time WebSocket sync across devices
+  useEffect(() => {
+    let isMounted = true;
+    fetch('/api/full-dashboard-bg')
       .then(res => res.json())
       .then(data => {
-        if (data.exists && data.url) {
-          setActiveImageSrc(data.url);
-        } else {
-          setActiveImageSrc('/PII-LCC-NEGRO.jpg');
+        if (isMounted && data?.success && data?.settings) {
+          setSettings(prev => {
+            const merged = { ...prev, ...data.settings };
+            safeStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+            return merged;
+          });
+          setActiveImageSrc(data.settings.imageUrl || data.settings.customDataUrl || '');
         }
-        setIsLoaded(true);
       })
-      .catch(() => {
-        setActiveImageSrc('/PII-LCC-NEGRO.jpg');
-        setIsLoaded(true);
-      });
-  }, [settings.customDataUrl, settings.imageUrl]);
+      .catch(err => console.warn('[FullDashboardBackground] Offline / using local cache:', err));
+
+    const handleWsUpdate = (e: any) => {
+      const detail = e.detail;
+      if (detail?.settings) {
+        setSettings(prev => {
+          const merged = { ...prev, ...detail.settings };
+          safeStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+          return merged;
+        });
+        setActiveImageSrc(detail.settings.imageUrl || detail.settings.customDataUrl || '');
+      }
+    };
+
+    window.addEventListener('full-dashboard-bg-update', handleWsUpdate);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('full-dashboard-bg-update', handleWsUpdate);
+    };
+  }, []);
 
   // Global Drag and Drop listener for tactical background
   useEffect(() => {
@@ -129,6 +156,14 @@ export function useFullDashboardBackground() {
       } catch {
         // ignore
       }
+
+      // Automatically sync with server so all installed terminals and devices update
+      fetch('/api/full-dashboard-bg', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      }).catch(err => console.warn('[FullDashboardBackground] Non-blocking server sync error:', err));
+
       return updated;
     });
   };
@@ -172,7 +207,7 @@ export function useFullDashboardBackground() {
   const resetToDefault = () => {
     safeStorage.removeItem(STORAGE_KEY);
     setSettings(DEFAULT_FULL_BG_SETTINGS);
-    setActiveImageSrc('/PII-LCC-NEGRO.jpg');
+    setActiveImageSrc('');
   };
 
   return {
@@ -194,13 +229,16 @@ export const FullDashboardBackground: React.FC<FullDashboardBackgroundProps> = (
   settings,
   imageSrc
 }) => {
-  const [currentSrc, setCurrentSrc] = useState<string>(imageSrc);
+  const [currentSrc, setCurrentSrc] = useState<string>(imageSrc || '');
 
   useEffect(() => {
-    setCurrentSrc(imageSrc);
+    setCurrentSrc(imageSrc || '');
   }, [imageSrc]);
 
-  if (!settings.enabled) return null;
+  // If disabled, or no image provided, or cleared, render nothing (pure clean dark military interface)
+  if (!settings.enabled || !currentSrc || currentSrc === '' || currentSrc === '/PII-LCC-NEGRO.jpg' || currentSrc === '/INTERFAZ.jpg' || (!settings.imageUrl && !settings.customDataUrl && !imageSrc)) {
+    return null;
+  }
 
   const blur = settings.blur || 0;
   const brightness = settings.brightness ?? 1;
@@ -229,27 +267,27 @@ export const FullDashboardBackground: React.FC<FullDashboardBackgroundProps> = (
       aria-hidden="true"
     >
       {/* 1. Full-screen tactical image */}
-      <img
-        src={currentSrc}
-        alt="Fondo Táctico de la Interfaz PII-LCC C4ISR"
-        referrerPolicy="no-referrer"
-        onError={() => {
-          if (currentSrc !== '/PII-LCC-NEGRO.jpg' && currentSrc !== '/interfaz-room.svg') {
-            setCurrentSrc('/PII-LCC-NEGRO.jpg');
-          }
-        }}
-        className={`w-full h-full transition-opacity duration-500 ease-out ${
-          fitMode === 'contain' 
-            ? 'object-contain object-center' 
-            : fitMode === 'center'
-            ? 'object-none object-center'
-            : 'object-cover object-center'
-        }`}
-        style={{
-          opacity: settings.opacity,
-          filter: finalFilter
-        }}
-      />
+      {Boolean(currentSrc && currentSrc.trim() !== '') && (
+        <img
+          src={currentSrc}
+          alt="Fondo Táctico de la Interfaz PII-LCC C4ISR"
+          referrerPolicy="no-referrer"
+          onError={() => {
+            setCurrentSrc('');
+          }}
+          className={`w-full h-full transition-opacity duration-500 ease-out ${
+            fitMode === 'contain' 
+              ? 'object-contain object-center' 
+              : fitMode === 'center'
+              ? 'object-none object-center'
+              : 'object-cover object-center'
+          }`}
+          style={{
+            opacity: settings.opacity,
+            filter: finalFilter
+          }}
+        />
+      )}
 
       {/* 2. Optical Tint Layer if filter is active */}
       {opticalFilter !== 'none' && (
@@ -353,7 +391,7 @@ export const FullDashboardBackgroundControl: React.FC<FullDashboardBackgroundCon
           isOpen={showModal}
           onClose={() => setShowModal(false)}
           globalSettings={settings}
-          activeGlobalImageSrc={settings.customDataUrl || settings.imageUrl || '/PII-LCC-NEGRO.jpg'}
+          activeGlobalImageSrc={settings.customDataUrl || settings.imageUrl || ''}
           onUpdateGlobalSettings={updateSettings}
           onUploadGlobalImage={uploadDashboardImage}
           onResetGlobal={resetToDefault}

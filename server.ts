@@ -20,7 +20,8 @@ import {
 import { RawAlert, Clan, ActionableIntel, AutomatedOrder, TacticalUnit, AuditLogEntry, ModuleBackgroundConfig } from "./src/types";
 
 // Centralized in-memory synced database
-let serverVersion = "v2.4.0-CAD";
+let serverVersion = "v2.5.0-DOCTRINAL";
+let serverBuildTimestamp = Date.now();
 let serverRawAlerts: RawAlert[] = [...initialRawAlerts];
 let serverClans: Clan[] = [...initialClans];
 let serverActionableIntel: ActionableIntel[] = [...initialActionableIntel];
@@ -37,9 +38,11 @@ let serverAuditLogs: AuditLogEntry[] = [
   }
 ];
 
-// Per-Module Backgrounds Persistence System
+// Persistent File System
 const DATA_DIR = path.join(process.cwd(), "data");
 const MODULE_BG_FILE = path.join(DATA_DIR, "module-backgrounds.json");
+const FULL_DASHBOARD_BG_FILE = path.join(DATA_DIR, "full-dashboard-background.json");
+const TACTICAL_STATE_FILE = path.join(DATA_DIR, "tactical-state.json");
 const BG_DIR = path.join(process.cwd(), "public", "backgrounds");
 
 if (!fs.existsSync(DATA_DIR)) {
@@ -58,8 +61,9 @@ const DEFAULT_SERVER_MODULE_BACKGROUNDS: Record<string, any> = {
     blur: 0,
     contrastOverlay: true,
     fitMode: "cover",
+    enabled: true,
     updatedAt: new Date().toISOString(),
-    updatedBy: "SISTEMA_DOCTRINAL"
+    updatedBy: "USER_REQUEST"
   },
   MOD_FUSION: {
     moduleId: "MOD_FUSION",
@@ -148,6 +152,75 @@ function saveModuleBackgroundsToDisk() {
   }
 }
 
+// Full Dashboard Background Persistence System
+const DEFAULT_FULL_DASHBOARD_BG = {
+  enabled: true,
+  opacity: 0.80,
+  blur: 0,
+  brightness: 1,
+  contrast: 1,
+  fitMode: "cover",
+  opticalFilter: "none",
+  gridOverlay: false,
+  contrastOverlay: false,
+  imageUrl: "/default-interface-bg.jpg",
+  customFileName: "PII-LCC.jpg",
+  customDataUrl: "",
+  updatedAt: new Date().toISOString(),
+  updatedBy: "USER_REQUEST"
+};
+
+let serverFullDashboardBg: Record<string, any> = { ...DEFAULT_FULL_DASHBOARD_BG };
+
+if (fs.existsSync(FULL_DASHBOARD_BG_FILE)) {
+  try {
+    const loadedBg = JSON.parse(fs.readFileSync(FULL_DASHBOARD_BG_FILE, "utf-8"));
+    serverFullDashboardBg = { ...DEFAULT_FULL_DASHBOARD_BG, ...loadedBg };
+  } catch (err) {
+    console.error("Error reading full-dashboard-background.json:", err);
+  }
+}
+
+function saveFullDashboardBgToDisk() {
+  try {
+    fs.writeFileSync(FULL_DASHBOARD_BG_FILE, JSON.stringify(serverFullDashboardBg, null, 2));
+  } catch (err) {
+    console.error("Error saving full-dashboard-background.json:", err);
+  }
+}
+
+// Tactical State (Alerts, Orders, Clans, Units, Intel) Persistence System
+if (fs.existsSync(TACTICAL_STATE_FILE)) {
+  try {
+    const loadedState = JSON.parse(fs.readFileSync(TACTICAL_STATE_FILE, "utf-8"));
+    if (Array.isArray(loadedState.rawAlerts) && loadedState.rawAlerts.length > 0) serverRawAlerts = loadedState.rawAlerts;
+    if (Array.isArray(loadedState.clans) && loadedState.clans.length > 0) serverClans = loadedState.clans;
+    if (Array.isArray(loadedState.actionableIntel) && loadedState.actionableIntel.length > 0) serverActionableIntel = loadedState.actionableIntel;
+    if (Array.isArray(loadedState.activeOrders) && loadedState.activeOrders.length > 0) serverActiveOrders = loadedState.activeOrders;
+    if (Array.isArray(loadedState.tacticalUnits) && loadedState.tacticalUnits.length > 0) serverTacticalUnits = loadedState.tacticalUnits;
+    if (Array.isArray(loadedState.auditLogs) && loadedState.auditLogs.length > 0) serverAuditLogs = loadedState.auditLogs;
+    console.log("[Data Persistence] Loaded persistent tactical state from data/tactical-state.json successfully.");
+  } catch (err) {
+    console.error("Error loading tactical-state.json:", err);
+  }
+}
+
+function saveTacticalStateToDisk() {
+  try {
+    fs.writeFileSync(TACTICAL_STATE_FILE, JSON.stringify({
+      rawAlerts: serverRawAlerts,
+      clans: serverClans,
+      actionableIntel: serverActionableIntel,
+      activeOrders: serverActiveOrders,
+      tacticalUnits: serverTacticalUnits,
+      auditLogs: serverAuditLogs.slice(0, 100),
+      savedAt: new Date().toISOString()
+    }, null, 2));
+  } catch (err) {
+    console.error("Error saving tactical-state.json:", err);
+  }
+}
+
 function sanitizeMediaUrl(mediaUrl?: string): string | undefined {
   if (!mediaUrl) return undefined;
   if (mediaUrl.startsWith("data:")) {
@@ -205,7 +278,8 @@ wss.on("connection", (ws: WebSocket) => {
       activeOrders: serverActiveOrders,
       tacticalUnits: serverTacticalUnits,
       auditLogs: serverAuditLogs,
-      moduleBackgrounds: serverModuleBackgrounds
+      moduleBackgrounds: serverModuleBackgrounds,
+      fullDashboardBackground: serverFullDashboardBg
     }
   }));
 
@@ -410,19 +484,43 @@ wss.on("connection", (ws: WebSocket) => {
         }
 
         case "UPDATE_MODULE_BACKGROUND": {
-          const { moduleId, config } = payload;
-          if (moduleId && config) {
-            serverModuleBackgrounds[moduleId] = {
-              ...serverModuleBackgrounds[moduleId],
+          const config = payload?.config || payload;
+          const targetModuleId = payload?.moduleId || config?.moduleId;
+          const imageBase64 = payload?.imageBase64;
+          if (targetModuleId && config) {
+            let finalUrl = config.imageUrl !== undefined ? config.imageUrl : (serverModuleBackgrounds[targetModuleId]?.imageUrl || "");
+            if (imageBase64) {
+              try {
+                const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+                const buffer = Buffer.from(base64Data, "base64");
+                const fileName = `bg_${targetModuleId}.png`;
+                const publicPath = path.join(process.cwd(), "public", "backgrounds", fileName);
+                fs.writeFileSync(publicPath, buffer);
+
+                const distBgDir = path.join(process.cwd(), "dist", "backgrounds");
+                if (fs.existsSync(path.join(process.cwd(), "dist"))) {
+                  if (!fs.existsSync(distBgDir)) {
+                    fs.mkdirSync(distBgDir, { recursive: true });
+                  }
+                  fs.writeFileSync(path.join(distBgDir, fileName), buffer);
+                }
+                finalUrl = `/backgrounds/${fileName}?v=${Date.now()}`;
+              } catch (e) {
+                console.error("Error writing WS module bg file:", e);
+              }
+            }
+            serverModuleBackgrounds[targetModuleId] = {
+              ...serverModuleBackgrounds[targetModuleId],
               ...config,
+              imageUrl: finalUrl,
               updatedAt: new Date().toISOString()
             };
             saveModuleBackgroundsToDisk();
             broadcast({
               type: "MODULE_BG_UPDATE",
               payload: {
-                moduleId,
-                config: serverModuleBackgrounds[moduleId],
+                moduleId: targetModuleId,
+                config: serverModuleBackgrounds[targetModuleId],
                 allConfigs: serverModuleBackgrounds
               }
             });
@@ -496,36 +594,18 @@ wss.on("connection", (ws: WebSocket) => {
           break;
         }
 
-        case "UPDATE_MODULE_BACKGROUND": {
-          const { config, imageBase64 } = payload || {};
-          if (config && config.moduleId) {
-            let finalUrl = config.imageUrl || serverModuleBackgrounds[config.moduleId]?.imageUrl || "/INTERFAZ.jpg";
-            if (imageBase64) {
-              try {
-                const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-                const buffer = Buffer.from(base64Data, "base64");
-                const fileName = `bg_${config.moduleId}.png`;
-                const publicPath = path.join(process.cwd(), "public", "backgrounds", fileName);
-                fs.writeFileSync(publicPath, buffer);
-                finalUrl = `/backgrounds/${fileName}?v=${Date.now()}`;
-              } catch (e) {
-                console.error("Error writing WS module bg file:", e);
-              }
-            }
-            serverModuleBackgrounds[config.moduleId] = {
-              ...serverModuleBackgrounds[config.moduleId],
-              ...config,
-              imageUrl: finalUrl,
+        case "UPDATE_FULL_DASHBOARD_BG": {
+          const { settings } = payload;
+          if (settings) {
+            serverFullDashboardBg = {
+              ...serverFullDashboardBg,
+              ...settings,
               updatedAt: new Date().toISOString()
             };
-            saveModuleBackgroundsToDisk();
+            saveFullDashboardBgToDisk();
             broadcast({
-              type: "MODULE_BG_UPDATE",
-              payload: {
-                moduleId: config.moduleId,
-                config: serverModuleBackgrounds[config.moduleId],
-                allConfigs: serverModuleBackgrounds
-              }
+              type: "FULL_DASHBOARD_BG_UPDATE",
+              payload: { settings: serverFullDashboardBg }
             });
           }
           break;
@@ -536,6 +616,7 @@ wss.on("connection", (ws: WebSocket) => {
       }
 
       if (shouldBroadcast) {
+        saveTacticalStateToDisk();
         broadcast({
           type: "STATE_UPDATE",
           payload: {
@@ -617,34 +698,32 @@ async function startServer() {
 
   // Official Military Dashboard Background Endpoints
   const serveDashboardBg = (req: any, res: any) => {
-    const candidates = [
-      path.join(process.cwd(), "public", "INTERFAZ.jpg"),
-      path.join(process.cwd(), "dist", "INTERFAZ.jpg"),
-      path.join(process.cwd(), "public", "interfaz.jpg"),
-      path.join(process.cwd(), "dist", "interfaz.jpg"),
-      path.join(process.cwd(), "public", "INTERFAZ.png"),
-      path.join(process.cwd(), "dist", "INTERFAZ.png"),
-      path.join(process.cwd(), "public", "interfaz-room.svg"),
-      path.join(process.cwd(), "dist", "interfaz-room.svg"),
-      path.join(process.cwd(), "public", "DASHB 3.jpg"),
-      path.join(process.cwd(), "dist", "DASHB 3.jpg"),
-      path.join(process.cwd(), "public", "DASHBOARD 2.png"),
-      path.join(process.cwd(), "dist", "DASHBOARD 2.png"),
-      path.join(process.cwd(), "public", "dashboard-room.svg"),
-      path.join(process.cwd(), "dist", "dashboard-room.svg"),
-    ];
+    const rawName = path.basename(decodeURIComponent(req.path || ""));
+    const publicPath = path.join(process.cwd(), "public", rawName);
+    const distPath = path.join(process.cwd(), "dist", rawName);
 
-    for (const filePath of candidates) {
-      if (fs.existsSync(filePath)) {
-        if (filePath.endsWith(".png")) {
-          res.setHeader("Content-Type", "image/png");
-        } else if (filePath.endsWith(".jpg") || filePath.endsWith(".jpeg")) {
-          res.setHeader("Content-Type", "image/jpeg");
-        } else if (filePath.endsWith(".svg")) {
-          res.setHeader("Content-Type", "image/svg+xml");
-        }
-        return res.sendFile(filePath);
+    let target: string | null = null;
+    if (rawName && fs.existsSync(publicPath)) {
+      target = publicPath;
+    } else if (rawName && fs.existsSync(distPath)) {
+      target = distPath;
+    } else {
+      // Fallback
+      const defaultBg = path.join(process.cwd(), "public", "INTERFAZ.jpg");
+      if (fs.existsSync(defaultBg)) {
+        target = defaultBg;
       }
+    }
+
+    if (target) {
+      if (target.endsWith(".png")) {
+        res.setHeader("Content-Type", "image/png");
+      } else if (target.endsWith(".jpg") || target.endsWith(".jpeg")) {
+        res.setHeader("Content-Type", "image/jpeg");
+      } else if (target.endsWith(".svg")) {
+        res.setHeader("Content-Type", "image/svg+xml");
+      }
+      return res.sendFile(target);
     }
     res.status(404).send("Not found");
   };
@@ -652,6 +731,7 @@ async function startServer() {
   app.get("/INTERFAZ.jpg", serveDashboardBg);
   app.get("/interfaz.jpg", serveDashboardBg);
   app.get("/INTERFAZ.png", serveDashboardBg);
+  app.get("/default-interface-bg.jpg", serveDashboardBg);
   app.get("/interfaz-room.svg", serveDashboardBg);
   app.get("/DASHB 3.jpg", serveDashboardBg);
   app.get("/DASHB%203.jpg", serveDashboardBg);
@@ -664,23 +744,11 @@ async function startServer() {
   app.get("/DASHBOARD.jpg", serveDashboardBg);
 
   app.get("/api/dashboard-bg-status", (req, res) => {
-    const candidates = [
-      { path: path.join(process.cwd(), "public", "INTERFAZ.jpg"), url: "/INTERFAZ.jpg" },
-      { path: path.join(process.cwd(), "public", "interfaz.jpg"), url: "/INTERFAZ.jpg" },
-      { path: path.join(process.cwd(), "public", "INTERFAZ.png"), url: "/INTERFAZ.png" },
-      { path: path.join(process.cwd(), "public", "interfaz-room.svg"), url: "/INTERFAZ.jpg" },
-      { path: path.join(process.cwd(), "public", "DASHB 3.jpg"), url: "/DASHB 3.jpg" },
-      { path: path.join(process.cwd(), "public", "DASHBOARD 2.png"), url: "/DASHBOARD 2.png" },
-      { path: path.join(process.cwd(), "public", "DASHBOARD.jpg"), url: "/DASHBOARD.jpg" },
-    ];
-    for (const item of candidates) {
-      if (fs.existsSync(item.path)) {
-        return res.json({ exists: true, url: item.url });
-      }
-    }
+    const defaultBg = path.join(process.cwd(), "public", "INTERFAZ.jpg");
+    const exists = fs.existsSync(defaultBg);
     res.json({
-      exists: false,
-      url: "/INTERFAZ.jpg"
+      exists,
+      url: exists ? "/INTERFAZ.jpg" : null
     });
   });
 
@@ -737,7 +805,7 @@ async function startServer() {
       return res.status(400).json({ error: "Missing moduleId parameter" });
     }
 
-    let finalUrl = imageUrl || serverModuleBackgrounds[moduleId]?.imageUrl || "/INTERFAZ.jpg";
+    let finalUrl = imageUrl !== undefined ? imageUrl : (serverModuleBackgrounds[moduleId]?.imageUrl || "");
 
     if (imageBase64) {
       try {
@@ -852,6 +920,162 @@ async function startServer() {
       });
     }
     res.json({ success: true, config: serverModuleBackgrounds[moduleId] });
+  });
+
+  // Full dashboard background query endpoint
+  app.get("/api/full-dashboard-bg", (req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.json({
+      success: true,
+      settings: serverFullDashboardBg
+    });
+  });
+
+  // Full dashboard background update endpoint
+  app.post("/api/full-dashboard-bg", (req, res) => {
+    const updates = req.body || {};
+    serverFullDashboardBg = {
+      ...serverFullDashboardBg,
+      ...updates,
+      updatedAt: new Date().toISOString()
+    };
+    saveFullDashboardBgToDisk();
+
+    // Broadcast update to all clients
+    broadcast({
+      type: "FULL_DASHBOARD_BG_UPDATE",
+      payload: { settings: serverFullDashboardBg }
+    });
+
+    res.json({ success: true, settings: serverFullDashboardBg });
+  });
+
+  // App version and update detection endpoint
+  app.get(["/api/version", "/api/app-version"], (req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.json({
+      success: true,
+      version: serverVersion,
+      buildTimestamp: serverBuildTimestamp,
+      publishedAt: new Date(serverBuildTimestamp).toISOString(),
+      name: "PII-LCC Plataforma Integrada de Inteligencia",
+      doctrine: "MIL-STD-188-220 / ECEME",
+      status: "NOMINAL",
+      activeModulesCount: 7,
+      serverTime: new Date().toISOString()
+    });
+  });
+
+  // Publish a new doctrinal version / trigger reload on all installed clients
+  app.post("/api/app-version/publish", (req, res) => {
+    serverBuildTimestamp = Date.now();
+    serverVersion = req.body.version || `v2.5.0-${Date.now().toString().slice(-4)}`;
+    
+    // Broadcast upgrade alert to all devices
+    broadcast({
+      type: "SYSTEM_UPGRADE_ALERT",
+      payload: {
+        version: serverVersion,
+        timestamp: serverBuildTimestamp,
+        message: "Nueva versión del terminal táctico publicada. Sincronizando modificaciones..."
+      }
+    });
+
+    res.json({ success: true, version: serverVersion, buildTimestamp: serverBuildTimestamp });
+  });
+
+  // Supabase Integration Health Endpoint
+  app.get("/api/supabase/status", async (req, res) => {
+    const supabaseUrl = process.env.SUPABASE_URL || "https://uapjebdcioptahguruyq.supabase.co";
+    const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhcGplYmRjaW9wdGFoZ3VydXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkyMjQ3OTgsImV4cCI6MjEwNDgwMDc5OH0.aTFlRmrGecFTlkEDIZywl5IaHltEz-6-t57872bF6iQ";
+    const projectId = process.env.SUPABASE_PROJECT_ID || "uapjebdcioptahguruyq";
+
+    try {
+      const t0 = Date.now();
+      const authResp = await fetch(`${supabaseUrl}/auth/v1/health`, {
+        headers: { apikey: supabaseAnonKey }
+      });
+      const latencyMs = Date.now() - t0;
+      res.json({
+        ok: authResp.ok,
+        projectId,
+        url: supabaseUrl,
+        latencyMs,
+        authStatus: authResp.status,
+        timestamp: new Date().toISOString()
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        ok: false,
+        projectId,
+        error: err.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
+  // Tactical Backup: Full Export package for cross-device migration and cold-storage
+  app.get("/api/backup/export", (req, res) => {
+    res.json({
+      format: "PII-LCC-MILITARY-BACKUP",
+      version: serverVersion,
+      exportedAt: new Date().toISOString(),
+      tacticalState: {
+        rawAlerts: serverRawAlerts,
+        clans: serverClans,
+        actionableIntel: serverActionableIntel,
+        activeOrders: serverActiveOrders,
+        tacticalUnits: serverTacticalUnits,
+        auditLogs: serverAuditLogs
+      },
+      fullDashboardBackground: serverFullDashboardBg,
+      moduleBackgrounds: serverModuleBackgrounds
+    });
+  });
+
+  // Tactical Backup: Full Import and sync to all devices
+  app.post("/api/backup/import", (req, res) => {
+    try {
+      const backup = req.body;
+      if (backup.tacticalState) {
+        const { rawAlerts, clans, actionableIntel, activeOrders, tacticalUnits, auditLogs } = backup.tacticalState;
+        if (Array.isArray(rawAlerts) && rawAlerts.length > 0) serverRawAlerts = rawAlerts;
+        if (Array.isArray(clans) && clans.length > 0) serverClans = clans;
+        if (Array.isArray(actionableIntel) && actionableIntel.length > 0) serverActionableIntel = actionableIntel;
+        if (Array.isArray(activeOrders) && activeOrders.length > 0) serverActiveOrders = activeOrders;
+        if (Array.isArray(tacticalUnits) && tacticalUnits.length > 0) serverTacticalUnits = tacticalUnits;
+        if (Array.isArray(auditLogs) && auditLogs.length > 0) serverAuditLogs = auditLogs;
+        saveTacticalStateToDisk();
+      }
+      if (backup.fullDashboardBackground) {
+        serverFullDashboardBg = { ...serverFullDashboardBg, ...backup.fullDashboardBackground };
+        saveFullDashboardBgToDisk();
+      }
+      if (backup.moduleBackgrounds) {
+        serverModuleBackgrounds = { ...serverModuleBackgrounds, ...backup.moduleBackgrounds };
+        saveModuleBackgroundsToDisk();
+      }
+
+      // Broadcast full sync to all connected devices
+      broadcast({
+        type: "INIT",
+        payload: {
+          version: serverVersion,
+          rawAlerts: serverRawAlerts,
+          clans: serverClans,
+          actionableIntel: serverActionableIntel,
+          activeOrders: serverActiveOrders,
+          tacticalUnits: serverTacticalUnits,
+          auditLogs: serverAuditLogs,
+          moduleBackgrounds: serverModuleBackgrounds,
+          fullDashboardBackground: serverFullDashboardBg
+        }
+      });
+
+      res.json({ success: true, message: "Copia de seguridad restaurada y sincronizada en todos los terminales." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.get("/emblem-bg.png", (req, res) => {
@@ -1093,6 +1317,58 @@ async function startServer() {
             break;
           }
 
+          case "UPDATE_MODULE_BACKGROUND": {
+            const config = payload?.config || payload;
+            const targetModuleId = payload?.moduleId || config?.moduleId;
+            const imageBase64 = payload?.imageBase64;
+            if (targetModuleId && config) {
+              let finalUrl = config.imageUrl !== undefined ? config.imageUrl : (serverModuleBackgrounds[targetModuleId]?.imageUrl || "");
+              if (imageBase64) {
+                try {
+                  const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
+                  const buffer = Buffer.from(base64Data, "base64");
+                  const fileName = `bg_${targetModuleId}.png`;
+                  const publicPath = path.join(process.cwd(), "public", "backgrounds", fileName);
+                  fs.writeFileSync(publicPath, buffer);
+
+                  const distBgDir = path.join(process.cwd(), "dist", "backgrounds");
+                  if (fs.existsSync(path.join(process.cwd(), "dist"))) {
+                    if (!fs.existsSync(distBgDir)) {
+                      fs.mkdirSync(distBgDir, { recursive: true });
+                    }
+                    fs.writeFileSync(path.join(distBgDir, fileName), buffer);
+                  }
+                  finalUrl = `/backgrounds/${fileName}?v=${Date.now()}`;
+                } catch (e) {
+                  console.error("Error writing HTTP sync module bg file:", e);
+                }
+              }
+              serverModuleBackgrounds[targetModuleId] = {
+                ...serverModuleBackgrounds[targetModuleId],
+                ...config,
+                imageUrl: finalUrl,
+                updatedAt: new Date().toISOString()
+              };
+              saveModuleBackgroundsToDisk();
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "UPDATE_FULL_DASHBOARD_BG": {
+            const { settings } = payload;
+            if (settings) {
+              serverFullDashboardBg = {
+                ...serverFullDashboardBg,
+                ...settings,
+                updatedAt: new Date().toISOString()
+              };
+              saveFullDashboardBgToDisk();
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
 
         }
       } catch (err) {
@@ -1101,6 +1377,7 @@ async function startServer() {
     }
 
     if (shouldBroadcast) {
+      saveTacticalStateToDisk();
       broadcast({
         type: "STATE_UPDATE",
         payload: {
@@ -1110,7 +1387,8 @@ async function startServer() {
           activeOrders: serverActiveOrders,
           tacticalUnits: serverTacticalUnits,
           auditLogs: serverAuditLogs,
-          moduleBackgrounds: serverModuleBackgrounds
+          moduleBackgrounds: serverModuleBackgrounds,
+          fullDashboardBackground: serverFullDashboardBg
         }
       });
     }
@@ -1123,7 +1401,8 @@ async function startServer() {
       activeOrders: serverActiveOrders,
       tacticalUnits: serverTacticalUnits,
       auditLogs: serverAuditLogs,
-      moduleBackgrounds: serverModuleBackgrounds
+      moduleBackgrounds: serverModuleBackgrounds,
+      fullDashboardBackground: serverFullDashboardBg
     });
   });
 

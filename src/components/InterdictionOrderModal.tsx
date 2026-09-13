@@ -665,7 +665,7 @@ export default function InterdictionOrderModal({
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
                   {/* Image Canvas / Viewport */}
                   <div className="md:col-span-8 bg-black rounded-xl border border-zinc-800 overflow-hidden relative group aspect-[16/10] flex items-center justify-center">
-                    {mediaSource.startsWith('data:image') || mediaSource.startsWith('http') ? (
+                    {Boolean(mediaSource && mediaSource.trim() !== '' && (mediaSource.startsWith('data:image') || mediaSource.startsWith('http'))) ? (
                       <img 
                         src={mediaSource} 
                         alt="Evidencia fotográfica analizada en taller de fusión" 

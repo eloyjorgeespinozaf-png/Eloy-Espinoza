@@ -211,7 +211,7 @@ export const TacticalPhotoViewerModal: React.FC<TacticalPhotoViewerModalProps> =
                   ...getFilterStyle()
                 }}
               >
-                {isCustomImage ? (
+                {isCustomImage && Boolean(alert.mediaUrl && alert.mediaUrl.trim() !== '') ? (
                   /* Custom photo uploaded by patrol or camera */
                   <img
                     src={alert.mediaUrl}

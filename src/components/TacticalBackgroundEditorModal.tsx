@@ -76,7 +76,7 @@ const ALL_SYSTEM_TARGETS: TargetItemMeta[] = [
     code: 'C4ISR-GLOBAL',
     color: '#10b981',
     desc: 'Fondo de la terminal de acceso militar, pantalla de login y contenedor base.',
-    fallbackImg: '/PII-LCC-NEGRO.jpg'
+    fallbackImg: '/INTERFAZ.jpg'
   },
   {
     id: 'MOD_BUSQUEDA',
@@ -139,7 +139,7 @@ const ALL_SYSTEM_TARGETS: TargetItemMeta[] = [
     code: 'DEV-AUDIT',
     color: '#ec4899',
     desc: 'Inspección de código fuente y criptografía militar CAD-C2.',
-    fallbackImg: '/INTERFAZ.jpg'
+    fallbackImg: '/interfaz-room.svg'
   }
 ];
 
@@ -246,7 +246,7 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
   // Import local file specifically for any target
   const handleImportFileForTarget = async (targetId: 'GLOBAL' | TacticalModuleId, file: File) => {
     if (!file.type.startsWith('image/')) {
-      alert('Por favor selecciona un archivo de imagen válido (PNG, JPG, WEBP, SVG)');
+      showFeedback('Por favor selecciona un archivo de imagen válido (PNG, JPG, WEBP, SVG)');
       return;
     }
 
@@ -276,7 +276,7 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
       }
     } catch (err) {
       console.error(err);
-      alert('Error al procesar la imagen.');
+      showFeedback('Error al procesar la imagen.');
     } finally {
       setIsProcessing(false);
     }
@@ -426,11 +426,11 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
       a.href = url;
       a.download = `pii-lcc-fondos-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
       showFeedback('Paquete de fondos exportado correctamente en archivo JSON');
     } catch (e) {
       console.error(e);
-      alert('Error al exportar paquete.');
+      showFeedback('Error al exportar paquete.');
     }
   };
 
@@ -450,10 +450,10 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
           }
           showFeedback('¡Paquete de fondos importado con éxito!');
         } else {
-          alert('El archivo no contiene una estructura válida de fondos PII-LCC.');
+          showFeedback('El archivo no contiene una estructura válida de fondos PII-LCC.');
         }
       } catch {
-        alert('Error al leer el archivo JSON.');
+        showFeedback('Error al leer el archivo JSON.');
       }
     };
     reader.readAsText(file);
@@ -710,18 +710,26 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
                         }}
                         title="Haz clic para cambiar la imagen de este módulo"
                       >
-                        <img
-                          src={bgData.img}
-                          alt={target.name}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                          style={{
-                            opacity: bgData.opacity,
-                            filter: getFilterCSS(bgData.opticalFilter, bgData.blur, bgData.brightness, bgData.contrast)
-                          }}
-                          onError={(e) => {
-                            (e.currentTarget as HTMLImageElement).src = target.fallbackImg;
-                          }}
-                        />
+                        {Boolean(bgData.img && bgData.img.trim() !== '') ? (
+                          <img
+                            src={bgData.img}
+                            alt={target.name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                            style={{
+                              opacity: bgData.opacity,
+                              filter: getFilterCSS(bgData.opticalFilter, bgData.blur, bgData.brightness, bgData.contrast)
+                            }}
+                            onError={(e) => {
+                              if (target.fallbackImg) {
+                                (e.currentTarget as HTMLImageElement).src = target.fallbackImg;
+                              }
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-900/60 text-zinc-500 p-2 text-center">
+                            <span className="text-[10px] font-mono">Fondo Estándar</span>
+                          </div>
+                        )}
 
                         {/* Vignette overlay */}
                         {bgData.contrastOverlay && (
@@ -940,22 +948,30 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
                   {/* Preview Window */}
                   <div className="relative rounded-xl border border-zinc-800 bg-black overflow-hidden shadow-xl aspect-video flex flex-col justify-between p-3 select-none">
                     <div className="absolute inset-0 z-0 overflow-hidden">
-                      <img
-                        src={currentStudioBg.img}
-                        alt={currentStudioTarget.name}
-                        className={`w-full h-full transition-all duration-300 ${
-                          currentStudioBg.fitMode === 'contain' 
-                            ? 'object-contain object-center' 
-                            : 'object-cover object-center'
-                        }`}
-                        style={{
-                          opacity: currentStudioBg.opacity,
-                          filter: getFilterCSS(currentStudioBg.opticalFilter, currentStudioBg.blur, currentStudioBg.brightness, currentStudioBg.contrast)
-                        }}
-                        onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).src = currentStudioTarget.fallbackImg;
-                        }}
-                      />
+                      {Boolean(currentStudioBg.img && currentStudioBg.img.trim() !== '') ? (
+                        <img
+                          src={currentStudioBg.img}
+                          alt={currentStudioTarget.name}
+                          className={`w-full h-full transition-all duration-300 ${
+                            currentStudioBg.fitMode === 'contain' 
+                              ? 'object-contain object-center' 
+                              : 'object-cover object-center'
+                          }`}
+                          style={{
+                            opacity: currentStudioBg.opacity,
+                            filter: getFilterCSS(currentStudioBg.opticalFilter, currentStudioBg.blur, currentStudioBg.brightness, currentStudioBg.contrast)
+                          }}
+                          onError={(e) => {
+                            if (currentStudioTarget.fallbackImg) {
+                              (e.currentTarget as HTMLImageElement).src = currentStudioTarget.fallbackImg;
+                            }
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center bg-zinc-900/50 text-zinc-500 p-4 text-center">
+                          <span className="text-xs font-mono">Fondo Estándar</span>
+                        </div>
+                      )}
 
                       {currentStudioBg.contrastOverlay && (
                         <div 
@@ -1275,11 +1291,13 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
                           className="relative rounded-lg overflow-hidden border border-zinc-800 bg-zinc-950 hover:border-zinc-600 p-1 text-left transition-all cursor-pointer group flex flex-col justify-between"
                         >
                           <div className="h-10 w-full rounded overflow-hidden bg-black mb-1">
-                            <img
-                              src={preset.url}
-                              alt={preset.name}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                            />
+                            {preset.url && (
+                              <img
+                                src={preset.url}
+                                alt={preset.name}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                              />
+                            )}
                           </div>
                           <p className="font-bold text-[9px] text-zinc-200 truncate leading-tight">
                             {preset.name}
@@ -1393,12 +1411,14 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
                     onClick={() => handleApplyPresetForTarget(presetModalTarget, preset.url, preset.name)}
                     className="rounded-lg overflow-hidden border border-zinc-800 bg-black hover:border-emerald-500 p-1.5 text-left transition-all cursor-pointer group flex flex-col justify-between"
                   >
-                    <div className="h-14 w-full rounded overflow-hidden mb-1">
-                      <img
-                        src={preset.url}
-                        alt={preset.name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                      />
+                    <div className="h-14 w-full rounded overflow-hidden mb-1 bg-black">
+                      {preset.url && (
+                        <img
+                          src={preset.url}
+                          alt={preset.name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        />
+                      )}
                     </div>
                     <span className="font-bold text-[10px] text-zinc-200 truncate">
                       {preset.name}

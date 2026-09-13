@@ -10,9 +10,12 @@ import {
   Eye, Info, Camera, Upload, RefreshCw, Trash2, Video, VideoOff, Crosshair,
   Lock, Unlock, Key, Plus, Sliders, Battery, Fuel, AlertTriangle, X,
   MapPin, Clock, CheckCircle2, ChevronRight, FileText, Layers, Activity,
-  Globe
+  Globe, Download
 } from 'lucide-react';
 import { playSyntheticBeep } from '../utils/audio';
+import { safeStorage } from '../utils/storage';
+import { convertToDMS, generateDeviceRealLocationKml, downloadKmlFile, parseCoordinates } from '../utils/geo';
+import { detectDevicePlatform, saveCachedDeviceLocation } from '../utils/deviceLocation';
 import { PatrolAuthModal } from './PatrolAuthModal';
 import { PatrolEditorModal } from './PatrolEditorModal';
 import { PatrolOperationalDashboard } from './PatrolOperationalDashboard';
@@ -76,7 +79,7 @@ export default function TacticalView({
   // Patrol Authentication, Management & Modals State
   const [unlockedPatrolIds, setUnlockedPatrolIds] = useState<Record<string, boolean>>(() => {
     try {
-      const saved = localStorage.getItem('PII_LCC_UNLOCKED_PATROLS');
+      const saved = safeStorage.getItem('PII_LCC_UNLOCKED_PATROLS');
       if (saved) return JSON.parse(saved);
     } catch {
       // ignore
@@ -334,6 +337,22 @@ export default function TacticalView({
         setIsLocatingDevice(false);
         setLiveLocationAcquired(true);
 
+        saveCachedDeviceLocation({
+          lat: latitude,
+          lon: longitude,
+          dms: formatted,
+          accuracy: accuracy ? Math.round(accuracy) : null,
+          altitude: pos.coords.altitude ? Math.round(pos.coords.altitude) : null,
+          altitudeAccuracy: null,
+          heading: pos.coords.heading ? Math.round(pos.coords.heading) : null,
+          speed: pos.coords.speed ? Math.round(pos.coords.speed * 3.6) : null,
+          timestamp: pos.timestamp || Date.now(),
+          isoTime: new Date(pos.timestamp || Date.now()).toISOString(),
+          isLive: true,
+          deviceType: detectDevicePlatform(),
+          error: null
+        });
+
         // Transmisión inmediata de coordenadas en vivo a Central de Fusión (CFI) y Mando LCC
         onUpdateUnitCoordinates(selectedPatrol, formatted);
 
@@ -436,6 +455,29 @@ export default function TacticalView({
     setGpsAccuracy(null);
     setTrackingLog(prev => [`[${new Date().toLocaleTimeString()}] Telemetría de receptor detenida.`, ...prev]);
     playTacticalBeep(400, 0.15);
+  };
+
+  const handleDownloadRealDeviceKml = () => {
+    playSyntheticBeep(920, 0.12);
+    let lat = -19.219444;
+    let lon = -68.597222;
+    const parsed = parseCoordinates(coordinates);
+    if (parsed) {
+      lat = parsed.lat;
+      lon = parsed.lon;
+    }
+    const kml = generateDeviceRealLocationKml({
+      lat,
+      lon,
+      accuracy: gpsAccuracy,
+      operatorName: selectedPatrol,
+      role: currentRole || 'Órgano de Búsqueda y Operaciones',
+      devicePlatform: detectDevicePlatform(),
+      timestamp: new Date().toISOString()
+    });
+    downloadKmlFile(`PII-LCC_Ubicacion_Real_Dispositivo_${new Date().toISOString().substring(0, 10)}`, kml);
+    setSuccessBanner(`KML GENERADO: Archivo de ubicación física real descargado para Google Earth.`);
+    setTimeout(() => setSuccessBanner(null), 4000);
   };
 
   const startSimulatedMovement = () => {
@@ -581,13 +623,35 @@ export default function TacticalView({
           setCustomPhoto(dataUrl);
           stopCamera();
         } else {
-          // Absolute last-resort dummy placeholder image
-          setCustomPhoto('multimedia-thermal');
+          // Generate an inline canvas dataURL
+          const fallbackCanvas = document.createElement('canvas');
+          fallbackCanvas.width = 480;
+          fallbackCanvas.height = 320;
+          const fctx = fallbackCanvas.getContext('2d');
+          if (fctx) {
+            fctx.fillStyle = '#0a100d';
+            fctx.fillRect(0, 0, 480, 320);
+            fctx.fillStyle = '#10b981';
+            fctx.font = 'bold 16px monospace';
+            fctx.fillText('[SENSOR S-2 CAPTURA TÁCTICA]', 40, 160);
+          }
+          setCustomPhoto(fallbackCanvas.toDataURL('image/jpeg', 0.8));
           stopCamera();
         }
       } catch (innerError) {
         console.error('Snapshot simulation fallback also failed:', innerError);
-        setCustomPhoto('multimedia-thermal');
+        const fallbackCanvas = document.createElement('canvas');
+        fallbackCanvas.width = 480;
+        fallbackCanvas.height = 320;
+        const fctx = fallbackCanvas.getContext('2d');
+        if (fctx) {
+          fctx.fillStyle = '#0a100d';
+          fctx.fillRect(0, 0, 480, 320);
+          fctx.fillStyle = '#10b981';
+          fctx.font = 'bold 16px monospace';
+          fctx.fillText('[SENSOR S-2 SIMULACIÓN]', 40, 160);
+        }
+        setCustomPhoto(fallbackCanvas.toDataURL('image/jpeg', 0.8));
         stopCamera();
       }
     }
@@ -794,7 +858,7 @@ export default function TacticalView({
     setUnlockedPatrolIds(prev => {
       const next = { ...prev, [unitId]: unlocked };
       try {
-        localStorage.setItem('PII_LCC_UNLOCKED_PATROLS', JSON.stringify(next));
+        safeStorage.setItem('PII_LCC_UNLOCKED_PATROLS', JSON.stringify(next));
       } catch {
         // ignore
       }
@@ -1611,7 +1675,7 @@ export default function TacticalView({
                   )}
 
                   {/* Captured / Uploaded Image Preview */}
-                  {customPhoto && (
+                  {Boolean(customPhoto && customPhoto.trim() !== '') && (
                     <div className="relative rounded-lg overflow-hidden border border-[#10b981]/40 bg-black">
                       <img
                         src={customPhoto}
@@ -1833,6 +1897,16 @@ export default function TacticalView({
                 >
                   <Globe className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
                   <span>Visualizar en Google Earth 3D</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadRealDeviceKml}
+                  className="bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 hover:text-emerald-100 border border-emerald-500/50 font-mono font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.25)]"
+                  title="Genera y descarga el archivo KML de la ubicación actual del dispositivo para Google Earth"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Generar KML de Mi Ubicación Real</span>
                 </button>
 
                 <button

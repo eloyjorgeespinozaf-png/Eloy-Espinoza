@@ -164,7 +164,7 @@ export const SearchOrganAlertViewer: React.FC<SearchOrganAlertViewerProps> = ({
 
           {/* Center Graphic Simulator / Photograph Display */}
           <div className="relative z-10 my-2 flex items-center justify-center">
-            {isCustomImage ? (
+            {isCustomImage && Boolean(alert.mediaUrl && alert.mediaUrl.trim() !== '') ? (
               /* Custom uploaded or camera photo */
               <div className="relative w-full max-h-[140px] rounded overflow-hidden flex items-center justify-center bg-black border border-[#1e2a40]">
                 <img

@@ -16,6 +16,13 @@ export interface User {
   organSubtitle?: string;
   clearanceLevel?: number;
   stationId?: string;
+  isAdmin?: boolean; // CEO-LCC MANDO is the administrator with full control over all search organs
+  phoneNumber?: string; // Número de celular como clave criptográfica / contraseña de acceso
+  cellphone?: string;   // Número de celular (alias de compatibilidad)
+  password?: string;    // Contraseña o hash alternativo
+  createdAt?: string;
+  status?: 'ACTIVO' | 'SUSPENDIDO' | 'EN_OPERACIONES';
+  assignedBy?: string;  // Registrado por Administrador CEO-LCC
 }
 
 export interface AuditLogEntry {
@@ -127,6 +134,19 @@ export interface Clan {
   tactics: string;
   recentHotspots: string[];
   lastActive: string;
+  // Campos de enriquecimiento e incremento de inteligencia
+  phoneNumbers?: string[];       // Números de celular interceptados / vinculados
+  interceptedPhones?: string[];  // Alias de números de celular interceptados
+  radioFrequencies?: string[];   // Frecuencias y canales radiales
+  interceptedFrequencies?: string[]; // Alias de frecuencias radiales
+  vehicles?: string[];           // Vehículos, marcas y convoyes identificados
+  keyLeaders?: string[];         // Cabecillas y operadores identificados
+  seizures?: string[];           // Incautaciones, decomisos y antecedentes
+  notes?: string;                // Notas doctrinales del analista G-2
+  contrabandTypes?: string[];    // Rubros de contrabando (mercancía, divisas, armas, etc.)
+  status?: 'ACTIVO' | 'BAJO_VIGILANCIA' | 'INTERCEPTADO' | 'DESARTICULADO';
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ActionableIntel {
@@ -200,6 +220,7 @@ export interface ModuleBackgroundConfig {
   moduleId: TacticalModuleId;
   moduleName: string;
   imageUrl: string;
+  enabled?: boolean;
   dataUrl?: string; // base64 cached offline
   opacity: number; // 0.1 to 1.0 (default 0.80)
   blur: number; // 0 to 15px (default 0)

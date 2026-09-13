@@ -4,6 +4,10 @@ import App from './App.tsx';
 import './index.css';
 import { AuthProvider } from './context/AuthContext.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
+import { initCyberAudioListener } from './utils/audio.ts';
+
+// Initialize futuristic cyber audio listener for all clicks and module navigation
+initCyberAudioListener();
 
 const container = document.getElementById('root');
 if (container) {

@@ -49,13 +49,15 @@ export default function HeaderTopRightLogo({ className = '', size = 52 }: Header
           title="Escudo Oficial ECEME - 'SER ANTES QUE PARECER' (Click para ampliar)"
         >
           {/* Unmodified Graphic */}
-          <img
-            src={sources[srcIndex]}
-            onError={handleImgError}
-            alt="Escudo ECEME Negro - 'SER ANTES QUE PARECER'"
-            className="w-full h-full object-cover select-none pointer-events-none"
-            loading="eager"
-          />
+          {sources[srcIndex] && (
+            <img
+              src={sources[srcIndex]}
+              onError={handleImgError}
+              alt="Escudo ECEME Negro - 'SER ANTES QUE PARECER'"
+              className="w-full h-full object-cover select-none pointer-events-none"
+              loading="eager"
+            />
+          )}
 
           {/* Subtle tactical corner accents */}
           <div className="absolute top-0.5 left-0.5 w-1.5 h-1.5 border-t border-l border-[#d4af37]/60 pointer-events-none" />
@@ -102,12 +104,14 @@ export default function HeaderTopRightLogo({ className = '', size = 52 }: Header
 
             {/* High-Resolution Graphic Viewer */}
             <div className="w-full relative aspect-[16/9] rounded-xl overflow-hidden border border-[#4a2e1d] bg-black shadow-2xl flex items-center justify-center">
-              <img
-                src={sources[srcIndex]}
-                onError={handleImgError}
-                alt="Escudo ECEME Negro - 'SER ANTES QUE PARECER'"
-                className="w-full h-full object-contain select-none"
-              />
+              {sources[srcIndex] && (
+                <img
+                  src={sources[srcIndex]}
+                  onError={handleImgError}
+                  alt="Escudo ECEME Negro - 'SER ANTES QUE PARECER'"
+                  className="w-full h-full object-contain select-none"
+                />
+              )}
             </div>
 
             {/* Footer Details */}

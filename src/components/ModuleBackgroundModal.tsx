@@ -79,7 +79,7 @@ export const ModuleBackgroundModal: React.FC<ModuleBackgroundModalProps> = ({
     updatedAt: new Date().toISOString()
   };
 
-  const previewSrc = currentConfig.dataUrl || currentConfig.imageUrl || currentModule.defaultPresetImage;
+  const previewSrc = currentConfig.dataUrl || currentConfig.imageUrl || currentModule.defaultPresetImage || '/interfaz-room.svg';
 
   const showFeedback = (msg: string) => {
     setSuccessMessage(msg);
@@ -89,7 +89,7 @@ export const ModuleBackgroundModal: React.FC<ModuleBackgroundModalProps> = ({
 
   const handleFileUpload = async (file: File) => {
     if (!file.type.startsWith('image/')) {
-      alert('Por favor selecciona un archivo de imagen válido (PNG, JPG, WEBP, SVG)');
+      showFeedback('Por favor selecciona un archivo de imagen válido (PNG, JPG, WEBP, SVG)');
       return;
     }
 
@@ -109,7 +109,7 @@ export const ModuleBackgroundModal: React.FC<ModuleBackgroundModalProps> = ({
         setIsProcessing(false);
       };
       reader.onerror = () => {
-        alert('Error al leer el archivo de imagen.');
+        showFeedback('Error al leer el archivo de imagen.');
         setIsProcessing(false);
       };
       reader.readAsDataURL(file);
@@ -151,7 +151,7 @@ export const ModuleBackgroundModal: React.FC<ModuleBackgroundModalProps> = ({
         onBatchImport(imported);
         showFeedback('¡Paquete de fondos importado con éxito!');
       } catch (err) {
-        alert('El archivo no tiene el formato de respaldo de fondos válido.');
+        showFeedback('El archivo no tiene el formato de respaldo de fondos válido.');
       }
     };
     reader.readAsText(file);
@@ -268,17 +268,23 @@ export const ModuleBackgroundModal: React.FC<ModuleBackgroundModalProps> = ({
               {/* Live Preview Container */}
               <div className="relative rounded-xl border border-zinc-800 overflow-hidden bg-black aspect-video flex items-center justify-center group shadow-inner">
                 {/* Background Image Preview */}
-                <img
-                  src={previewSrc}
-                  alt={`Preview ${currentModule.name}`}
-                  className={`w-full h-full transition-all ${
-                    currentConfig.fitMode === 'contain' ? 'object-contain' : 'object-cover'
-                  }`}
-                  style={{
-                    opacity: currentConfig.opacity,
-                    filter: currentConfig.blur > 0 ? `blur(${currentConfig.blur}px)` : 'none'
-                  }}
-                />
+                {Boolean(previewSrc && previewSrc.trim() !== '') ? (
+                  <img
+                    src={previewSrc}
+                    alt={`Preview ${currentModule.name}`}
+                    className={`w-full h-full transition-all ${
+                      currentConfig.fitMode === 'contain' ? 'object-contain' : 'object-cover'
+                    }`}
+                    style={{
+                      opacity: currentConfig.opacity,
+                      filter: currentConfig.blur > 0 ? `blur(${currentConfig.blur}px)` : 'none'
+                    }}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center p-6 text-center text-zinc-500">
+                    <span className="text-xs font-mono">Sin fondo doctrinal asignado</span>
+                  </div>
+                )}
 
                 {/* Tactical Contrast Simulation */}
                 {currentConfig.contrastOverlay && (
@@ -503,12 +509,14 @@ export const ModuleBackgroundModal: React.FC<ModuleBackgroundModalProps> = ({
                             : 'border-zinc-800 bg-zinc-950 hover:border-zinc-600 hover:bg-zinc-900'
                         }`}
                       >
-                        <div className="h-14 w-full rounded overflow-hidden bg-black mb-1.5">
-                          <img
-                            src={preset.url}
-                            alt={preset.name}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          />
+                        <div className="h-14 w-full rounded overflow-hidden bg-black mb-1.5 flex items-center justify-center">
+                          {preset.url && (
+                            <img
+                              src={preset.url}
+                              alt={preset.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                          )}
                         </div>
                         <p className="font-bold text-[10px] text-zinc-200 truncate leading-tight">
                           {preset.name}
