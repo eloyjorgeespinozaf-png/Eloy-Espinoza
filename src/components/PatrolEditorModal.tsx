@@ -202,7 +202,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                 <input
                   type="text"
                   required
-                  value={name}
+                  value={name || ''}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Patrulla Cóndor-4"
                   className="w-full bg-[#141620] border border-neutral-700 rounded-lg pl-8 pr-2.5 py-1.5 text-white focus:outline-none focus:border-yellow-400"
@@ -219,7 +219,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                 <input
                   type="text"
                   required
-                  value={commander}
+                  value={commander || ''}
                   onChange={(e) => setCommander(e.target.value)}
                   placeholder="e.g. CB1. F. Valenzuela"
                   className="w-full bg-[#141620] border border-neutral-700 rounded-lg pl-8 pr-2.5 py-1.5 text-white focus:outline-none focus:border-yellow-400"
@@ -236,7 +236,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                 min={1}
                 max={50}
                 required
-                value={personnel}
+                value={personnel ?? 8}
                 onChange={(e) => setPersonnel(parseInt(e.target.value) || 1)}
                 className="w-full bg-[#141620] border border-neutral-700 rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-yellow-400"
               />
@@ -255,7 +255,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                 <input
                   type={showPin ? 'text' : 'password'}
                   required
-                  value={pin}
+                  value={pin || ''}
                   onChange={(e) => setPin(e.target.value)}
                   placeholder="e.g. 1234"
                   className="w-full bg-[#181a26] border border-yellow-500/40 rounded-lg pl-8 pr-8 py-1.5 text-yellow-300 font-bold focus:outline-none focus:border-yellow-400"
@@ -279,7 +279,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                 <input
                   type="text"
                   required
-                  value={frequency}
+                  value={frequency || ''}
                   onChange={(e) => setFrequency(e.target.value)}
                   placeholder="e.g. 142.850 MHz"
                   className="w-full bg-[#181a26] border border-neutral-700 rounded-lg pl-8 pr-2.5 py-1.5 text-white focus:outline-none focus:border-yellow-400"
@@ -292,7 +292,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                 Estado Operacional
               </label>
               <select
-                value={status}
+                value={status || 'PATROLLING'}
                 onChange={(e) => setStatus(e.target.value as any)}
                 className="w-full bg-[#181a26] border border-neutral-700 rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-yellow-400 font-bold"
               >
@@ -341,7 +341,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                   <input
                     type="text"
                     required
-                    value={sector}
+                    value={sector || ''}
                     onChange={(e) => setSector(e.target.value)}
                     placeholder="e.g. Salar de Coipasa - Hito XIX"
                     className="w-full bg-[#141620] border border-neutral-700 rounded-lg pl-8 pr-2.5 py-1.5 text-white focus:outline-none focus:border-yellow-400"
@@ -354,7 +354,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                 <input
                   type="text"
                   required
-                  value={coordinates}
+                  value={coordinates || ''}
                   onChange={(e) => setCoordinates(e.target.value)}
                   placeholder={'e.g. 19°13\'10"S 68°35\'50"W'}
                   className="w-full bg-[#141620] border border-neutral-700 rounded-lg px-2.5 py-1.5 text-white font-mono focus:outline-none focus:border-yellow-400"
@@ -374,7 +374,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                 type="range"
                 min={10}
                 max={100}
-                value={battery}
+                value={battery ?? 100}
                 onChange={(e) => setBattery(parseInt(e.target.value))}
                 className="w-full accent-emerald-500"
               />
@@ -389,7 +389,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                 type="range"
                 min={0}
                 max={100}
-                value={fuel}
+                value={fuel ?? 100}
                 onChange={(e) => setFuel(parseInt(e.target.value))}
                 className="w-full accent-amber-500"
               />
@@ -404,7 +404,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                 type="range"
                 min={0}
                 max={100}
-                value={ammo}
+                value={ammo ?? 100}
                 onChange={(e) => setAmmo(parseInt(e.target.value))}
                 className="w-full accent-blue-500"
               />
@@ -441,7 +441,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
             <div className="flex gap-2 mt-2">
               <input
                 type="text"
-                value={customEquipInput}
+                value={customEquipInput || ''}
                 onChange={(e) => setCustomEquipInput(e.target.value)}
                 placeholder="Añadir otro equipo táctico..."
                 className="flex-1 bg-[#141620] border border-neutral-700 rounded-lg px-2.5 py-1 text-white text-[11px] focus:outline-none focus:border-yellow-400"

@@ -428,7 +428,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                             {isEditing ? (
                               <input
                                 type="text"
-                                value={editPhone}
+                                value={editPhone || ''}
                                 onChange={(e) => setEditPhone(e.target.value)}
                                 className="bg-black/60 border border-emerald-500 rounded px-2 py-0.5 text-xs font-mono text-emerald-300 w-32 text-right focus:outline-none"
                                 placeholder="Ej: 71200001"
@@ -604,7 +604,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                   <input
                     type="text"
                     required
-                    value={name}
+                    value={name || ''}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Ej: Marcelo Quispe Huanca"
                     className="w-full bg-[#151c2c] border border-[#242f46] rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
@@ -616,7 +616,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                     Grado Militar: *
                   </label>
                   <select
-                    value={rank}
+                    value={rank || 'SGTO1.'}
                     onChange={(e) => setRank(e.target.value)}
                     className="w-full bg-[#151c2c] border border-[#242f46] rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-blue-500"
                   >
@@ -628,7 +628,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                   {rank === 'OTRO' && (
                     <input
                       type="text"
-                      value={customRank}
+                      value={customRank || ''}
                       onChange={(e) => setCustomRank(e.target.value)}
                       placeholder="Especifique grado o título militar"
                       className="mt-1 w-full bg-[#151c2c] border border-[#242f46] rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none"
@@ -648,7 +648,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                 <input
                   type="text"
                   required
-                  value={phoneNumber}
+                  value={phoneNumber || ''}
                   onChange={(e) => setPhoneNumber(e.target.value)}
                   placeholder="Ej: 71234567 o +591 71234567"
                   className="w-full bg-black/60 border border-emerald-500/60 rounded-xl px-3 py-2.5 text-sm font-mono font-bold text-emerald-400 placeholder-emerald-800/60 focus:outline-none focus:border-emerald-400 shadow-inner"
@@ -666,7 +666,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                   </label>
                   <input
                     type="text"
-                    value={username}
+                    value={username || ''}
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder="Ej: s2.quispe (Autogenerado si está vacío)"
                     className="w-full bg-[#151c2c] border border-[#242f46] rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
@@ -679,7 +679,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                   </label>
                   <input
                     type="text"
-                    value={stationId}
+                    value={stationId || ''}
                     onChange={(e) => setStationId(e.target.value)}
                     placeholder="Ej: Puesto Fronterizo Pisiga-01"
                     className="w-full bg-[#151c2c] border border-[#242f46] rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"

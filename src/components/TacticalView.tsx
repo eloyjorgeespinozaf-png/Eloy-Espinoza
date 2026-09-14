@@ -64,6 +64,7 @@ export default function TacticalView({
   onDeleteTacticalUnit
 }: TacticalViewProps) {
   const [selectedPatrol, setSelectedPatrol] = useState<string>('Patrulla Delta-3');
+  const [exclusivePatrolMode, setExclusivePatrolMode] = useState<boolean>(true);
   const [reportType, setReportType] = useState<'IMINT' | 'HUMINT' | 'SIGINT'>('HUMINT');
   const [sensorId, setSensorId] = useState<string>('VANT-01 (Cóndor - Dron Óptico)');
   const [coordinates, setCoordinates] = useState<string>('19°13\'10"S 68°35\'50"W');
@@ -961,7 +962,9 @@ export default function TacticalView({
       }
       setPatrolUnlockedState(newUnit.id, true);
       setSelectedPatrol(newUnit.name);
-      setSuccessBanner(`NUEVA PATRULLA INCREMENTADA: ${newUnit.name} desplegada con módulo asignado.`);
+      setActivePatrolTab('DASHBOARD');
+      setExclusivePatrolMode(true);
+      setSuccessBanner(`NUEVA PATRULLA INCREMENTADA: ${newUnit.name} desplegada con su propio Dashboard Operacional exclusivo.`);
     } else if (editorTargetPatrol && onUpdateTacticalUnit) {
       const updatedUnit: TacticalUnit = {
         ...editorTargetPatrol,
@@ -1076,16 +1079,48 @@ export default function TacticalView({
           <div className="flex items-center gap-2.5">
             <Radio className="w-4 h-4 text-[#10b981] animate-pulse" />
             <div>
-              <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
-                Módulos Activos Asignados // Control de Patrullas
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                  Módulos Activos Asignados // Control de Patrullas
+                </h3>
+                {exclusivePatrolMode ? (
+                  <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1">
+                    <Shield className="w-2.5 h-2.5" />
+                    VER SOLAMENTE: {selectedPatrol}
+                  </span>
+                ) : (
+                  <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 flex items-center gap-1">
+                    <Globe className="w-2.5 h-2.5" />
+                    CUADRANTE GENERAL
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] font-mono text-[#777]">
-                Cada patrulla opera su propio módulo con autenticación por contraseña individual y funciones tácticas completas.
+                Cada patrulla cuenta con su propio módulo operacional y dashboard aislado e independiente.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Toggle Compartmented View */}
+            <button
+              type="button"
+              onClick={() => {
+                const nextMode = !exclusivePatrolMode;
+                setExclusivePatrolMode(nextMode);
+                playTacticalBeep(nextMode ? 900 : 600, 0.1);
+              }}
+              className={`text-xs font-mono font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all border cursor-pointer ${
+                exclusivePatrolMode
+                  ? 'bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border-emerald-500/50 shadow-inner'
+                  : 'bg-[#111] hover:bg-[#1a1a1a] text-slate-300 border-[#333]'
+              }`}
+              title={exclusivePatrolMode ? "Haga clic para ver cuadrante global" : "Haga clic para ver solamente la patrulla seleccionada"}
+            >
+              {exclusivePatrolMode ? <Lock className="w-3.5 h-3.5 text-emerald-400" /> : <Eye className="w-3.5 h-3.5 text-cyan-400" />}
+              <span>{exclusivePatrolMode ? 'Ver Solamente Mi Patrulla' : 'Ver Todas las Patrullas'}</span>
+            </button>
+
             <button
               type="button"
               onClick={handleOpenCreatePatrol}
@@ -1115,9 +1150,42 @@ export default function TacticalView({
           </div>
         </div>
 
+        {/* Patrol Quick Switch if in Exclusive Mode */}
+        {exclusivePatrolMode && (
+          <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-lg p-2.5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+              <span className="text-emerald-300 font-bold">Consola Exclusiva de:</span>
+              <span className="text-white font-bold bg-black/50 px-2 py-0.5 rounded border border-emerald-500/40">
+                {selectedPatrol}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-400">Seleccionar Patrulla Operativa:</span>
+              <select
+                value={selectedPatrol || ''}
+                onChange={(e) => {
+                  const target = tacticalUnits.find(u => u.name === e.target.value);
+                  if (target) handleSelectPatrolTab(target);
+                }}
+                className="bg-black/70 border border-emerald-500/40 rounded px-2.5 py-1 text-xs font-mono text-emerald-300 focus:outline-none focus:border-emerald-400 cursor-pointer"
+              >
+                {tacticalUnits.map(unit => (
+                  <option key={unit.id} value={unit.name}>
+                    {unit.name} ({unit.commander || 'S-2'})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+
         {/* Patrol Module Tabs Selection */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
-          {tacticalUnits.map(unit => {
+          {(exclusivePatrolMode 
+            ? tacticalUnits.filter(u => u.name === selectedPatrol) 
+            : tacticalUnits
+          ).map(unit => {
             const isSelected = unit.name === selectedPatrol;
             const isUnlocked = Boolean(unlockedPatrolIds[unit.id]);
             const unitOrdersCount = activeOrders.filter(
@@ -1169,6 +1237,22 @@ export default function TacticalView({
                     )}
                   </div>
                 </div>
+
+                {/* Direct button to this patrol's own isolated dashboard */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSelectPatrolTab(unit);
+                    setActivePatrolTab('DASHBOARD');
+                    playTacticalBeep(980, 0.1);
+                  }}
+                  className="mt-2.5 w-full py-1 px-2 rounded bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 text-purple-300 hover:text-white text-[10px] font-mono flex items-center justify-center gap-1.5 transition-all cursor-pointer font-bold shadow-sm"
+                  title={`Abrir Dashboard Operacional exclusivo de ${unit.name}`}
+                >
+                  <Layers className="w-3 h-3 text-purple-400" />
+                  <span>Dashboard Propio</span>
+                </button>
               </div>
             );
           })}
@@ -1335,7 +1419,7 @@ export default function TacticalView({
               }`}
             >
               <Layers className="w-3.5 h-3.5 text-purple-400" />
-              <span>4. Consola de Fusión / Expedientes</span>
+              <span>4. Dashboard Operacional ({selectedPatrol})</span>
             </button>
           </div>
 
@@ -1397,7 +1481,7 @@ export default function TacticalView({
                       Sensor / Unidad de Captación:
                     </label>
                     <select
-                      value={sensorId}
+                      value={sensorId || 'VANT-01 (Cóndor - Dron Óptico)'}
                       onChange={(e) => setSensorId(e.target.value)}
                       className="w-full bg-[#111] border border-[#222] focus:border-[#10b981] rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none"
                     >
@@ -1433,7 +1517,7 @@ export default function TacticalView({
                     <div className="flex gap-2">
                       <input
                         type="text"
-                        value={coordinates}
+                        value={coordinates || ''}
                         onChange={(e) => setCoordinates(e.target.value)}
                         placeholder='19°13&apos;10"S 68°35&apos;50"W'
                         className="flex-1 bg-[#111] border border-[#222] focus:border-[#10b981] rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none"
@@ -1505,7 +1589,7 @@ export default function TacticalView({
                       Objeto o Evento Observado (Detalle Doctrinal):
                     </label>
                     <textarea
-                      value={reportDetails}
+                      value={reportDetails || ''}
                       onChange={(e) => setReportDetails(e.target.value)}
                       placeholder="Describa actividad sospechosa, vehículos no autorizados, cantidad de personas, dirección de desplazamiento, armamento o bultos observados..."
                       rows={4}
@@ -1548,7 +1632,7 @@ export default function TacticalView({
                       Modo de Entrada Multimedia:
                     </label>
                     <select
-                      value={multimediaPreset}
+                      value={multimediaPreset || 'multimedia-thermal'}
                       onChange={(e) => {
                         const val = e.target.value;
                         setMultimediaPreset(val);
@@ -1864,7 +1948,7 @@ export default function TacticalView({
                   </label>
                   <input
                     type="text"
-                    value={customLat}
+                    value={customLat || ''}
                     onChange={(e) => setCustomLat(e.target.value)}
                     placeholder='19°13&apos;10"S'
                     className="w-full bg-[#111] border border-[#222] focus:border-blue-500 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none"
@@ -1876,7 +1960,7 @@ export default function TacticalView({
                   </label>
                   <input
                     type="text"
-                    value={customLon}
+                    value={customLon || ''}
                     onChange={(e) => setCustomLon(e.target.value)}
                     placeholder='68°35&apos;50"W'
                     className="w-full bg-[#111] border border-[#222] focus:border-blue-500 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none"
@@ -1969,6 +2053,7 @@ export default function TacticalView({
           {activePatrolTab === 'DASHBOARD' && (
             <div className="animate-fade-in">
               <PatrolOperationalDashboard
+                key={selectedUnitDetails.id}
                 patrol={selectedUnitDetails}
                 rawAlerts={rawAlerts}
                 clans={clans}

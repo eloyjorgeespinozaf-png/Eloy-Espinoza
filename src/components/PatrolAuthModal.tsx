@@ -149,7 +149,7 @@ export const PatrolAuthModal: React.FC<PatrolAuthModalProps> = ({
               <input
                 type={showPassword ? 'text' : 'password'}
                 autoFocus
-                value={passwordInput}
+                value={passwordInput || ''}
                 onChange={(e) => setPasswordInput(e.target.value)}
                 placeholder="Ingrese PIN o clave táctica..."
                 className="w-full bg-[#161822] border border-yellow-500/40 rounded-xl pl-9 pr-10 py-2.5 text-center text-sm font-mono tracking-widest text-white placeholder-neutral-500 focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400/50"

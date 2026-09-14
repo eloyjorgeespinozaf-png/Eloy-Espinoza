@@ -798,7 +798,7 @@ ${recommendedAction}
                 <div className="space-y-2 mb-3">
                   <input
                     type="text"
-                    value={searchTerm}
+                    value={searchTerm || ''}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder={isG2Selected ? "Buscar expediente, rubro..." : "Buscar alerta S-2..."}
                     className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-3 py-1.5 text-xs font-mono placeholder:text-[#64748b] focus:outline-none focus:border-[#f97316]"
@@ -1004,7 +1004,7 @@ ${recommendedAction}
                     </label>
                     <input
                       type="text"
-                      value={intelTitle}
+                      value={intelTitle || ''}
                       onChange={(e) => setIntelTitle(e.target.value)}
                       className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-3 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
                     />
@@ -1016,7 +1016,7 @@ ${recommendedAction}
                         Organización / Clan Hostil:
                       </label>
                       <select
-                        value={targetClan}
+                        value={targetClan || ''}
                         onChange={(e) => setTargetClan(e.target.value)}
                         className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
                       >
@@ -1031,7 +1031,7 @@ ${recommendedAction}
                         Vector / Ruta Clandestina:
                       </label>
                       <select
-                        value={routeId}
+                        value={routeId || ''}
                         onChange={(e) => setRouteId(e.target.value)}
                         className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
                       >
@@ -1102,7 +1102,7 @@ ${recommendedAction}
                       type="range"
                       min={10}
                       max={100}
-                      value={threatScore}
+                      value={threatScore ?? 75}
                       onChange={(e) => setThreatScore(Number(e.target.value))}
                       className="w-full accent-[#f97316] cursor-pointer"
                     />
@@ -1115,7 +1115,7 @@ ${recommendedAction}
                     </label>
                     <textarea
                       rows={2}
-                      value={recommendedAction}
+                      value={recommendedAction || ''}
                       onChange={(e) => setRecommendedAction(e.target.value)}
                       className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-3 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
                     />
@@ -1232,7 +1232,7 @@ ${recommendedAction}
                     Tipo de Inteligencia:
                   </label>
                   <select
-                    value={reportType}
+                    value={reportType || 'HUMINT'}
                     onChange={(e) => setReportType(e.target.value as any)}
                     className="w-full bg-[#121722] text-white border border-[#22293a] rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-yellow-400"
                   >
@@ -1248,7 +1248,7 @@ ${recommendedAction}
                   </label>
                   <input
                     type="text"
-                    value={sensorId}
+                    value={sensorId || ''}
                     onChange={(e) => setSensorId(e.target.value)}
                     className="w-full bg-[#121722] text-white border border-[#22293a] rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-yellow-400"
                   />
@@ -1267,7 +1267,7 @@ ${recommendedAction}
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    value={reportCoordinates}
+                    value={reportCoordinates || ''}
                     onChange={(e) => setReportCoordinates(e.target.value)}
                     className="flex-1 bg-[#121722] text-[#10b981] font-mono font-bold border border-[#22293a] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#10b981]"
                   />
@@ -1320,7 +1320,7 @@ ${recommendedAction}
                 </label>
                 <textarea
                   rows={4}
-                  value={reportDetails}
+                  value={reportDetails || ''}
                   onChange={(e) => setReportDetails(e.target.value)}
                   placeholder="Ej: Avistamiento de convoy de 4 camiones sin luces ingresando por Hito 18 a gran velocidad..."
                   className="w-full bg-[#121722] text-white border border-[#22293a] rounded-lg px-3 py-2 text-xs font-mono focus:outline-none focus:border-yellow-400 placeholder:text-[#64748b]"
@@ -1587,7 +1587,7 @@ ${recommendedAction}
                 <label className="text-[10px] font-mono text-[#94a3b8] uppercase block mb-1">Latitud / Cuadrante:</label>
                 <input
                   type="text"
-                  value={telemetryLat}
+                  value={telemetryLat || ''}
                   onChange={(e) => setTelemetryLat(e.target.value)}
                   className="w-full bg-[#121722] text-white font-mono text-xs border border-[#22293a] rounded-lg px-3 py-2"
                 />
@@ -1597,7 +1597,7 @@ ${recommendedAction}
                 <label className="text-[10px] font-mono text-[#94a3b8] uppercase block mb-1">Longitud / Cuadrante:</label>
                 <input
                   type="text"
-                  value={telemetryLon}
+                  value={telemetryLon || ''}
                   onChange={(e) => setTelemetryLon(e.target.value)}
                   className="w-full bg-[#121722] text-white font-mono text-xs border border-[#22293a] rounded-lg px-3 py-2"
                 />

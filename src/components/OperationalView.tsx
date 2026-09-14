@@ -799,7 +799,7 @@ ${recommendedAction}
             <div className="space-y-2 mb-3">
               <input
                 type="text"
-                value={searchTerm}
+                value={searchTerm || ''}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder={
                   activeFeedTab === 'G2'
@@ -1215,7 +1215,7 @@ ${recommendedAction}
                     <input
                       type="text"
                       required
-                      value={intelTitle}
+                      value={intelTitle || ''}
                       onChange={(e) => setIntelTitle(e.target.value)}
                       className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-3 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
                     />
@@ -1226,7 +1226,7 @@ ${recommendedAction}
                       Rubro Destino PII-LCC
                     </label>
                     <select
-                      value={expedienteRubro}
+                      value={expedienteRubro || 'ECONOMICO'}
                       onChange={(e) => setExpedienteRubro(e.target.value as any)}
                       className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
                     >
@@ -1246,7 +1246,7 @@ ${recommendedAction}
                       [Confiabilidad de Fuente] *
                     </label>
                     <select
-                      value={reliability}
+                      value={reliability || 'A'}
                       onChange={(e) => setReliability(e.target.value as any)}
                       className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
                     >
@@ -1262,7 +1262,7 @@ ${recommendedAction}
                       [Certeza Información] *
                     </label>
                     <select
-                      value={certainty}
+                      value={certainty || '1'}
                       onChange={(e) => setCertainty(e.target.value as any)}
                       className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
                     >
@@ -1281,7 +1281,7 @@ ${recommendedAction}
                       [Ruta / Vector Contrastado]
                     </label>
                     <select
-                      value={routeId}
+                      value={routeId || ''}
                       onChange={(e) => setRouteId(e.target.value)}
                       className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
                     >
@@ -1298,7 +1298,7 @@ ${recommendedAction}
                       [Facción / Clan Implicado]
                     </label>
                     <select
-                      value={targetClan}
+                      value={targetClan || ''}
                       onChange={(e) => setTargetClan(e.target.value)}
                       className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
                     >
@@ -1327,7 +1327,7 @@ ${recommendedAction}
                     type="range"
                     min="1"
                     max="100"
-                    value={threatScore}
+                    value={threatScore ?? 75}
                     onChange={(e) => setThreatScore(parseInt(e.target.value))}
                     className="w-full accent-[#f97316] h-1.5 bg-[#1e2738] rounded-lg appearance-none cursor-pointer"
                   />
@@ -1341,7 +1341,7 @@ ${recommendedAction}
                   <textarea
                     rows={3}
                     required
-                    value={recommendedAction}
+                    value={recommendedAction || ''}
                     onChange={(e) => setRecommendedAction(e.target.value)}
                     className="w-full bg-[#121722] text-white border border-[#22293a] rounded p-2 text-xs font-mono focus:outline-none focus:border-[#f97316] resize-none font-sans"
                   />

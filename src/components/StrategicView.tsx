@@ -626,7 +626,7 @@ export default function StrategicView({
                   </div>
                 ) : (
                   <select
-                    value={selectedIntelId}
+                    value={selectedIntelId || ''}
                     onChange={(e) => handleIntelChange(e.target.value)}
                     required
                     className="w-full bg-[#111] text-[#e0e0e0] border border-[#222] rounded px-3 py-2 text-xs font-mono focus:outline-none focus:border-[#3b82f6]"
@@ -775,7 +775,7 @@ export default function StrategicView({
                   <input
                     type="text"
                     required
-                    value={codeName}
+                    value={codeName || ''}
                     onChange={(e) => setCodeName(e.target.value)}
                     placeholder="e.g. OP_HALCON_ALFA"
                     className="w-full bg-[#111] text-[#e0e0e0] border border-[#222] rounded px-3 py-2 text-xs font-mono focus:outline-none focus:border-[#3b82f6]"
@@ -787,7 +787,7 @@ export default function StrategicView({
                     Unidad de Terreno Asignada
                   </label>
                   <select
-                    value={assignedUnit}
+                    value={assignedUnit || ''}
                     onChange={(e) => setAssignedUnit(e.target.value)}
                     required
                     className="w-full bg-[#111] text-[#e0e0e0] border border-[#222] rounded px-3 py-2 text-xs font-mono focus:outline-none focus:border-[#3b82f6]"
@@ -809,7 +809,7 @@ export default function StrategicView({
                 </label>
                 <textarea
                   rows={3}
-                  value={customObjective}
+                  value={customObjective || ''}
                   onChange={(e) => setCustomObjective(e.target.value)}
                   placeholder="Instrucciones tácticas para intercepción rápida, bloqueo o patrullaje nocturno..."
                   className="w-full bg-[#111] text-[#e0e0e0] border border-[#222] rounded px-3 py-2 text-xs font-mono focus:outline-none focus:border-[#3b82f6] resize-none"
