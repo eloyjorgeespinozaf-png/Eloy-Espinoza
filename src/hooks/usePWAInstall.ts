@@ -19,50 +19,58 @@ export function usePWAInstall() {
   const [isMac, setIsMac] = useState(false);
 
   useEffect(() => {
-    // Check if running in standalone mode (already installed as PWA)
-    const checkStandalone = () => {
-      const isStandaloneMedia = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
-      const isNavStandalone = (window.navigator as any)?.standalone === true;
-      const isInstalledAttr = document.referrer.includes('android-app://') || window.location.search.includes('standalone=true');
-      return Boolean(isStandaloneMedia || isNavStandalone || isInstalledAttr);
-    };
+    try {
+      // Check if running in standalone mode (already installed as PWA)
+      const checkStandalone = () => {
+        try {
+          const isStandaloneMedia = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+          const isNavStandalone = typeof window !== 'undefined' && (window.navigator as any)?.standalone === true;
+          const isInstalledAttr = typeof document !== 'undefined' && (document.referrer.includes('android-app://') || window.location.search.includes('standalone=true'));
+          return Boolean(isStandaloneMedia || isNavStandalone || isInstalledAttr);
+        } catch {
+          return false;
+        }
+      };
 
-    setIsInstalled(checkStandalone());
+      setIsInstalled(checkStandalone());
 
-    // Platform detection
-    const ua = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
-    const isIOSDevice = /iphone|ipad|ipod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    const isAndroidDevice = /android/.test(ua);
-    const isMobileDevice = isIOSDevice || isAndroidDevice || /mobile|tablet|silk|blackberry|iemobile/.test(ua);
-    const isWin = /windows|win32|win64/.test(ua);
-    const isMacDevice = /macintosh|mac os x/.test(ua) && !isIOSDevice;
+      // Platform detection
+      const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '').toLowerCase() : '';
+      const isIOSDevice = /iphone|ipad|ipod/.test(ua) || (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const isAndroidDevice = /android/.test(ua);
+      const isMobileDevice = isIOSDevice || isAndroidDevice || /mobile|tablet|silk|blackberry|iemobile/.test(ua);
+      const isWin = /windows|win32|win64/.test(ua);
+      const isMacDevice = /macintosh|mac os x/.test(ua) && !isIOSDevice;
 
-    setIsIOS(isIOSDevice);
-    setIsAndroid(isAndroidDevice);
-    setIsMobile(isMobileDevice);
-    setIsWindows(isWin);
-    setIsMac(isMacDevice);
+      setIsIOS(isIOSDevice);
+      setIsAndroid(isAndroidDevice);
+      setIsMobile(isMobileDevice);
+      setIsWindows(isWin);
+      setIsMac(isMacDevice);
 
-    const handleBeforeInstallPrompt = (e: Event) => {
-      // Prevent browser default mini-infobar
-      e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-      console.log('[PWA] beforeinstallprompt event captured and ready.');
-    };
+      const handleBeforeInstallPrompt = (e: Event) => {
+        // Prevent browser default mini-infobar
+        e.preventDefault();
+        setDeferredPrompt(e as BeforeInstallPromptEvent);
+        console.log('[PWA] beforeinstallprompt event captured and ready.');
+      };
 
-    const handleAppInstalled = () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-      console.log('[PWA] Application successfully installed.');
-    };
+      const handleAppInstalled = () => {
+        setIsInstalled(true);
+        setDeferredPrompt(null);
+        console.log('[PWA] Application successfully installed.');
+      };
 
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleAppInstalled);
+      window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.addEventListener('appinstalled', handleAppInstalled);
 
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleAppInstalled);
-    };
+      return () => {
+        window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        window.removeEventListener('appinstalled', handleAppInstalled);
+      };
+    } catch (err) {
+      console.warn('[usePWAInstall] Detection warning:', err);
+    }
   }, []);
 
   const triggerInstall = useCallback(async (): Promise<boolean> => {

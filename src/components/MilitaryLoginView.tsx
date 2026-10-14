@@ -32,7 +32,8 @@ import {
   Crown,
   Smartphone,
   PhoneCall,
-  Users
+  Users,
+  Code
 } from 'lucide-react';
 import { TacticalModuleId, MilitaryRole, ModuleBackgroundConfig, ModuleBackgroundsMap } from '../types';
 import { useAuth, PRESET_CREDENTIALS, PRESET_USERS } from '../context/AuthContext';
@@ -46,6 +47,8 @@ import {
 } from '../utils/audio';
 import { GamerFontSelector } from './GamerFontSelector';
 import { AppInstallModal } from './AppInstallModal';
+import { MultiDeviceSyncModal } from './MultiDeviceSyncModal';
+import CodeViewer from './CodeViewer';
 import { 
   FullDashboardBackground, 
   FullDashboardBackgroundControl, 
@@ -53,6 +56,7 @@ import {
 } from './FullDashboardBackground';
 import { TacticalBackgroundEditorModal } from './TacticalBackgroundEditorModal';
 import { TacticalUpdateManager } from './TacticalUpdateManager';
+import { AI_STUDIO_BUILD } from '../buildVersion';
 import OfficialCrest from './OfficialCrest';
 import HeaderTopRightLogo from './HeaderTopRightLogo';
 import PIILCCLogo from './PIILCCLogo';
@@ -68,6 +72,8 @@ interface MilitaryLoginViewProps {
   onResetModuleBackground?: (moduleId: TacticalModuleId) => Promise<void>;
   onApplyToAllModules?: (sourceModuleId: TacticalModuleId) => Promise<void>;
   onBatchImportModules?: (importedMap: ModuleBackgroundsMap) => void;
+  syncedDevicesCount?: number;
+  onOpenSyncModal?: () => void;
 }
 
 export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({ 
@@ -76,8 +82,11 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
   onUpdateModuleBackground,
   onResetModuleBackground,
   onApplyToAllModules,
-  onBatchImportModules
+  onBatchImportModules,
+  syncedDevicesCount = 1,
+  onOpenSyncModal
 }) => {
+
   const { loginWithCredentials, login, users } = useAuth();
   const fullBgState = useFullDashboardBackground();
 
@@ -92,6 +101,8 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
   const [cryptoHash, setCryptoHash] = useState<string>('AES256-SHA512-SEC-INIT');
   const [showInstallModal, setShowInstallModal] = useState<boolean>(false);
   const [showBackgroundModal, setShowBackgroundModal] = useState<boolean>(false);
+  const [showLoginSyncModal, setShowLoginSyncModal] = useState<boolean>(false);
+  const [showCodeModal, setShowCodeModal] = useState<boolean>(false);
 
   // Rotate simulated crypto hash every few seconds for high-tech military immersion
   useEffect(() => {
@@ -130,7 +141,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
   };
 
   // Filter dynamic users registered for this specific military role/organ
-  const activeOrganUsers = users.filter(u => {
+  const activeOrganUsers = (users || []).filter(u => {
     if (selectedRole === 'ROL_TERRENO') {
       return u.role === 'ROL_TERRENO' || u.role === 'ROL_PATRULLA';
     }
@@ -306,9 +317,29 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
 
           {/* Tactical Version, Update Monitor & Cloud Sync */}
           <TacticalUpdateManager 
-            currentVersion="v2.5.0-DOCTRINAL"
+            currentVersion={AI_STUDIO_BUILD.version}
             onOpenInstallModal={() => setShowInstallModal(true)}
           />
+
+          {/* Real-time Multi-Terminal Sync Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (onOpenSyncModal) {
+                onOpenSyncModal();
+              } else {
+                setShowLoginSyncModal(true);
+              }
+              if (soundEnabled) playCyberClick('toggle');
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/70 text-emerald-300 hover:text-white transition-all cursor-pointer text-[11px] font-mono font-bold shadow-[0_0_12px_rgba(16,185,129,0.25)]"
+            title="Red Táctica en Tiempo Real: Ver terminales conectadas y sincronizar datos"
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+            <Radio className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline">TERMINALES:</span>
+            <span className="text-emerald-200 font-bold">{syncedDevicesCount || 1} EN RED</span>
+          </button>
 
           {/* Download & Install App button (PC & Celular) */}
           <button
@@ -320,6 +351,22 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
             <Download className="w-3.5 h-3.5 animate-bounce" />
             <span className="hidden sm:inline">Instalar App (PC / Celular)</span>
             <span className="sm:hidden">Instalar</span>
+          </button>
+
+          {/* Copy Source Code Button (Direct Access) */}
+          <button
+            type="button"
+            id="btn-login-copy-code"
+            onClick={() => {
+              setShowCodeModal(true);
+              if (soundEnabled) playCyberClick('laser', 0.08);
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-950/70 hover:bg-blue-900 border border-blue-500/70 text-blue-300 hover:text-white transition-all cursor-pointer text-[11px] font-mono font-bold shadow-[0_0_12px_rgba(59,130,246,0.3)] active:scale-95"
+            title="Ver y Copiar el Código Fuente Completo del Sistema"
+          >
+            <Code className="w-3.5 h-3.5 text-blue-400" />
+            <span className="hidden sm:inline">Copiar Código Fuente</span>
+            <span className="sm:hidden">Código</span>
           </button>
 
           <button
@@ -701,10 +748,12 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
       </button>
 
       {/* Cross-Platform PWA & App Download Modal */}
-      <AppInstallModal 
-        isOpen={showInstallModal} 
-        onClose={() => setShowInstallModal(false)} 
-      />
+      {showInstallModal && (
+        <AppInstallModal 
+          isOpen={showInstallModal} 
+          onClose={() => setShowInstallModal(false)} 
+        />
+      )}
 
       {/* Comprehensive Tactical Background Editor Modal */}
       <TacticalBackgroundEditorModal
@@ -721,6 +770,29 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
         onApplyToAllModules={onApplyToAllModules}
         onBatchImportModules={onBatchImportModules}
       />
+
+      {/* Multi-Device Real-Time Sync Modal */}
+      {showLoginSyncModal && (
+        <MultiDeviceSyncModal
+          isOpen={showLoginSyncModal}
+          onClose={() => setShowLoginSyncModal(false)}
+          appVersion={AI_STUDIO_BUILD.version}
+          isOnline={true}
+          onTriggerSyncNow={async () => {}}
+        />
+      )}
+
+      {/* Full-Featured Source Code Viewer Modal */}
+      {showCodeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-6xl max-h-[92vh] flex flex-col">
+            <CodeViewer 
+              isModal={true} 
+              onClose={() => setShowCodeModal(false)} 
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

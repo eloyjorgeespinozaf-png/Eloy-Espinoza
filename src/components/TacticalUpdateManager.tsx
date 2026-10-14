@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { playSyntheticBeep, playChime } from '../utils/audio';
 import { safeStorage } from '../utils/storage';
+import { AI_STUDIO_BUILD } from '../buildVersion';
 
 interface TacticalUpdateManagerProps {
   currentVersion?: string;
@@ -25,12 +26,13 @@ interface TacticalUpdateManagerProps {
 }
 
 export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
-  currentVersion = 'v2.5.0-DOCTRINAL',
+  currentVersion = AI_STUDIO_BUILD.version,
   onOpenInstallModal
 }) => {
   const [hasUpdate, setHasUpdate] = useState<boolean>(false);
-  const [serverVersion, setServerVersion] = useState<string>(currentVersion);
-  const [changelog, setChangelog] = useState<string>('Nuevas mejoras de persistencia y sincronización multiplataforma.');
+  const [serverVersion, setServerVersion] = useState<string>(currentVersion || AI_STUDIO_BUILD.version);
+  const [serverBuildId, setServerBuildId] = useState<string>(AI_STUDIO_BUILD.buildId);
+  const [changelog, setChangelog] = useState<string>(AI_STUDIO_BUILD.changelog);
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
   const [isChecking, setIsChecking] = useState<boolean>(false);
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
@@ -38,30 +40,32 @@ export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
   const [lastCheckedTime, setLastCheckedTime] = useState<string>('Recién comprobado');
   const [updateFunction, setUpdateFunction] = useState<(() => Promise<void>) | null>(null);
+  const serverBuildIdRef = React.useRef<string>(AI_STUDIO_BUILD.buildId);
 
   // 1. Service Worker registration hook
   useEffect(() => {
     let updateSWFn: ((reloadPage?: boolean) => Promise<void>) | null = null;
     let swInterval: any = null;
 
-    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && !import.meta.env.DEV) {
       import('virtual:pwa-register')
         .then(({ registerSW }) => {
           updateSWFn = registerSW({
             immediate: true,
             onNeedRefresh() {
-              console.log('[PWA Updater] New version detected by Service Worker.');
-              setHasUpdate(true);
+              // When SW detects potential changes, verify deterministically via server endpoint
+              // Do NOT blindly set hasUpdate = true to prevent repeated false alarms
+              checkForUpdates(false);
             },
             onOfflineReady() {
               console.log('[PWA Updater] App is cached and ready for offline operation.');
             },
             onRegistered(r) {
               if (r) {
-                // Check periodically for SW updates
+                // Check periodically for SW updates without aggressive popups
                 swInterval = setInterval(() => {
                   r.update().catch(err => console.warn('[PWA] SW update check error:', err));
-                }, 60 * 1000);
+                }, 120 * 1000);
               }
             }
           });
@@ -85,10 +89,26 @@ export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Listen for WebSocket system upgrade broadcasts
+    // Listen for WebSocket system upgrade broadcasts from Central Command
     const handleSystemUpgradeAlert = (e: any) => {
       const detail = e.detail;
-      if (detail) {
+      if (detail && detail.buildId) {
+        // If it is the current running build, disregard
+        if (detail.buildId === AI_STUDIO_BUILD.buildId) {
+          setHasUpdate(false);
+          return;
+        }
+
+        // If user already dismissed or applied this exact build, do not prompt again
+        const dismissed = safeStorage.getItem('PII_LCC_DISMISSED_BUILD_ID');
+        const applied = safeStorage.getItem('PII_LCC_APPLIED_BUILD_ID');
+        if (dismissed === detail.buildId || applied === detail.buildId) {
+          setHasUpdate(false);
+          return;
+        }
+
+        serverBuildIdRef.current = detail.buildId;
+        setServerBuildId(detail.buildId);
         setHasUpdate(true);
         if (detail.version) setServerVersion(detail.version);
         if (detail.changelog) setChangelog(detail.changelog);
@@ -105,7 +125,7 @@ export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
     };
   }, []);
 
-  // 2. Periodic version polling to ensure devices detect deployments
+  // 2. Periodic version check: ONLY triggers if AI Studio has published an actually newer buildId
   const checkForUpdates = useCallback(async (manual: boolean = false) => {
     if (manual) {
       setIsChecking(true);
@@ -119,16 +139,43 @@ export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
       if (res.ok) {
         const data = await res.json();
         setLastCheckedTime(new Date().toLocaleTimeString('es-CL'));
-        if (data && data.version) {
-          setServerVersion(data.version);
-          const initialTimestamp = safeStorage.getItem('PII_LCC_INITIAL_BUILD_TS');
-          if (!initialTimestamp) {
-            safeStorage.setItem('PII_LCC_INITIAL_BUILD_TS', String(data.buildTimestamp || Date.now()));
-          } else if (data.buildTimestamp && Number(data.buildTimestamp) > Number(initialTimestamp)) {
-            setHasUpdate(true);
-          } else if (data.version !== currentVersion) {
-            setHasUpdate(true);
+        if (data && data.buildId) {
+          const remoteBuildId = String(data.buildId);
+          serverBuildIdRef.current = remoteBuildId;
+          setServerBuildId(remoteBuildId);
+          setServerVersion(data.version || AI_STUDIO_BUILD.version);
+          if (data.changelog) setChangelog(data.changelog);
+
+          // 1. If remote buildId equals client's compiled buildId, the client is already running latest AI Studio code!
+          if (remoteBuildId === AI_STUDIO_BUILD.buildId) {
+            setHasUpdate(false);
+            if (manual) {
+              setSyncStatusMsg(`Terminal al día: Ejecutando versión actual de AI Studio (${AI_STUDIO_BUILD.version}).`);
+              setTimeout(() => setSyncStatusMsg(null), 4000);
+            }
+            return;
           }
+
+          // 2. Check if user already applied or dismissed this specific build
+          const appliedBuildId = safeStorage.getItem('PII_LCC_APPLIED_BUILD_ID');
+          const dismissedBuildId = safeStorage.getItem('PII_LCC_DISMISSED_BUILD_ID');
+          if (appliedBuildId === remoteBuildId || dismissedBuildId === remoteBuildId) {
+            setHasUpdate(false);
+            if (manual) {
+              setSyncStatusMsg(`Cambios ya procesados para la versión ${data.version}.`);
+              setTimeout(() => setSyncStatusMsg(null), 4000);
+            }
+            return;
+          }
+
+          // 3. A truly new build from AI Studio is available and waiting to be applied!
+          setHasUpdate(true);
+          if (manual) {
+            setSyncStatusMsg(`Nueva versión ${data.version} disponible desde AI Studio.`);
+            setTimeout(() => setSyncStatusMsg(null), 4000);
+          }
+        } else {
+          setHasUpdate(false);
         }
       }
     } catch (err) {
@@ -138,16 +185,16 @@ export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
         setTimeout(() => setIsChecking(false), 500);
       }
     }
-  }, [currentVersion]);
+  }, []);
 
   useEffect(() => {
     // Initial check
     checkForUpdates(false);
 
-    // Poll every 45 seconds
+    // Poll every 90 seconds (lightweight & non-intrusive)
     const interval = setInterval(() => {
       checkForUpdates(false);
-    }, 45 * 1000);
+    }, 90 * 1000);
 
     // Check when user returns to tab
     const handleVisibilityChange = () => {
@@ -163,15 +210,17 @@ export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
     };
   }, [checkForUpdates]);
 
-  // Execute update: guarantees preserving IndexedDB and localStorage
+  // Execute update: guarantees preserving IndexedDB and localStorage, marks build applied so it never pops up again
   const handleApplyUpdate = async () => {
     setIsUpdating(true);
     playChime(600, 900, 0.3);
 
     try {
-      // 1. Store toast flag
+      const targetBuildId = serverBuildIdRef.current || serverBuildId;
+      // 1. Mark this build as applied so it never appears again for this build
+      safeStorage.setItem('PII_LCC_APPLIED_BUILD_ID', targetBuildId);
       safeStorage.setItem('PII_LCC_JUST_UPDATED', 'true');
-      safeStorage.setItem('PII_LCC_INITIAL_BUILD_TS', String(Date.now()));
+      setHasUpdate(false);
 
       // 2. Clear workbox cache storage so new JS/CSS bundles are fetched fresh
       if (typeof window !== 'undefined' && 'caches' in window) {
@@ -185,13 +234,15 @@ export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
 
       // 3. Trigger Service Worker reload if available
       if (updateFunction) {
-        await updateFunction();
+        try {
+          await updateFunction();
+        } catch (e) {}
       }
 
       // 4. Force browser hard reload
       setTimeout(() => {
         window.location.reload();
-      }, 350);
+      }, 300);
     } catch (err) {
       console.error('Update execution error:', err);
       window.location.reload();
@@ -279,7 +330,13 @@ export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setHasUpdate(false)}
+                  onClick={() => {
+                    const targetBuildId = serverBuildIdRef.current || serverBuildId;
+                    if (targetBuildId) {
+                      safeStorage.setItem('PII_LCC_DISMISSED_BUILD_ID', targetBuildId);
+                    }
+                    setHasUpdate(false);
+                  }}
                   className="text-zinc-500 hover:text-zinc-300 p-1 rounded hover:bg-zinc-800 transition-colors"
                   title="Cerrar notificación"
                 >

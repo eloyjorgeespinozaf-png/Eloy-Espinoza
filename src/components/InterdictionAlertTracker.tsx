@@ -239,13 +239,13 @@ export default function InterdictionAlertTracker({
         </div>
 
         {/* List of Interdiction Orders */}
-        {activeOrders.length === 0 ? (
+        {(!activeOrders || activeOrders.length === 0) ? (
           <div className="p-8 border border-dashed border-[#222] rounded-xl text-center text-zinc-500 font-mono text-xs">
             No hay órdenes de interdicción activas en este momento. Puede simular una directiva del Mando LCC con el botón superior.
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {activeOrders.map((order) => {
+            {(activeOrders || []).map((order) => {
               const isIssued = order.status === 'ISSUED';
               const isReceived = order.status === 'RECEIVED';
               const isInProgress = order.status === 'IN_PROGRESS';

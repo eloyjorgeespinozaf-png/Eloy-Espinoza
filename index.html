@@ -87,6 +87,24 @@
           SilentHmrWS.CLOSED = 3;
           window.WebSocket = SilentHmrWS;
         }
+
+        // Unregister any stale dev service worker and purge dev caches to avoid dual React instances
+        if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+          if (window.location.hostname === 'localhost' || window.location.hostname.includes('ais-dev')) {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              for (var i = 0; i < regs.length; i++) {
+                regs[i].unregister();
+              }
+            }).catch(function() {});
+            if ('caches' in window) {
+              caches.keys().then(function(names) {
+                for (var j = 0; j < names.length; j++) {
+                  caches.delete(names[j]);
+                }
+              }).catch(function() {});
+            }
+          }
+        }
       })();
     </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

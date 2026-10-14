@@ -17,16 +17,51 @@ import {
   initialOrders, 
   initialTacticalUnits 
 } from "./src/utils/mockData";
-import { RawAlert, Clan, ActionableIntel, AutomatedOrder, TacticalUnit, AuditLogEntry, ModuleBackgroundConfig } from "./src/types";
+import { initialG2Records } from "./src/utils/g2Records";
+import { RawAlert, Clan, ActionableIntel, AutomatedOrder, TacticalUnit, AuditLogEntry, ModuleBackgroundConfig, G2RegistryRecord } from "./src/types";
+
+// Synced Device record interface for multi-device tracking
+export interface SyncedDeviceRecord {
+  deviceId: string;
+  deviceName: string;
+  installedVersion: string;
+  platform: string;
+  role: string;
+  userName?: string;
+  connectedAt: string;
+  lastSeenAt: string;
+  transport: "WEBSOCKET" | "HTTP_POLL";
+  isOnline: boolean;
+  ipAddress?: string;
+}
 
 // Centralized in-memory synced database
-let serverVersion = "v2.5.0-DOCTRINAL";
-let serverBuildTimestamp = Date.now();
+let serverVersionConfig = {
+  version: "v2.5.2-AISTUDIO",
+  buildId: "ais-build-2026-09-16-0815",
+  builtAt: "2026-09-16T08:15:00.000Z",
+  changelog: "Modificaciones de persistencia y sincronización multi-dispositivo aplicadas en AI Studio"
+};
+
+try {
+  const vPath = path.join(process.cwd(), "version.json");
+  if (fs.existsSync(vPath)) {
+    const raw = fs.readFileSync(vPath, "utf-8");
+    serverVersionConfig = { ...serverVersionConfig, ...JSON.parse(raw) };
+  }
+} catch (e) {
+  console.warn("Notice: reading version.json:", e);
+}
+
+let serverVersion = serverVersionConfig.version;
+let serverBuildId = serverVersionConfig.buildId;
+let serverBuildTimestamp = new Date(serverVersionConfig.builtAt).getTime() || 1789545600000;
 let serverRawAlerts: RawAlert[] = [...initialRawAlerts];
 let serverClans: Clan[] = [...initialClans];
 let serverActionableIntel: ActionableIntel[] = [...initialActionableIntel];
 let serverActiveOrders: AutomatedOrder[] = [...initialOrders];
 let serverTacticalUnits: TacticalUnit[] = [...initialTacticalUnits];
+let serverExpedientes: G2RegistryRecord[] = [...initialG2Records];
 let serverAuditLogs: AuditLogEntry[] = [
   {
     id: "log-seed",
@@ -37,6 +72,10 @@ let serverAuditLogs: AuditLogEntry[] = [
     coordinates: "19°13'10\"S 68°35'50\"W"
   }
 ];
+
+// Persistent Registry of all connected devices across all installed versions
+const syncedDevicesMap = new Map<string, SyncedDeviceRecord>();
+const socketToDeviceIdMap = new Map<WebSocket, string>();
 
 // Persistent File System
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -189,7 +228,7 @@ function saveFullDashboardBgToDisk() {
   }
 }
 
-// Tactical State (Alerts, Orders, Clans, Units, Intel) Persistence System
+// Tactical State (Alerts, Orders, Clans, Units, Intel, Expedientes) Persistence System
 if (fs.existsSync(TACTICAL_STATE_FILE)) {
   try {
     const loadedState = JSON.parse(fs.readFileSync(TACTICAL_STATE_FILE, "utf-8"));
@@ -199,6 +238,7 @@ if (fs.existsSync(TACTICAL_STATE_FILE)) {
     if (Array.isArray(loadedState.activeOrders) && loadedState.activeOrders.length > 0) serverActiveOrders = loadedState.activeOrders;
     if (Array.isArray(loadedState.tacticalUnits) && loadedState.tacticalUnits.length > 0) serverTacticalUnits = loadedState.tacticalUnits;
     if (Array.isArray(loadedState.auditLogs) && loadedState.auditLogs.length > 0) serverAuditLogs = loadedState.auditLogs;
+    if (Array.isArray(loadedState.expedientes) && loadedState.expedientes.length > 0) serverExpedientes = loadedState.expedientes;
     console.log("[Data Persistence] Loaded persistent tactical state from data/tactical-state.json successfully.");
   } catch (err) {
     console.error("Error loading tactical-state.json:", err);
@@ -213,6 +253,7 @@ function saveTacticalStateToDisk() {
       actionableIntel: serverActionableIntel,
       activeOrders: serverActiveOrders,
       tacticalUnits: serverTacticalUnits,
+      expedientes: serverExpedientes,
       auditLogs: serverAuditLogs.slice(0, 100),
       savedAt: new Date().toISOString()
     }, null, 2));
@@ -262,30 +303,65 @@ function broadcastPeersList() {
   });
 }
 
+// Helper to broadcast active synchronized devices across all installed versions
+function broadcastSyncedDevices() {
+  const devices = Array.from(syncedDevicesMap.values());
+  const msgStr = JSON.stringify({
+    type: "SYNCED_DEVICES_UPDATE",
+    payload: {
+      devices,
+      serverVersion,
+      totalConnected: devices.filter(d => d.isOnline).length
+    }
+  });
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      try {
+        client.send(msgStr);
+      } catch (err) {}
+    }
+  });
+}
+
 const wss = new WebSocketServer({ noServer: true });
+
+wss.on("error", (err) => {
+  console.warn("[PII-LCC Server] WebSocketServer runtime error:", err);
+});
 
 wss.on("connection", (ws: WebSocket) => {
   console.log("A device connected to PII-LCC real-time network.");
 
-  // Send the current authoritative state to the newly connected terminal
-  ws.send(JSON.stringify({
-    type: "INIT",
-    payload: {
-      version: serverVersion,
-      rawAlerts: serverRawAlerts,
-      clans: serverClans,
-      actionableIntel: serverActionableIntel,
-      activeOrders: serverActiveOrders,
-      tacticalUnits: serverTacticalUnits,
-      auditLogs: serverAuditLogs,
-      moduleBackgrounds: serverModuleBackgrounds,
-      fullDashboardBackground: serverFullDashboardBg
-    }
-  }));
+  ws.on("error", (err) => {
+    console.warn("[PII-LCC Server] Client WebSocket connection error:", err);
+  });
 
-  ws.on("message", (message: string) => {
+  // Send the current authoritative state to the newly connected terminal
+  try {
+    ws.send(JSON.stringify({
+      type: "INIT",
+      payload: {
+        version: serverVersion,
+        rawAlerts: serverRawAlerts,
+        clans: serverClans,
+        actionableIntel: serverActionableIntel,
+        activeOrders: serverActiveOrders,
+        tacticalUnits: serverTacticalUnits,
+        auditLogs: serverAuditLogs,
+        expedientes: serverExpedientes,
+        moduleBackgrounds: serverModuleBackgrounds,
+        fullDashboardBackground: serverFullDashboardBg,
+        syncedDevices: Array.from(syncedDevicesMap.values())
+      }
+    }));
+  } catch (err) {
+    console.error("[PII-LCC Server] Failed to send INIT state to client:", err);
+  }
+
+  ws.on("message", (message: any) => {
     try {
-      const data = JSON.parse(message);
+      const raw = typeof message === "string" ? message : message.toString("utf-8");
+      const data = JSON.parse(raw);
       const { type, payload } = data;
 
       let shouldBroadcast = false;
@@ -611,6 +687,208 @@ wss.on("connection", (ws: WebSocket) => {
           break;
         }
 
+        case "REGISTER_DEVICE":
+        case "DEVICE_HEARTBEAT": {
+          const { deviceId, deviceName, installedVersion, platform, role, userName, ipAddress } = payload || {};
+          if (deviceId) {
+            socketToDeviceIdMap.set(ws, deviceId);
+            const existing = syncedDevicesMap.get(deviceId);
+            syncedDevicesMap.set(deviceId, {
+              deviceId,
+              deviceName: deviceName || existing?.deviceName || `Terminal [${deviceId.slice(-4)}]`,
+              installedVersion: installedVersion || existing?.installedVersion || serverVersion,
+              platform: platform || existing?.platform || "Web Browser",
+              role: role || existing?.role || "ROL_BUSQUEDA",
+              userName: userName || existing?.userName,
+              connectedAt: existing?.connectedAt || new Date().toISOString(),
+              lastSeenAt: new Date().toISOString(),
+              transport: "WEBSOCKET",
+              isOnline: true,
+              ipAddress: ipAddress || existing?.ipAddress
+            });
+            broadcastSyncedDevices();
+          }
+          break;
+        }
+
+        case "UPDATE_CLANS": {
+          const { clans } = payload || {};
+          if (Array.isArray(clans)) {
+            serverClans = clans;
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "SAVE_CLAN": {
+          const { clan } = payload || {};
+          if (clan && clan.id) {
+            const idx = serverClans.findIndex(c => c.id === clan.id);
+            if (idx >= 0) {
+              serverClans[idx] = clan;
+            } else {
+              serverClans = [clan, ...serverClans];
+            }
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "DELETE_CLAN": {
+          const { clanId } = payload || {};
+          if (clanId) {
+            serverClans = serverClans.filter(c => c.id !== clanId);
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "SAVE_EXPEDIENTE": {
+          const { expediente } = payload || {};
+          if (expediente && expediente.id) {
+            const idx = serverExpedientes.findIndex(e => e.id === expediente.id);
+            if (idx >= 0) {
+              serverExpedientes[idx] = expediente;
+            } else {
+              serverExpedientes = [expediente, ...serverExpedientes];
+            }
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "UPDATE_EXPEDIENTES":
+        case "RESTORE_EXPEDIENTES": {
+          const { expedientes } = payload || {};
+          if (Array.isArray(expedientes)) {
+            serverExpedientes = expedientes;
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "DELETE_EXPEDIENTE": {
+          const { expedienteId, id } = payload || {};
+          const targetId = expedienteId || id;
+          if (targetId) {
+            serverExpedientes = serverExpedientes.filter(e => e.id !== targetId);
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "BATCH_IMPORT_CLANS": {
+          const { clans } = payload || {};
+          if (Array.isArray(clans) && clans.length > 0) {
+            serverClans = clans;
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "ORDER_UPDATE": {
+          const { orderId, updateMsg } = payload || {};
+          if (orderId && updateMsg) {
+            serverActiveOrders = serverActiveOrders.map(order =>
+              order.id === orderId
+                ? { ...order, updates: [...(order.updates || []), updateMsg] }
+                : order
+            );
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "UPDATE_RAW_ALERT": {
+          const { alert } = payload || {};
+          if (alert && alert.id) {
+            serverRawAlerts = serverRawAlerts.map(a => a.id === alert.id ? { ...a, ...alert } : a);
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "DELETE_RAW_ALERT": {
+          const { alertId, id } = payload || {};
+          const targetId = alertId || id;
+          if (targetId) {
+            serverRawAlerts = serverRawAlerts.filter(a => a.id !== targetId);
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "TRIGGER_FORCE_BROADCAST": {
+          shouldBroadcast = true;
+          break;
+        }
+
+        case "TACTICAL_RADIO_MESSAGE":
+        case "BROADCAST_TACTICAL_COMMS": {
+          const { commsMessage, message } = payload || {};
+          const finalMsg = commsMessage || message;
+          if (finalMsg) {
+            broadcast({
+              type: "TACTICAL_COMMS_BROADCAST",
+              payload: { commsMessage: finalMsg }
+            });
+          }
+          break;
+        }
+
+        case "TACTICAL_ALARM_EMERGENCY":
+        case "BROADCAST_TACTICAL_ALARM": {
+          const { alarm, emergency } = payload || {};
+          broadcast({
+            type: "TACTICAL_ALARM_ALERT",
+            payload: { emergency: emergency || alarm }
+          });
+          break;
+        }
+
+        case "RESTORE_ALL_DATA":
+        case "SYNC_ALL_DATA":
+        case "PUSH_FULL_STATE": {
+          const { clans, rawAlerts, actionableIntel, activeOrders, tacticalUnits, expedientes, auditLogs } = payload || {};
+          if (Array.isArray(clans) && clans.length > 0) serverClans = clans;
+          if (Array.isArray(rawAlerts) && rawAlerts.length > 0) serverRawAlerts = rawAlerts;
+          if (Array.isArray(actionableIntel) && actionableIntel.length > 0) serverActionableIntel = actionableIntel;
+          if (Array.isArray(activeOrders) && activeOrders.length > 0) serverActiveOrders = activeOrders;
+          if (Array.isArray(tacticalUnits) && tacticalUnits.length > 0) serverTacticalUnits = tacticalUnits;
+          if (Array.isArray(expedientes) && expedientes.length > 0) serverExpedientes = expedientes;
+          if (Array.isArray(auditLogs) && auditLogs.length > 0) {
+            const existingIds = new Set(serverAuditLogs.map(l => l.id));
+            const newLogs = auditLogs.filter(l => !existingIds.has(l.id));
+            serverAuditLogs = [...newLogs, ...serverAuditLogs].slice(0, 150);
+          }
+          shouldBroadcast = true;
+          break;
+        }
+
+        case "REQUEST_FULL_STATE": {
+          try {
+            ws.send(JSON.stringify({
+              type: "STATE_UPDATE",
+              payload: {
+                version: serverVersion,
+                rawAlerts: serverRawAlerts,
+                clans: serverClans,
+                actionableIntel: serverActionableIntel,
+                activeOrders: serverActiveOrders,
+                tacticalUnits: serverTacticalUnits,
+                auditLogs: serverAuditLogs,
+                expedientes: serverExpedientes,
+                moduleBackgrounds: serverModuleBackgrounds,
+                fullDashboardBackground: serverFullDashboardBg,
+                syncedDevices: Array.from(syncedDevicesMap.values())
+              }
+            }));
+          } catch (e) {
+            console.error("Error sending full state to request:", e);
+          }
+          break;
+        }
+
         default:
           console.warn(`Unrecognized action event: ${type}`);
       }
@@ -620,12 +898,16 @@ wss.on("connection", (ws: WebSocket) => {
         broadcast({
           type: "STATE_UPDATE",
           payload: {
+            version: serverVersion,
             rawAlerts: serverRawAlerts,
             clans: serverClans,
             actionableIntel: serverActionableIntel,
             activeOrders: serverActiveOrders,
             tacticalUnits: serverTacticalUnits,
-            auditLogs: serverAuditLogs
+            auditLogs: serverAuditLogs,
+            expedientes: serverExpedientes,
+            moduleBackgrounds: serverModuleBackgrounds,
+            fullDashboardBackground: serverFullDashboardBg
           }
         });
       }
@@ -639,6 +921,16 @@ wss.on("connection", (ws: WebSocket) => {
     if (connectedPeers.has(ws)) {
       connectedPeers.delete(ws);
       broadcastPeersList();
+    }
+    if (socketToDeviceIdMap.has(ws)) {
+      const devId = socketToDeviceIdMap.get(ws);
+      if (devId && syncedDevicesMap.has(devId)) {
+        const dev = syncedDevicesMap.get(devId)!;
+        dev.isOnline = false;
+        dev.lastSeenAt = new Date().toISOString();
+        broadcastSyncedDevices();
+      }
+      socketToDeviceIdMap.delete(ws);
     }
   });
 });
@@ -673,6 +965,18 @@ async function startServer() {
 
   const app = express();
   const PORT = 3000;
+
+  // Full CORS middleware for cross-origin, mobile PWA, and cross-version synchronization
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-App-Version, X-Device-Id, X-Device-Name, X-Platform, X-Role");
+    res.setHeader("Access-Control-Expose-Headers", "X-App-Version, X-Synced-Devices");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    next();
+  });
 
   app.use(express.json({ limit: "50mb" }));
 
@@ -952,12 +1256,29 @@ async function startServer() {
 
   // App version and update detection endpoint
   app.get(["/api/version", "/api/app-version"], (req, res) => {
+    // Check if version.json has been updated in AI Studio
+    try {
+      const vPath = path.join(process.cwd(), "version.json");
+      if (fs.existsSync(vPath)) {
+        const raw = fs.readFileSync(vPath, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (parsed.buildId && parsed.buildId !== serverBuildId) {
+          serverBuildId = parsed.buildId;
+          serverVersion = parsed.version || serverVersion;
+          serverBuildTimestamp = new Date(parsed.builtAt).getTime() || Date.now();
+          serverVersionConfig = { ...serverVersionConfig, ...parsed };
+        }
+      }
+    } catch {}
+
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.json({
       success: true,
       version: serverVersion,
+      buildId: serverBuildId,
       buildTimestamp: serverBuildTimestamp,
-      publishedAt: new Date(serverBuildTimestamp).toISOString(),
+      publishedAt: serverVersionConfig.builtAt || new Date(serverBuildTimestamp).toISOString(),
+      changelog: serverVersionConfig.changelog || "Actualización de sistema aplicada en AI Studio",
       name: "PII-LCC Plataforma Integrada de Inteligencia",
       doctrine: "MIL-STD-188-220 / ECEME",
       status: "NOMINAL",
@@ -1026,7 +1347,8 @@ async function startServer() {
         actionableIntel: serverActionableIntel,
         activeOrders: serverActiveOrders,
         tacticalUnits: serverTacticalUnits,
-        auditLogs: serverAuditLogs
+        auditLogs: serverAuditLogs,
+        expedientes: serverExpedientes
       },
       fullDashboardBackground: serverFullDashboardBg,
       moduleBackgrounds: serverModuleBackgrounds
@@ -1038,13 +1360,14 @@ async function startServer() {
     try {
       const backup = req.body;
       if (backup.tacticalState) {
-        const { rawAlerts, clans, actionableIntel, activeOrders, tacticalUnits, auditLogs } = backup.tacticalState;
+        const { rawAlerts, clans, actionableIntel, activeOrders, tacticalUnits, auditLogs, expedientes } = backup.tacticalState;
         if (Array.isArray(rawAlerts) && rawAlerts.length > 0) serverRawAlerts = rawAlerts;
         if (Array.isArray(clans) && clans.length > 0) serverClans = clans;
         if (Array.isArray(actionableIntel) && actionableIntel.length > 0) serverActionableIntel = actionableIntel;
         if (Array.isArray(activeOrders) && activeOrders.length > 0) serverActiveOrders = activeOrders;
         if (Array.isArray(tacticalUnits) && tacticalUnits.length > 0) serverTacticalUnits = tacticalUnits;
         if (Array.isArray(auditLogs) && auditLogs.length > 0) serverAuditLogs = auditLogs;
+        if (Array.isArray(expedientes) && expedientes.length > 0) serverExpedientes = expedientes;
         saveTacticalStateToDisk();
       }
       if (backup.fullDashboardBackground) {
@@ -1067,6 +1390,7 @@ async function startServer() {
           activeOrders: serverActiveOrders,
           tacticalUnits: serverTacticalUnits,
           auditLogs: serverAuditLogs,
+          expedientes: serverExpedientes,
           moduleBackgrounds: serverModuleBackgrounds,
           fullDashboardBackground: serverFullDashboardBg
         }
@@ -1131,13 +1455,208 @@ async function startServer() {
   });
 
   app.post("/api/sync", (req, res) => {
-    const { action } = req.body;
+    // Track device from headers or body
+    const devId = (req.headers["x-device-id"] as string) || req.body?.deviceInfo?.deviceId || req.body?.deviceId;
+    if (devId) {
+      const existing = syncedDevicesMap.get(devId);
+      syncedDevicesMap.set(devId, {
+        deviceId: devId,
+        deviceName: decodeURIComponent((req.headers["x-device-name"] as string) || "") || req.body?.deviceInfo?.deviceName || existing?.deviceName || `Terminal [${devId.slice(-4)}]`,
+        installedVersion: (req.headers["x-app-version"] as string) || req.body?.deviceInfo?.installedVersion || existing?.installedVersion || serverVersion,
+        platform: (req.headers["x-platform"] as string) || req.body?.deviceInfo?.platform || existing?.platform || "Web Browser",
+        role: (req.headers["x-role"] as string) || req.body?.deviceInfo?.role || existing?.role || "ROL_BUSQUEDA",
+        userName: req.body?.deviceInfo?.userName || existing?.userName,
+        connectedAt: existing?.connectedAt || new Date().toISOString(),
+        lastSeenAt: new Date().toISOString(),
+        transport: "HTTP_POLL",
+        isOnline: true,
+        ipAddress: req.ip || req.socket.remoteAddress
+      });
+    }
+
+    const { action } = req.body || {};
     let shouldBroadcast = false;
 
     if (action && action.type) {
       const { type, payload } = action;
       try {
         switch (type) {
+          case "REGISTER_DEVICE":
+          case "DEVICE_HEARTBEAT": {
+            const { deviceId, deviceName, installedVersion, platform, role, userName } = payload || {};
+            if (deviceId) {
+              const existing = syncedDevicesMap.get(deviceId);
+              syncedDevicesMap.set(deviceId, {
+                deviceId,
+                deviceName: deviceName || existing?.deviceName || `Terminal [${deviceId.slice(-4)}]`,
+                installedVersion: installedVersion || existing?.installedVersion || serverVersion,
+                platform: platform || existing?.platform || "Web Browser",
+                role: role || existing?.role || "ROL_BUSQUEDA",
+                userName: userName || existing?.userName,
+                connectedAt: existing?.connectedAt || new Date().toISOString(),
+                lastSeenAt: new Date().toISOString(),
+                transport: "HTTP_POLL",
+                isOnline: true,
+                ipAddress: req.ip || req.socket.remoteAddress
+              });
+              broadcastSyncedDevices();
+            }
+            break;
+          }
+
+          case "UPDATE_CLANS": {
+            const { clans } = payload || {};
+            if (Array.isArray(clans)) {
+              serverClans = clans;
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "SAVE_CLAN": {
+            const { clan } = payload || {};
+            if (clan && clan.id) {
+              const idx = serverClans.findIndex(c => c.id === clan.id);
+              if (idx >= 0) {
+                serverClans[idx] = clan;
+              } else {
+                serverClans = [clan, ...serverClans];
+              }
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "DELETE_CLAN": {
+            const { clanId } = payload || {};
+            if (clanId) {
+              serverClans = serverClans.filter(c => c.id !== clanId);
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "SAVE_EXPEDIENTE": {
+            const { expediente } = payload || {};
+            if (expediente && expediente.id) {
+              const idx = serverExpedientes.findIndex(e => e.id === expediente.id);
+              if (idx >= 0) {
+                serverExpedientes[idx] = expediente;
+              } else {
+                serverExpedientes = [expediente, ...serverExpedientes];
+              }
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "UPDATE_EXPEDIENTES":
+          case "RESTORE_EXPEDIENTES": {
+            const { expedientes } = payload || {};
+            if (Array.isArray(expedientes)) {
+              serverExpedientes = expedientes;
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "DELETE_EXPEDIENTE": {
+            const { expedienteId, id } = payload || {};
+            const targetId = expedienteId || id;
+            if (targetId) {
+              serverExpedientes = serverExpedientes.filter(e => e.id !== targetId);
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "BATCH_IMPORT_CLANS": {
+            const { clans } = payload || {};
+            if (Array.isArray(clans) && clans.length > 0) {
+              serverClans = clans;
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "ORDER_UPDATE": {
+            const { orderId, updateMsg } = payload || {};
+            if (orderId && updateMsg) {
+              serverActiveOrders = serverActiveOrders.map(order =>
+                order.id === orderId
+                  ? { ...order, updates: [...(order.updates || []), updateMsg] }
+                  : order
+              );
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "UPDATE_RAW_ALERT": {
+            const { alert } = payload || {};
+            if (alert && alert.id) {
+              serverRawAlerts = serverRawAlerts.map(a => a.id === alert.id ? { ...a, ...alert } : a);
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "DELETE_RAW_ALERT": {
+            const { alertId, id } = payload || {};
+            const targetId = alertId || id;
+            if (targetId) {
+              serverRawAlerts = serverRawAlerts.filter(a => a.id !== targetId);
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "TRIGGER_FORCE_BROADCAST": {
+            shouldBroadcast = true;
+            break;
+          }
+
+          case "TACTICAL_RADIO_MESSAGE":
+          case "BROADCAST_TACTICAL_COMMS": {
+            const { commsMessage, message } = payload || {};
+            const finalMsg = commsMessage || message;
+            if (finalMsg) {
+              broadcast({
+                type: "TACTICAL_COMMS_BROADCAST",
+                payload: { commsMessage: finalMsg }
+              });
+            }
+            break;
+          }
+
+          case "TACTICAL_ALARM_EMERGENCY":
+          case "BROADCAST_TACTICAL_ALARM": {
+            const { alarm, emergency } = payload || {};
+            broadcast({
+              type: "TACTICAL_ALARM_ALERT",
+              payload: { emergency: emergency || alarm }
+            });
+            break;
+          }
+
+          case "RESTORE_ALL_DATA":
+          case "SYNC_ALL_DATA":
+          case "PUSH_FULL_STATE": {
+            const { clans, rawAlerts, actionableIntel, activeOrders, tacticalUnits, expedientes, auditLogs } = payload || {};
+            if (Array.isArray(clans) && clans.length > 0) serverClans = clans;
+            if (Array.isArray(rawAlerts) && rawAlerts.length > 0) serverRawAlerts = rawAlerts;
+            if (Array.isArray(actionableIntel) && actionableIntel.length > 0) serverActionableIntel = actionableIntel;
+            if (Array.isArray(activeOrders) && activeOrders.length > 0) serverActiveOrders = activeOrders;
+            if (Array.isArray(tacticalUnits) && tacticalUnits.length > 0) serverTacticalUnits = tacticalUnits;
+            if (Array.isArray(expedientes) && expedientes.length > 0) serverExpedientes = expedientes;
+            if (Array.isArray(auditLogs) && auditLogs.length > 0) {
+              const existingIds = new Set(serverAuditLogs.map(l => l.id));
+              const newLogs = auditLogs.filter(l => !existingIds.has(l.id));
+              serverAuditLogs = [...newLogs, ...serverAuditLogs].slice(0, 150);
+            }
+            shouldBroadcast = true;
+            break;
+          }
           case "CREATE_ORDER": {
             const { order } = payload;
             if (!serverActiveOrders.some(o => o.id === order.id)) {
@@ -1381,16 +1900,20 @@ async function startServer() {
       broadcast({
         type: "STATE_UPDATE",
         payload: {
+          version: serverVersion,
           rawAlerts: serverRawAlerts,
           clans: serverClans,
           actionableIntel: serverActionableIntel,
           activeOrders: serverActiveOrders,
           tacticalUnits: serverTacticalUnits,
           auditLogs: serverAuditLogs,
+          expedientes: serverExpedientes,
           moduleBackgrounds: serverModuleBackgrounds,
-          fullDashboardBackground: serverFullDashboardBg
+          fullDashboardBackground: serverFullDashboardBg,
+          syncedDevices: Array.from(syncedDevicesMap.values())
         }
       });
+      broadcastSyncedDevices();
     }
 
     res.json({
@@ -1401,8 +1924,82 @@ async function startServer() {
       activeOrders: serverActiveOrders,
       tacticalUnits: serverTacticalUnits,
       auditLogs: serverAuditLogs,
+      expedientes: serverExpedientes,
       moduleBackgrounds: serverModuleBackgrounds,
-      fullDashboardBackground: serverFullDashboardBg
+      fullDashboardBackground: serverFullDashboardBg,
+      syncedDevices: Array.from(syncedDevicesMap.values())
+    });
+  });
+
+  // Query connected and registered terminals across all versions
+  app.get("/api/sync/devices", (req, res) => {
+    const devices = Array.from(syncedDevicesMap.values());
+    res.json({
+      serverVersion,
+      totalConnected: devices.filter(d => d.isOnline).length,
+      totalRegistered: devices.length,
+      devices
+    });
+  });
+
+  // Trigger manual network force-broadcast of current state across all connected devices
+  app.post("/api/sync/force-broadcast", (req, res) => {
+    broadcast({
+      type: "STATE_UPDATE",
+      payload: {
+        version: serverVersion,
+        rawAlerts: serverRawAlerts,
+        clans: serverClans,
+        actionableIntel: serverActionableIntel,
+        activeOrders: serverActiveOrders,
+        tacticalUnits: serverTacticalUnits,
+        auditLogs: serverAuditLogs,
+        expedientes: serverExpedientes,
+        moduleBackgrounds: serverModuleBackgrounds,
+        fullDashboardBackground: serverFullDashboardBg,
+        syncedDevices: Array.from(syncedDevicesMap.values())
+      }
+    });
+    broadcastSyncedDevices();
+    res.json({ 
+      success: true, 
+      message: "Difusión forzada a todos los terminales completada.",
+      activeDevices: syncedDevicesMap.size
+    });
+  });
+
+  // Broadcast OTA upgrade alert to all installed versions so they can synchronize seamlessly
+  app.post("/api/sync/broadcast-ota", (req, res) => {
+    const { nextVersion, changelog } = req.body || {};
+    if (nextVersion) {
+      serverVersion = nextVersion;
+    }
+    broadcast({
+      type: "SYSTEM_UPGRADE_ALERT",
+      payload: {
+        version: serverVersion,
+        changelog: changelog || "Parche doctrinal sincronizado en todos los dispositivos y versiones generadas.",
+        rawAlerts: serverRawAlerts,
+        clans: serverClans,
+        actionableIntel: serverActionableIntel,
+        activeOrders: serverActiveOrders,
+        tacticalUnits: serverTacticalUnits,
+        auditLogs: serverAuditLogs,
+        expedientes: serverExpedientes
+      }
+    });
+    res.json({ success: true, version: serverVersion });
+  });
+
+  // Health and sync capabilities endpoint
+  app.get("/api/sync/health", (req, res) => {
+    res.json({
+      status: "online",
+      version: serverVersion,
+      serverTime: Date.now(),
+      connectedSockets: wss.clients.size,
+      syncedDevicesCount: syncedDevicesMap.size,
+      crossVersionSupported: true
     });
   });
 
@@ -1461,37 +2058,184 @@ async function startServer() {
     });
   });
 
+  // Safe Source Code Explorer, Bundler & Downloader APIs
+  app.get("/api/code/files", (req, res) => {
+    try {
+      const allowedExts = ['.ts', '.tsx', '.json', '.html', '.css', '.bat', '.sh', '.md'];
+      const fileList: Array<{ path: string; name: string; category: string; size: number; lines: number }> = [];
+
+      const walkDir = (dir: string, relativePrefix: string = '') => {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (
+            entry.name.startsWith('.') || 
+            entry.name === 'node_modules' || 
+            entry.name === 'dist' || 
+            entry.name === 'assets' ||
+            entry.name === 'data' ||
+            entry.name.endsWith('.tar.gz')
+          ) {
+            continue;
+          }
+          const fullPath = path.join(dir, entry.name);
+          const relPath = relativePrefix ? `${relativePrefix}/${entry.name}` : entry.name;
+          if (entry.isDirectory()) {
+            walkDir(fullPath, relPath);
+          } else if (entry.isFile()) {
+            const ext = path.extname(entry.name);
+            if (allowedExts.includes(ext) && !entry.name.includes('.env')) {
+              try {
+                const stat = fs.statSync(fullPath);
+                let cat = 'General';
+                if (relPath.startsWith('src/components/fusion/')) cat = 'Fusión e Inteligencia G-2';
+                else if (relPath.startsWith('src/components/')) cat = 'Componentes e Interfaz';
+                else if (relPath.startsWith('src/services/')) cat = 'Servicios y Red Táctica';
+                else if (relPath.startsWith('src/utils/')) cat = 'Utilidades y Criptografía';
+                else if (relPath.startsWith('src/')) cat = 'Núcleo Cliente';
+                else if (relPath.startsWith('server')) cat = 'Servidor y Enlace WS';
+                
+                const content = fs.readFileSync(fullPath, 'utf-8');
+                const lineCount = content.split('\n').length;
+                fileList.push({
+                  path: relPath,
+                  name: entry.name,
+                  category: cat,
+                  size: stat.size,
+                  lines: lineCount
+                });
+              } catch {}
+            }
+          }
+        }
+      };
+
+      walkDir(process.cwd());
+      fileList.sort((a, b) => a.path.localeCompare(b.path));
+      res.json({ files: fileList });
+    } catch (err: any) {
+      res.status(500).json({ error: "Error enumerando archivos de código", details: err?.message });
+    }
+  });
+
+  app.get("/api/code/bundle", (req, res) => {
+    try {
+      const primaryFiles = [
+        "server.ts",
+        "src/App.tsx",
+        "src/types.ts",
+        "src/services/MultiDeviceSyncService.ts",
+        "src/components/StrategicView.tsx",
+        "src/components/OperationalView.tsx",
+        "src/components/TacticalView.tsx",
+        "src/components/TacticalP2PMesh.tsx",
+        "src/components/InterdictionAlertTracker.tsx",
+        "src/components/MultiDeviceSyncModal.tsx",
+        "src/components/AppInstallModal.tsx",
+        "src/components/ClanManagementModal.tsx",
+        "src/components/PatrolOperationalDashboard.tsx",
+        "src/components/MilitaryLoginView.tsx",
+        "src/components/CodeViewer.tsx",
+        "src/components/SystemArchitectureDiagram.tsx",
+        "src/components/OfficialCrest.tsx",
+        "src/services/DeviceAuthService.ts",
+        "src/utils/audio.ts",
+        "src/utils/storage.ts",
+        "package.json",
+        "vite.config.ts"
+      ];
+
+      let bundledText = `/* ==========================================================================\n`;
+      bundledText += ` * PII-LCC CAD-C2 // CÓDIGO FUENTE CONSOLIDADO AUTORITATIVO\n`;
+      bundledText += ` * FECHA DE GENERACIÓN: ${new Date().toISOString()}\n`;
+      bundledText += ` * TOTAL DE ARCHIVOS CONSOLIDADOS: ${primaryFiles.length}\n`;
+      bundledText += ` * SISTEMA DE SINCRONIZACIÓN MULTI-TERMINAL EN TIEMPO REAL\n`;
+      bundledText += ` * ========================================================================== */\n\n`;
+
+      let totalLines = 0;
+      let bundledCount = 0;
+
+      for (const relFile of primaryFiles) {
+        const fullPath = path.join(process.cwd(), relFile);
+        if (fs.existsSync(fullPath)) {
+          const content = fs.readFileSync(fullPath, "utf-8");
+          const lines = content.split('\n').length;
+          totalLines += lines;
+          bundledCount++;
+          bundledText += `\n/* ==========================================================================\n`;
+          bundledText += ` * ARCHIVO: ${relFile} (${lines} líneas)\n`;
+          bundledText += ` * ========================================================================== */\n\n`;
+          bundledText += content;
+          bundledText += `\n\n`;
+        }
+      }
+
+      res.json({
+        totalFiles: bundledCount,
+        totalLines,
+        totalBytes: Buffer.byteLength(bundledText, "utf-8"),
+        bundleContent: bundledText
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: "Error empaquetando código", details: err?.message });
+    }
+  });
+
+  app.get("/api/code/download-archive", (req, res) => {
+    const tempFilename = `pii_lcc_source_${Date.now()}.tar.gz`;
+    const archivePath = path.join(process.cwd(), tempFilename);
+    const cmd = `tar -czf "${archivePath}" --exclude=node_modules --exclude=dist --exclude=.git --exclude=.cache --exclude=.npm --exclude=*.tar.gz src server.ts package.json tsconfig.json vite.config.ts index.html README_DESKTOP.md`;
+
+    exec(cmd, { cwd: process.cwd() }, (error) => {
+      if (error) {
+        console.error("Error creating code archive:", error);
+        return res.status(500).json({ error: "No se pudo generar el archivo de código fuente" });
+      }
+
+      res.download(archivePath, "PII-LCC_Codigo_Fuente_Completo.tar.gz", (err) => {
+        try {
+          if (fs.existsSync(archivePath)) {
+            fs.unlinkSync(archivePath);
+          }
+        } catch {}
+      });
+    });
+  });
+
   app.get("/api/code", (req, res) => {
     const file = req.query.file as string;
-    const allowedFiles = [
-      "server.ts",
-      "src/App.tsx",
-      "src/types.ts",
-      "src/components/StrategicView.tsx",
-      "src/components/OperationalView.tsx",
-      "src/components/TacticalView.tsx",
-      "src/components/TacticalP2PMesh.tsx",
-      "src/components/OfficialCrest.tsx",
-      "src/components/SystemArchitectureDiagram.tsx",
-      "src/components/InteractiveChartCreator.tsx",
-      "src/services/DeviceAuthService.ts",
-      "src/components/SecureElement.tsx"
-    ];
+    if (!file || typeof file !== 'string') {
+      return res.status(400).json({ error: "Archivo no especificado" });
+    }
 
-    if (!file || !allowedFiles.includes(file)) {
-      return res.status(400).json({ error: "Archivo no permitido o no especificado" });
+    const safeNormalized = path.normalize(file).replace(/^(\.\.[\/\\])+/, '');
+    if (safeNormalized.includes('..') || path.isAbsolute(safeNormalized)) {
+      return res.status(403).json({ error: "Acceso denegado: ruta no permitida" });
+    }
+
+    if (safeNormalized.includes('.env') || safeNormalized.includes('node_modules')) {
+      return res.status(403).json({ error: "Acceso restringido a este recurso" });
     }
 
     try {
-      const filePath = path.join(process.cwd(), file);
+      const filePath = path.join(process.cwd(), safeNormalized);
+      if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+        return res.status(404).json({ error: "El archivo no existe" });
+      }
+
       const content = fs.readFileSync(filePath, "utf-8");
-      res.json({ file, content });
-    } catch (err) {
-      res.status(500).json({ error: "Error al leer el archivo" });
+      const lines = content.split('\n').length;
+      const size = Buffer.byteLength(content, "utf-8");
+      res.json({ file: safeNormalized, content, lines, size });
+    } catch (err: any) {
+      res.status(500).json({ error: "Error al leer el archivo", details: err?.message });
     }
   });
 
   httpServer.on("upgrade", (request, socket, head) => {
+    socket.on("error", (err) => {
+      console.warn("[PII-LCC Server] Upgrade socket error:", err);
+    });
+
     const url = request.url || "";
     if (url.startsWith("/ws-sync")) {
       wss.handleUpgrade(request, socket, head, (ws) => {

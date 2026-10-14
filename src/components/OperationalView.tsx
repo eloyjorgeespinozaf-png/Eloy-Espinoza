@@ -1178,7 +1178,7 @@ ${recommendedAction}
                           </button>
                         </div>
                         <div className="space-y-1 max-h-[100px] overflow-y-auto pr-1">
-                          {selectedG2.evaluacion.ideasFuerza.map((idea, idx) => {
+                          {(selectedG2.evaluacion?.ideasFuerza || []).map((idea, idx) => {
                             const isChecked = selectedIdeas.includes(idea);
                             return (
                               <div
@@ -1517,7 +1517,7 @@ ${recommendedAction}
                     <div>
                       <span className="text-[9px] text-[#64748b] uppercase font-bold block mb-1">Rutas Conocidas:</span>
                       <div className="flex flex-wrap gap-1">
-                        {activeClanDetails.knownRoutes.map((r, i) => (
+                        {(activeClanDetails.knownRoutes || []).map((r, i) => (
                           <span key={i} className="bg-[#0b0f19] text-[#cbd5e1] text-[9px] px-1.5 py-0.5 rounded border border-[#1e2738]">
                             {r}
                           </span>
@@ -1535,7 +1535,7 @@ ${recommendedAction}
                     <div>
                       <span className="text-[9px] text-[#64748b] uppercase font-bold block mb-1">Puntos Calientes:</span>
                       <div className="flex flex-wrap gap-1">
-                        {activeClanDetails.recentHotspots.map((hs, i) => (
+                        {(activeClanDetails.recentHotspots || []).map((hs, i) => (
                           <span key={i} className="text-[9px] text-[#38bdf8] flex items-center gap-1 font-bold">
                             ● {hs}
                           </span>

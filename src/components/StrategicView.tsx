@@ -446,7 +446,7 @@ export default function StrategicView({
                 })()}
 
                 {/* Draw active tactical units as moving triangles */}
-                {tacticalUnits.map((unit, idx) => {
+                {(tacticalUnits || []).map((unit, idx) => {
                   const { x, y } = getUnitMapPosition(unit.coordinates, idx);
                   return (
                     <g 
@@ -574,7 +574,7 @@ export default function StrategicView({
               </button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {tacticalUnits.slice(0, 4).map(u => (
+              {(tacticalUnits || []).slice(0, 4).map(u => (
                 <div key={u.id} className="bg-[#070b14] p-2 rounded border border-white/5 flex items-center justify-between">
                   <div className="truncate mr-2">
                     <span className="text-white font-bold block truncate">{u.name}</span>
@@ -632,7 +632,7 @@ export default function StrategicView({
                     className="w-full bg-[#111] text-[#e0e0e0] border border-[#222] rounded px-3 py-2 text-xs font-mono focus:outline-none focus:border-[#3b82f6]"
                   >
                     <option value="">-- Seleccionar Reporte Validado --</option>
-                    {approvedIntel.map(intel => (
+                    {(approvedIntel || []).map(intel => (
                       <option key={intel.id} value={intel.id}>
                         {intel.title} ({intel.targetClan})
                       </option>
@@ -793,7 +793,7 @@ export default function StrategicView({
                     className="w-full bg-[#111] text-[#e0e0e0] border border-[#222] rounded px-3 py-2 text-xs font-mono focus:outline-none focus:border-[#3b82f6]"
                   >
                     <option value="">-- Unidad --</option>
-                    {tacticalUnits.map(unit => (
+                    {(tacticalUnits || []).map(unit => (
                       <option key={unit.id} value={unit.name}>
                         {unit.name} ({unit.status})
                       </option>
@@ -859,13 +859,13 @@ export default function StrategicView({
               </span>
             </h3>
 
-            {activeOrders.length === 0 ? (
+            {(!activeOrders || activeOrders.length === 0) ? (
               <div className="text-center py-6 text-[#666] text-xs font-mono">
                 No hay órdenes de operación activas circulando en la red.
               </div>
             ) : (
               <div className="space-y-4 max-h-[300px] overflow-y-auto pr-1">
-                {activeOrders.map(order => (
+                {(activeOrders || []).map(order => (
                   <div key={order.id} className="bg-[#111] border border-[#222] p-3 rounded space-y-2 relative text-left">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-mono font-bold text-[#3b82f6]">

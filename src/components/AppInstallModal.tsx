@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, Component, ErrorInfo, ReactNode } from 'react';
 import { 
   Download, 
   Monitor, 
@@ -16,10 +16,19 @@ import {
   Info,
   Laptop,
   CheckCircle2,
-  X
+  X,
+  AlertTriangle
 } from 'lucide-react';
-import { usePWAInstall } from '../hooks/usePWAInstall';
 import { playSyntheticBeep, playChime } from '../utils/audio';
+
+interface BeforeInstallPromptEvent extends Event {
+  readonly platforms: string[];
+  readonly userChoice: Promise<{
+    outcome: 'accepted' | 'dismissed';
+    platform: string;
+  }>;
+  prompt(): Promise<void>;
+}
 
 interface AppInstallModalProps {
   isOpen: boolean;
@@ -28,18 +37,126 @@ interface AppInstallModalProps {
   onDownloadMobilePackage?: () => void;
 }
 
-export const AppInstallModal: React.FC<AppInstallModalProps> = ({
+class ModalErrorBoundary extends Component<{ children: ReactNode; onClose: () => void }, { hasError: boolean }> {
+  constructor(props: { children: ReactNode; onClose: () => void }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(_: Error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.warn('[AppInstallModal] Caught render error, rendering fallback UI:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#0b1017] border border-amber-500/50 rounded-2xl p-6 max-w-md w-full text-zinc-200 font-mono text-xs space-y-4">
+            <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+              <AlertTriangle className="w-5 h-5" />
+              <span>Instalación PWA - Terminal Táctico</span>
+            </div>
+            <p className="text-zinc-400 font-sans">
+              Para instalar la app en su dispositivo, use la opción &quot;Añadir a pantalla de inicio&quot; o &quot;Instalar aplicación&quot; en el menú de su navegador (Chrome, Edge o Safari).
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={this.props.onClose}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded font-bold cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const AppInstallModalInner: React.FC<AppInstallModalProps> = ({
   isOpen,
   onClose,
   onDownloadDesktopPackage,
   onDownloadMobilePackage
 }) => {
-  const { isInstallable, isInstalled, isIOS, isAndroid, isMobile, triggerInstall } = usePWAInstall();
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isAndroid, setIsAndroid] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [isWindows, setIsWindows] = useState(false);
   const [activeTab, setActiveTab] = useState<'PC' | 'MOBILE' | 'PACKAGES'>('PC');
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [installSuccessNotice, setInstallSuccessNotice] = useState(false);
+  const isInstallable = Boolean(deferredPrompt);
 
-  if (!isOpen) return null;
+  useEffect(() => {
+    try {
+      const isStandaloneMedia = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+      const isNavStandalone = typeof window !== 'undefined' && (window.navigator as any)?.standalone === true;
+      const isInstalledAttr = typeof document !== 'undefined' && (document.referrer.includes('android-app://') || window.location.search.includes('standalone=true'));
+      setIsInstalled(Boolean(isStandaloneMedia || isNavStandalone || isInstalledAttr));
+
+      const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '').toLowerCase() : '';
+      const isIOSDevice = /iphone|ipad|ipod/.test(ua) || (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const isAndroidDevice = /android/.test(ua);
+      const isMobileDevice = isIOSDevice || isAndroidDevice || /mobile|tablet|silk|blackberry|iemobile/.test(ua);
+      const isWin = /windows|win32|win64/.test(ua);
+
+      setIsIOS(isIOSDevice);
+      setIsAndroid(isAndroidDevice);
+      setIsMobile(isMobileDevice);
+      setIsWindows(isWin);
+
+      if (isMobileDevice || isAndroidDevice || isIOSDevice) {
+        setActiveTab('MOBILE');
+      }
+
+      const handleBeforeInstall = (e: Event) => {
+        e.preventDefault();
+        setDeferredPrompt(e as BeforeInstallPromptEvent);
+      };
+
+      const handleInstalled = () => {
+        setIsInstalled(true);
+        setDeferredPrompt(null);
+      };
+
+      window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.addEventListener('appinstalled', handleInstalled);
+
+      return () => {
+        window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+        window.removeEventListener('appinstalled', handleInstalled);
+      };
+    } catch (e) {
+      console.warn('[AppInstallModal] Detection initialization warning:', e);
+    }
+  }, []);
+
+  const triggerInstall = useCallback(async (): Promise<boolean> => {
+    if (!deferredPrompt) return false;
+    try {
+      await deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        setIsInstalled(true);
+        setDeferredPrompt(null);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.warn('[PWA] prompt error:', err);
+      return false;
+    }
+  }, [deferredPrompt]);
+
 
   const currentAppUrl = typeof window !== 'undefined' ? window.location.href : '/';
   const currentAppOrigin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -646,3 +763,14 @@ Categories=Office;Security;System;
     </div>
   );
 };
+
+export const AppInstallModal: React.FC<AppInstallModalProps> = (props) => {
+  if (!props.isOpen) return null;
+  return (
+    <ModalErrorBoundary onClose={props.onClose}>
+      <AppInstallModalInner {...props} />
+    </ModalErrorBoundary>
+  );
+};
+
+export default AppInstallModal;

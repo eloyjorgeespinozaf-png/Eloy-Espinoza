@@ -46,15 +46,27 @@ import {
 } from './services/ModuleBackgroundService';
 import { AppInstallModal } from './components/AppInstallModal';
 import { TacticalUpdateManager } from './components/TacticalUpdateManager';
+import { AI_STUDIO_BUILD } from './buildVersion';
 import GoogleEarthPatrolModal from './components/GoogleEarthPatrolModal';
 import UserManagementModal from './components/UserManagementModal';
 import ClanManagementModal from './components/ClanManagementModal';
 import DataStorageManagerModal from './components/DataStorageManagerModal';
 import SupabaseSyncModal from './components/SupabaseSyncModal';
+import { MultiDeviceSyncModal } from './components/MultiDeviceSyncModal';
 import { requestDeviceLocation, getCachedDeviceLocation, detectDevicePlatform } from './utils/deviceLocation';
 import { generateDeviceRealLocationKml, downloadKmlFile } from './utils/geo';
+import { 
+  getOrCreateDeviceId, 
+  getDeviceName, 
+  detectDevicePlatform as detectSyncPlatform, 
+  getActiveSyncHubUrl, 
+  getSyncWebSocketUrl, 
+  broadcastLocalTabSync, 
+  subscribeToLocalTabSync, 
+  normalizeCrossVersionState 
+} from './services/MultiDeviceSyncService';
 
-import { Shield, Radio, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2, Smartphone, Laptop, Image as ImageIcon, Palette, Globe, Crown, Database, HardDrive, Users, Save, Cloud } from 'lucide-react';
+import { Shield, Radio, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2, Smartphone, Laptop, Image as ImageIcon, Palette, Globe, Crown, Database, HardDrive, Users, Save, Cloud, X } from 'lucide-react';
 import { useAuth, PRESET_USERS } from './context/AuthContext';
 import { safeStorage } from './utils/storage';
 import { 
@@ -101,7 +113,10 @@ export default function App() {
   const [expedientes, setExpedientes] = useState<G2RegistryRecord[]>(() => {
     try {
       const saved = safeStorage.getItem('pii_lcc_expedientes');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
     } catch (e) {
       console.warn('Failed to load saved expedientes:', e);
     }
@@ -158,6 +173,7 @@ export default function App() {
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'OPERATIONS' | 'ARCHITECTURE' | 'P2P_MESH' | 'CODE_VIEWER'>('OPERATIONS');
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [showInstallModal, setShowInstallModal] = useState(false);
+  const [showLogoutConfirmModal, setShowLogoutConfirmModal] = useState(false);
   
   // Per-Module Backgrounds State (IndexedDB + Server Synced)
   const [moduleBackgrounds, setModuleBackgrounds] = useState<ModuleBackgroundsMap>(createDefaultModuleBackgrounds);
@@ -170,6 +186,9 @@ export default function App() {
   const [showClanManagementModal, setShowClanManagementModal] = useState<boolean>(false);
   const [showDataStorageModal, setShowDataStorageModal] = useState<boolean>(false);
   const [showSupabaseModal, setShowSupabaseModal] = useState<boolean>(false);
+  const [showMultiDeviceSyncModal, setShowMultiDeviceSyncModal] = useState<boolean>(false);
+  const [showCodeViewerModal, setShowCodeViewerModal] = useState<boolean>(false);
+  const [syncedDevicesCount, setSyncedDevicesCount] = useState<number>(1);
 
   // Clan persistence and modification handlers
   const handleSaveClan = useCallback((clanToSave: Clan) => {
@@ -185,6 +204,7 @@ export default function App() {
       safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(updated));
       return updated;
     });
+    sendWsMessageRef.current?.('SAVE_CLAN', { clan: clanToSave });
   }, []);
 
   const handleDeleteClan = useCallback((clanId: string) => {
@@ -193,11 +213,13 @@ export default function App() {
       safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(updated));
       return updated;
     });
+    sendWsMessageRef.current?.('DELETE_CLAN', { clanId });
   }, []);
 
   const handleBatchImportClans = useCallback((importedClans: Clan[]) => {
     setClans(importedClans);
     safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(importedClans));
+    sendWsMessageRef.current?.('BATCH_IMPORT_CLANS', { clans: importedClans });
   }, []);
 
   const handleRestoreAllData = useCallback((data: {
@@ -233,9 +255,10 @@ export default function App() {
       safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(data.tacticalUnits));
     }
 
-    // Sync restored state with server
+    // Sync restored state with server and all connected terminals
     try {
-      fetch('/api/backup/import', {
+      const hubUrl = getActiveSyncHubUrl();
+      fetch(`${hubUrl}/api/backup/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -244,12 +267,16 @@ export default function App() {
             clans: data.clans,
             actionableIntel: data.actionableIntel,
             activeOrders: data.activeOrders,
-            tacticalUnits: data.tacticalUnits
+            tacticalUnits: data.tacticalUnits,
+            expedientes: data.expedientes
           }
         })
       }).catch(() => {});
     } catch {
       // ignore
+    }
+    if (data.expedientes) {
+      sendWsMessageRef.current?.('RESTORE_EXPEDIENTES', { expedientes: data.expedientes });
     }
   }, []);
 
@@ -328,9 +355,9 @@ export default function App() {
   }, [rawAlerts, notificationsSoundEnabled]);
 
   // Automatic OTA update tracking
-  const APP_VERSION = 'v2.4.0-CAD';
+  const APP_VERSION = AI_STUDIO_BUILD.version;
   const [appVersion, setAppVersion] = useState<string>(() => {
-    return safeLocalStorage.getItem('PII_LCC_UPDATED_VERSION') || 'v2.4.0-CAD';
+    return safeLocalStorage.getItem('PII_LCC_UPDATED_VERSION') || AI_STUDIO_BUILD.version;
   });
   const [updateInProgress, setUpdateInProgress] = useState<boolean>(false);
   const [updateProgress, setUpdateProgress] = useState<number>(0);
@@ -338,6 +365,18 @@ export default function App() {
   const [updateChangelog, setUpdateChangelog] = useState<string>('');
   const [newVersionToInstall, setNewVersionToInstall] = useState<string>('');
   const [justUpdatedToast, setJustUpdatedToast] = useState<boolean>(false);
+  const [realtimeSyncToast, setRealtimeSyncToast] = useState<{ message: string; timestamp: number } | null>(null);
+
+  // Auto-dismiss realtime sync toast after 4s
+  useEffect(() => {
+    if (realtimeSyncToast) {
+      const timer = setTimeout(() => {
+        setRealtimeSyncToast(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [realtimeSyncToast]);
+
 
   // Trigger automated update HUD overlay
   const triggerAutoUpdate = (nextVersion: string, changelog: string) => {
@@ -399,30 +438,44 @@ export default function App() {
   const socketRef = useRef<WebSocket | null>(null);
   const sentLogsRef = useRef<Set<string>>(new Set());
 
-  // Shared helper to synchronize central state with React states
+  // Shared helper to synchronize central state with React states across all versions
   const handleStateSync = useCallback((state: any) => {
     if (!state) return;
-    const { version: serverVersion, rawAlerts: incomingAlerts, clans: incomingClans, actionableIntel: incomingIntel, activeOrders: incomingOrders, tacticalUnits: incomingUnits, auditLogs: incomingLogs, changelog } = state;
+    const normalized = normalizeCrossVersionState(state);
+    const { 
+      version: serverVersion, 
+      rawAlerts: incomingAlerts, 
+      clans: incomingClans, 
+      actionableIntel: incomingIntel, 
+      activeOrders: incomingOrders, 
+      tacticalUnits: incomingUnits, 
+      auditLogs: incomingLogs,
+      expedientes: incomingExpedientes
+    } = normalized;
     
-    if (incomingAlerts) {
+    if (Array.isArray(incomingAlerts)) {
       setRawAlerts(incomingAlerts);
       safeLocalStorage.setItem('PII_LCC_RAW_ALERTS', JSON.stringify(incomingAlerts));
     }
-    if (incomingClans) {
+    if (Array.isArray(incomingClans)) {
       setClans(incomingClans);
       safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(incomingClans));
     }
-    if (incomingIntel) {
+    if (Array.isArray(incomingIntel)) {
       setActionableIntel(incomingIntel);
       safeLocalStorage.setItem('PII_LCC_ACTIONABLE_INTEL', JSON.stringify(incomingIntel));
     }
-    if (incomingOrders) {
+    if (Array.isArray(incomingOrders)) {
       setActiveOrders(incomingOrders);
       safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(incomingOrders));
     }
-    if (incomingUnits) {
+    if (Array.isArray(incomingUnits)) {
       setTacticalUnits(incomingUnits);
       safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(incomingUnits));
+    }
+    if (Array.isArray(incomingExpedientes)) {
+      setExpedientes(incomingExpedientes);
+      safeStorage.setItem('pii_lcc_expedientes', JSON.stringify(incomingExpedientes));
     }
 
     if (state.moduleBackgrounds) {
@@ -434,6 +487,11 @@ export default function App() {
 
     if (state.fullDashboardBackground) {
       window.dispatchEvent(new CustomEvent('full-dashboard-bg-update', { detail: { settings: state.fullDashboardBackground } }));
+    }
+
+    if (state.syncedDevices && Array.isArray(state.syncedDevices)) {
+      window.dispatchEvent(new CustomEvent('synced-devices-update', { detail: { devices: state.syncedDevices } }));
+      setSyncedDevicesCount(state.syncedDevices.filter((d: any) => d.isOnline).length);
     }
 
     if (incomingLogs && incomingLogs.length > 0) {
@@ -453,40 +511,149 @@ export default function App() {
       setAppVersion(serverVersion);
       safeLocalStorage.setItem('PII_LCC_UPDATED_VERSION', serverVersion);
     }
-  }, []);
+
+    // Broadcast update to other local tabs/installed PWA windows on this device
+    broadcastLocalTabSync('LOCAL_TAB_SYNC', normalized);
+  }, [appVersion]);
 
   const handleStateSyncRef = useRef(handleStateSync);
   useEffect(() => {
     handleStateSyncRef.current = handleStateSync;
   }, [handleStateSync]);
 
-  // Safe helper to send messages via WebSocket or fallback HTTP POST
+  // Subscribe to local tab / cross-window broadcast sync
+  useEffect(() => {
+    const unsubscribe = subscribeToLocalTabSync((type, payload) => {
+      if (type === 'LOCAL_TAB_SYNC' && payload) {
+        handleStateSyncRef.current(payload);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  // Queue to buffer actions when offline or during transient link disruptions
+  const offlineActionQueueRef = useRef<{ type: string; payload: any }[]>([]);
+  const sendWsMessageRef = useRef<((type: string, payload: any) => Promise<void>) | null>(null);
+
+  const drainActionQueue = useCallback(() => {
+    if (offlineActionQueueRef.current.length === 0) return;
+    const queuedItems = [...offlineActionQueueRef.current];
+    offlineActionQueueRef.current = [];
+    console.log(`[PII-LCC Network] Link active. Transmitting ${queuedItems.length} deferred tactical actions.`);
+    queuedItems.forEach(({ type, payload }) => {
+      sendWsMessageRef.current?.(type, payload);
+    });
+  }, []);
+
+  // Resilient helper to dispatch tactical messages via WebSocket or fallback HTTP POST across all devices
   const sendWsMessage = useCallback(async (type: string, payload: any) => {
+    const devId = getOrCreateDeviceId();
+    const devName = getDeviceName();
+    const devPlatform = detectSyncPlatform();
+
+    // 1. Direct WebSocket transmission when connected
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ type, payload }));
-    } else {
-      console.warn(`[PII-LCC Network] WebSocket offline. Routing action '${type}' via secure HTTP Sync Fallback.`);
       try {
-        const response = await fetch('/api/sync', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            action: { type, payload }
-          })
-        });
-        if (response.ok) {
-          const state = await response.json();
-          handleStateSyncRef.current(state);
-        } else {
-          console.error('[PII-LCC Network] HTTP Sync Fallback failed:', response.statusText);
-        }
+        socketRef.current.send(JSON.stringify({ 
+          type, 
+          payload,
+          deviceInfo: {
+            deviceId: devId,
+            deviceName: devName,
+            platform: devPlatform,
+            installedVersion: appVersion
+          }
+        }));
+        return;
       } catch (err) {
-        console.error('[PII-LCC Network] Error during HTTP Sync Fallback:', err);
+        console.warn(`[PII-LCC Network] WebSocket send failed, falling back to HTTP Sync:`, err);
       }
     }
-  }, []);
+
+    // 2. If WebSocket is currently negotiating (CONNECTING), wait briefly before falling back
+    const activeSocket = socketRef.current;
+    if (activeSocket && activeSocket.readyState === WebSocket.CONNECTING) {
+      try {
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(resolve, 800);
+          const interval = setInterval(() => {
+            const currentStatus = (socketRef.current as any)?.readyState;
+            if (currentStatus === WebSocket.OPEN || currentStatus === WebSocket.CLOSED) {
+              clearInterval(interval);
+              clearTimeout(timeout);
+              resolve();
+            }
+          }, 50);
+        });
+        if ((socketRef.current as any)?.readyState === WebSocket.OPEN) {
+          socketRef.current?.send(JSON.stringify({ 
+            type, 
+            payload,
+            deviceInfo: {
+              deviceId: devId,
+              deviceName: devName,
+              platform: devPlatform,
+              installedVersion: appVersion
+            }
+          }));
+          return;
+        }
+      } catch {
+        // Continue to fallback
+      }
+    }
+
+    // 3. If terminal is operating offline, queue action locally without throwing
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      console.warn(`[PII-LCC Network] Terminal in tactical offline mode. Action '${type}' buffered.`);
+      offlineActionQueueRef.current.push({ type, payload });
+      return;
+    }
+
+    // 4. Secure HTTP Sync Fallback with timeout & automatic queueing on transient failures
+    try {
+      const hubUrl = getActiveSyncHubUrl();
+      const syncEndpoint = `${hubUrl}/api/sync`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 7000);
+      const response = await fetch(syncEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Device-Id': devId,
+          'X-Device-Name': encodeURIComponent(devName),
+          'X-App-Version': appVersion,
+          'X-Platform': devPlatform
+        },
+        body: JSON.stringify({
+          action: { type, payload },
+          deviceInfo: {
+            deviceId: devId,
+            deviceName: devName,
+            platform: devPlatform,
+            installedVersion: appVersion
+          }
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const state = await response.json();
+        handleStateSyncRef.current(state);
+      } else {
+        console.warn('[PII-LCC Network] HTTP Sync Fallback status non-200, action queued for retry:', response.status);
+        offlineActionQueueRef.current.push({ type, payload });
+      }
+    } catch (err: any) {
+      console.warn('[PII-LCC Network] HTTP Sync Fallback deferred (network unavailable, action queued):', err?.message || err);
+      offlineActionQueueRef.current.push({ type, payload });
+    }
+  }, [appVersion]);
+
+  useEffect(() => {
+    sendWsMessageRef.current = sendWsMessage;
+  }, [sendWsMessage]);
 
   // Real-time synchronization connection hook
   useEffect(() => {
@@ -497,15 +664,30 @@ export default function App() {
     const connect = () => {
       if (isCleanedUp) return;
       try {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws-sync`;
-        
+        const wsUrl = getSyncWebSocketUrl();
         console.log(`[PII-LCC Network] Connecting to sync node: ${wsUrl}`);
         socket = new WebSocket(wsUrl);
         socketRef.current = socket;
 
         socket.onopen = () => {
           console.log('[PII-LCC Network] Link established with central node.');
+          // Register this device with the server hub
+          try {
+            socket?.send(JSON.stringify({
+              type: 'REGISTER_DEVICE',
+              payload: {
+                deviceId: getOrCreateDeviceId(),
+                deviceName: getDeviceName(),
+                installedVersion: appVersion,
+                platform: detectSyncPlatform(),
+                role: user ? user.role : 'ROL_CEO',
+                userName: user?.name
+              }
+            }));
+          } catch (e) {
+            console.warn('[PII-LCC Network] Error sending REGISTER_DEVICE:', e);
+          }
+          drainActionQueue();
         };
 
         socket.onmessage = (event) => {
@@ -515,6 +697,12 @@ export default function App() {
 
             if (type && type.startsWith('P2P_')) {
               window.dispatchEvent(new CustomEvent('p2p-message', { detail: { type, payload } }));
+              return;
+            }
+
+            if (type === 'SYNCED_DEVICES_UPDATE' && payload?.devices) {
+              window.dispatchEvent(new CustomEvent('synced-devices-update', { detail: payload }));
+              setSyncedDevicesCount(payload.devices.filter((d: any) => d.isOnline).length);
               return;
             }
 
@@ -539,15 +727,62 @@ export default function App() {
               window.dispatchEvent(new CustomEvent('system-upgrade-alert', { detail: payload }));
             }
 
+            if (type === 'TACTICAL_COMMS_BROADCAST' && payload?.commsMessage) {
+              window.dispatchEvent(new CustomEvent('tactical-comms-message', { detail: payload.commsMessage }));
+              playSyntheticBeep(880, 0.08);
+              setRealtimeSyncToast({
+                message: `Transmisión táctica recibida: ${payload.commsMessage.senderName || 'Terminal'} - "${payload.commsMessage.text?.slice(0, 30) || 'Mensaje'}"`,
+                timestamp: Date.now()
+              });
+              return;
+            }
+
+            if (type === 'TACTICAL_ALARM_ALERT' && payload?.emergency) {
+              playCyberAlert();
+              setRealtimeSyncToast({
+                message: `¡ALERTA DE EMERGENCIA EMITIDA POR TERMINAL!: ${payload.emergency.title || 'Prioridad 1'}`,
+                timestamp: Date.now()
+              });
+              return;
+            }
+
+            if (type === 'STATE_UPDATE') {
+              playSyntheticBeep(1200, 0.04);
+              setRealtimeSyncToast({
+                message: 'Información táctica recibida y sincronizada en tiempo real desde terminal remota.',
+                timestamp: Date.now()
+              });
+            }
+
             if (type === 'INIT' || type === 'STATE_UPDATE' || type === 'SYSTEM_UPGRADE_ALERT') {
               handleStateSyncRef.current(payload);
             }
           } catch (err) {
-            console.error('[PII-LCC Network] Error parsing incoming sync package:', err);
+            console.warn('[PII-LCC Network] Warning parsing incoming sync package:', err);
           }
         };
 
+        // Periodic heartbeat
+        const heartbeatInterval = setInterval(() => {
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            try {
+              socket.send(JSON.stringify({
+                type: 'DEVICE_HEARTBEAT',
+                payload: {
+                  deviceId: getOrCreateDeviceId(),
+                  deviceName: getDeviceName(),
+                  installedVersion: appVersion,
+                  platform: detectSyncPlatform(),
+                  role: user ? user.role : 'ROL_CEO',
+                  userName: user?.name
+                }
+              }));
+            } catch {}
+          }
+        }, 15000);
+
         socket.onclose = () => {
+          clearInterval(heartbeatInterval);
           if (isCleanedUp) return;
           if (reconnectTimeout) clearTimeout(reconnectTimeout);
           console.warn('[PII-LCC Network] Connection interrupted. Re-establishing secure link in 3s...');
@@ -558,7 +793,7 @@ export default function App() {
           console.warn('[PII-LCC Network] WebSocket link unreachable. Operating in secure HTTP Sync Fallback mode.', err);
         };
       } catch (wsErr) {
-        console.error('[PII-LCC Network] Could not initialize WebSocket constructor on this device:', wsErr);
+        console.warn('[PII-LCC Network] Could not initialize WebSocket constructor on this device:', wsErr);
         if (!isCleanedUp) {
           if (reconnectTimeout) clearTimeout(reconnectTimeout);
           reconnectTimeout = setTimeout(connect, 5000);
@@ -568,8 +803,19 @@ export default function App() {
 
     connect();
 
+    const handleOnline = () => {
+      console.log('[PII-LCC Network] Device online event detected. Restoring links and flushing queue.');
+      if (!socket || socket.readyState === WebSocket.CLOSED) {
+        connect();
+      } else {
+        drainActionQueue();
+      }
+    };
+    window.addEventListener('online', handleOnline);
+
     return () => {
       isCleanedUp = true;
+      window.removeEventListener('online', handleOnline);
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (socket) {
         socket.onclose = null;
@@ -577,39 +823,53 @@ export default function App() {
         socket.close();
       }
     };
-  }, []);
+  }, [drainActionQueue, appVersion, user]);
 
-  // HTTP fallback polling loop
+  // HTTP fallback polling loop with backoff and link prioritization
   useEffect(() => {
     let pollInterval: any;
 
     const performPoll = async () => {
-      if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-        try {
-          const response = await fetch('/api/sync', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({}) // Empty body fetches current state
-          });
-          if (response.ok) {
-            const state = await response.json();
-            handleStateSyncRef.current(state);
-          }
-        } catch (err) {
-          console.warn('[PII-LCC Network] Error polling central state:', err);
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      if (socketRef.current && (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      try {
+        const hubUrl = getActiveSyncHubUrl();
+        const syncEndpoint = `${hubUrl}/api/sync`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const response = await fetch(syncEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Device-Id': getOrCreateDeviceId(),
+            'X-Device-Name': encodeURIComponent(getDeviceName()),
+            'X-App-Version': appVersion,
+            'X-Platform': detectSyncPlatform()
+          },
+          body: JSON.stringify({}),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (response.ok) {
+          const state = await response.json();
+          handleStateSyncRef.current(state);
         }
+      } catch (err) {
+        console.warn('[PII-LCC Network] Notice: Central node polling deferred:', err);
       }
     };
 
-    performPoll();
-    pollInterval = setInterval(performPoll, 3000);
+    const initialTimer = setTimeout(performPoll, 3500);
+    pollInterval = setInterval(performPoll, 6000);
 
     return () => {
+      clearTimeout(initialTimer);
       clearInterval(pollInterval);
     };
-  }, []);
+  }, [appVersion]);
 
   // Synchronize locally generated audit logs with other network nodes
   useEffect(() => {
@@ -785,7 +1045,7 @@ export default function App() {
         }
       }
     } catch (err) {
-      console.error('[Clock Sync] Failed to fetch actual time from server:', err);
+      console.warn('[Clock Sync] Server clock unavailable (using local device clock):', err);
     } finally {
       setTimeout(() => setIsUpdatingTime(false), 600);
     }
@@ -1042,6 +1302,32 @@ export default function App() {
       coordinates: newExp.especificoGrafico?.coordenadasCuadricula || '19°13\'10"S 68°35\'50"W'
     };
     setAuditLogs(prev => [logEntry, ...prev]);
+    sendWsMessage('SAVE_EXPEDIENTE', { expediente: newExp });
+    sendWsMessage('LOG_AUDIT_ACTION', { logEntry });
+  };
+
+  const handleDeleteExpediente = (expedienteId: string) => {
+    setExpedientes(prev => {
+      const updated = prev.filter(e => e.id !== expedienteId);
+      try {
+        safeStorage.setItem('pii_lcc_expedientes', JSON.stringify(updated));
+      } catch (e) {
+        console.warn('Failed to persist expedientes:', e);
+      }
+      return updated;
+    });
+
+    const logEntry: AuditLogEntry = {
+      id: `log-exp-del-${Date.now()}`,
+      userId: user ? user.name : 'ANALISTA LCC',
+      role: currentRole,
+      action: `Expediente ${expedienteId} archivado/retirado del registro activo`,
+      timestamp: new Date().toISOString(),
+      coordinates: '19°13\'10"S 68°35\'50"W'
+    };
+    setAuditLogs(prev => [logEntry, ...prev]);
+    sendWsMessage('DELETE_EXPEDIENTE', { expedienteId });
+    sendWsMessage('LOG_AUDIT_ACTION', { logEntry });
   };
 
   const handleSendFieldReport = (report: RawAlert) => {
@@ -1399,6 +1685,8 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
         onResetModuleBackground={handleResetModuleBackground}
         onApplyToAllModules={handleApplyToAllModules}
         onBatchImportModules={handleBatchImportBackgrounds}
+        syncedDevicesCount={syncedDevicesCount}
+        onOpenSyncModal={() => setShowMultiDeviceSyncModal(true)}
       />
     );
   }
@@ -1758,227 +2046,272 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                 {(currentRole === 'ROL_TERRENO' || currentRole === 'ROL_PATRULLA') && 'ÓRGANO DE BÚSQUEDA EN TERRENO'}
               </span>
             </div>
-            {isAuthenticated && (
-              <div className="flex items-center gap-1.5 relative">
-                {/* Admin-Only User Management Button (CEO-LCC Mando) */}
-                {(currentRole === 'ROL_CEO' || user?.isAdmin) && (
+          </div>
+
+          {/* System Tactical Actions Toolbar (Fully Accessible on Mobile & Desktop) */}
+          {isAuthenticated && (
+            <div className="flex items-center flex-wrap gap-2 relative">
+              {/* Admin-Only User Management Button (CEO-LCC Mando) */}
+              {(currentRole === 'ROL_CEO' || user?.isAdmin) && (
+                <button
+                  onClick={() => {
+                    setShowUserManagementModal(true);
+                    playCyberClick('laser', 0.08);
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-950/70 hover:bg-blue-900 text-blue-300 hover:text-white border border-blue-500/70 shadow-[0_0_12px_rgba(59,130,246,0.3)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap active:scale-95"
+                  title="Módulo de Administración de Usuarios, Órganos de Búsqueda y Claves Criptográficas (CEO-LCC Mando)"
+                >
+                  <Crown className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="hidden sm:inline">Gestión Usuarios</span>
+                  <span className="sm:hidden">Usuarios</span>
+                  <span className="text-[9px] bg-blue-600 text-white px-1 py-0.2 rounded font-black">ADMIN</span>
+                </button>
+              )}
+
+              {/* Clan Intelligence Database & Expansion Button (Accessible to all modules) */}
+              <button
+                onClick={() => {
+                  setShowClanManagementModal(true);
+                  playCyberClick('laser', 0.08);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700 hover:border-emerald-500/60 transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap active:scale-95"
+                title="Base de Datos e Incremento de Clanes y Rutas Ilícitas"
+              >
+                <Database className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden lg:inline">Clanes ({clans.length})</span>
+                <span className="lg:hidden">Clanes</span>
+              </button>
+
+              {/* Centralized Data Storage & Backup Persistence Button */}
+              <button
+                onClick={() => {
+                  setShowDataStorageModal(true);
+                  playCyberClick('laser', 0.08);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 hover:text-white border border-emerald-600/70 shadow-[0_0_10px_rgba(16,185,129,0.2)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap active:scale-95"
+                title="Almacenamiento, Respaldo y Persistencia Integral de Datos Generados en PII-LCC"
+              >
+                <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden md:inline">Almacenamiento</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping hidden sm:inline-block" />
+              </button>
+
+              {/* Supabase Cloud Integration Button */}
+              <button
+                onClick={() => {
+                  setShowSupabaseModal(true);
+                  playCyberClick('laser', 0.08);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 hover:text-white border border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.3)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap active:scale-95"
+                title="Integración y Sincronización con Base de Datos Supabase (PostgreSQL Cloud)"
+              >
+                <Cloud className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                <span className="hidden xl:inline">Supabase BD</span>
+                <span className="xl:hidden">Supabase</span>
+                <span className="text-[9px] bg-emerald-500/30 text-emerald-300 px-1 py-0.2 rounded border border-emerald-500/40 font-mono">
+                  CLOUD
+                </span>
+              </button>
+
+              {/* Multi-Device & Cross-Version Fleet Synchronization Button */}
+              <button
+                type="button"
+                id="btn-header-sync-fleet"
+                onClick={() => {
+                  setShowMultiDeviceSyncModal(true);
+                  playCyberClick('laser', 0.08);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-950/70 hover:bg-cyan-900 text-cyan-300 hover:text-white border border-cyan-500/70 shadow-[0_0_12px_rgba(6,182,212,0.3)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap active:scale-95"
+                title="Sincronización en Tiempo Real entre Todos los Dispositivos y Versiones Instaladas"
+              >
+                <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                <span className="hidden lg:inline">Sincronizar Dispositivos</span>
+                <span className="lg:hidden">Sync</span>
+                <span className="text-[9px] bg-cyan-500/20 text-cyan-300 px-1.5 py-0.2 rounded font-bold border border-cyan-500/30 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                  {syncedDevicesCount}
+                </span>
+              </button>
+
+              {/* Copy Source Code Global Button */}
+              <button
+                type="button"
+                id="btn-header-copy-code"
+                onClick={() => {
+                  setShowCodeViewerModal(true);
+                  playCyberClick('laser', 0.08);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-950/70 hover:bg-blue-900 text-blue-300 hover:text-white border border-blue-500/70 shadow-[0_0_12px_rgba(59,130,246,0.3)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap active:scale-95"
+                title="Ver y Copiar el Código Fuente Completo del Sistema"
+              >
+                <Code className="w-3.5 h-3.5 text-blue-400" />
+                <span className="hidden lg:inline">Copiar Código Fuente</span>
+                <span className="lg:hidden">Código</span>
+              </button>
+
+              <button
+                onClick={() => toggleInstalledDevice(!isInstalledDevice)}
+                className={`flex items-center justify-center p-2 rounded border transition-all cursor-pointer ${
+                  isInstalledDevice 
+                    ? 'bg-emerald-950/20 text-emerald-400 border-emerald-800/60 shadow-[0_0_10px_rgba(16,185,129,0.15)]' 
+                    : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300 border-zinc-800'
+                }`}
+                title={isInstalledDevice ? "Terminal Móvil/Instalado: Enlace de Acceso Total Activado" : "Habilitar Acceso Completo Móvil/Instalado"}
+              >
+                <Shield className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Primary Install App Button (PC & Mobile PWA) - Fully visible on cellphones and desktops */}
+              <button
+                type="button"
+                id="btn-header-install-app"
+                onClick={() => {
+                  setShowInstallModal(true);
+                  playSyntheticBeep(700, 0.1);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 hover:text-white border border-emerald-500/80 shadow-[0_0_12px_rgba(16,185,129,0.3)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap active:scale-95"
+                title="Descargar e Instalar la Aplicación en PC y Celular (PWA Nativa)"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-emerald-400 sm:hidden animate-pulse" />
+                <Download className="w-3.5 h-3.5 animate-bounce text-emerald-400 hidden sm:inline" />
+                <span className="sm:hidden">Instalar App</span>
+                <span className="hidden sm:inline">Instalar App (PC / Celular)</span>
+              </button>
+
+              <button
+                onClick={() => setShowDownloadMenu(!showDownloadMenu)}
+                className={`flex items-center justify-center p-2 rounded border transition-colors cursor-pointer ${
+                  showDownloadMenu 
+                    ? 'bg-zinc-800 text-white border-zinc-700' 
+                    : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-white border-zinc-800'
+                }`}
+                title="Descargar Datos y Reportes PII-LCC"
+              >
+                <Download className="w-3.5 h-3.5" />
+              </button>
+              {showDownloadMenu && (
+                <div className="absolute right-0 top-10 mt-1 w-64 bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl p-2 z-50 font-mono text-left">
+                  <div className="px-2 py-1.5 border-b border-zinc-900 text-[9px] text-zinc-500 font-bold uppercase tracking-wider">
+                    Descargas Disponibles (PII-LCC)
+                  </div>
                   <button
                     onClick={() => {
-                      setShowUserManagementModal(true);
-                      playCyberClick('laser', 0.08);
+                      setShowInstallModal(true);
+                      setShowDownloadMenu(false);
                     }}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-950/70 hover:bg-blue-900 text-blue-300 hover:text-white border border-blue-500/70 shadow-[0_0_12px_rgba(59,130,246,0.3)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap"
-                    title="Módulo de Administración de Usuarios, Órganos de Búsqueda y Claves Criptográficas (CEO-LCC Mando)"
+                    className="w-full text-left px-2 py-2 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 rounded flex items-center gap-2 transition-all cursor-pointer border border-emerald-700/60 mb-1 mt-1"
                   >
-                    <Crown className="w-3.5 h-3.5 text-blue-400" />
-                    <span className="hidden sm:inline">Gestión Usuarios</span>
-                    <span className="sm:hidden">Usuarios</span>
-                    <span className="text-[9px] bg-blue-600 text-white px-1 py-0.2 rounded font-black">ADMIN</span>
-                  </button>
-                )}
-
-                {/* Clan Intelligence Database & Expansion Button (Accessible to all modules) */}
-                <button
-                  onClick={() => {
-                    setShowClanManagementModal(true);
-                    playCyberClick('laser', 0.08);
-                  }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700 hover:border-emerald-500/60 transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap"
-                  title="Base de Datos e Incremento de Clanes y Rutas Ilícitas"
-                >
-                  <Database className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="hidden lg:inline">Clanes ({clans.length})</span>
-                  <span className="lg:hidden">Clanes</span>
-                </button>
-
-                {/* Centralized Data Storage & Backup Persistence Button */}
-                <button
-                  onClick={() => {
-                    setShowDataStorageModal(true);
-                    playCyberClick('laser', 0.08);
-                  }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 hover:text-white border border-emerald-600/70 shadow-[0_0_10px_rgba(16,185,129,0.2)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap"
-                  title="Almacenamiento, Respaldo y Persistencia Integral de Datos Generados en PII-LCC"
-                >
-                  <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="hidden md:inline">Almacenamiento</span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping hidden sm:inline-block" />
-                </button>
-
-                {/* Supabase Cloud Integration Button */}
-                <button
-                  onClick={() => {
-                    setShowSupabaseModal(true);
-                    playCyberClick('laser', 0.08);
-                  }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 hover:text-white border border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.3)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap"
-                  title="Integración y Sincronización con Base de Datos Supabase (PostgreSQL Cloud)"
-                >
-                  <Cloud className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                  <span className="hidden xl:inline">Supabase BD</span>
-                  <span className="xl:hidden">Supabase</span>
-                  <span className="text-[9px] bg-emerald-500/30 text-emerald-300 px-1 py-0.2 rounded border border-emerald-500/40 font-mono">
-                    CLOUD
-                  </span>
-                </button>
-
-                <button
-                  onClick={() => toggleInstalledDevice(!isInstalledDevice)}
-                  className={`flex items-center justify-center p-2 rounded border transition-all cursor-pointer ${
-                    isInstalledDevice 
-                      ? 'bg-emerald-950/20 text-emerald-400 border-emerald-800/60 shadow-[0_0_10px_rgba(16,185,129,0.15)]' 
-                      : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300 border-zinc-800'
-                  }`}
-                  title={isInstalledDevice ? "Terminal Móvil/Instalado: Enlace de Acceso Total Activado" : "Habilitar Acceso Completo Móvil/Instalado"}
-                >
-                  <Shield className="w-3.5 h-3.5" />
-                </button>
-
-                {/* Primary Install App Button (PC & Mobile PWA) */}
-                <button
-                  onClick={() => {
-                    setShowInstallModal(true);
-                    playSyntheticBeep(700, 0.1);
-                  }}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 hover:text-white border border-emerald-600/70 shadow-[0_0_12px_rgba(16,185,129,0.25)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap"
-                  title="Descargar e Instalar la Aplicación en PC y Celular (PWA Nativa)"
-                >
-                  <Download className="w-3.5 h-3.5 animate-bounce text-emerald-400" />
-                  <span className="hidden sm:inline">Instalar App (PC / Celular)</span>
-                  <span className="sm:hidden">Instalar</span>
-                </button>
-
-                <button
-                  onClick={() => setShowDownloadMenu(!showDownloadMenu)}
-                  className={`flex items-center justify-center p-2 rounded border transition-colors cursor-pointer ${
-                    showDownloadMenu 
-                      ? 'bg-zinc-800 text-white border-zinc-700' 
-                      : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-white border-zinc-800'
-                  }`}
-                  title="Descargar Datos y Reportes PII-LCC"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                </button>
-                {showDownloadMenu && (
-                  <div className="absolute right-0 top-10 mt-1 w-64 bg-zinc-950 border border-zinc-800 rounded-lg shadow-2xl p-2 z-50 font-mono text-left">
-                    <div className="px-2 py-1.5 border-b border-zinc-900 text-[9px] text-zinc-500 font-bold uppercase tracking-wider">
-                      Descargas Disponibles (PII-LCC)
+                    <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                    <div>
+                      <p className="font-bold leading-tight flex items-center gap-1">
+                        Instalar en PC / Celular
+                        <span className="text-[8px] bg-emerald-700 text-white px-1 rounded uppercase">PWA</span>
+                      </p>
+                      <p className="text-[9px] text-zinc-400 font-normal">Acceso directo y código QR</p>
                     </div>
-                    <button
-                      onClick={() => {
-                        setShowInstallModal(true);
-                        setShowDownloadMenu(false);
-                      }}
-                      className="w-full text-left px-2 py-2 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 rounded flex items-center gap-2 transition-all cursor-pointer border border-emerald-700/60 mb-1 mt-1"
-                    >
-                      <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-                      <div>
-                        <p className="font-bold leading-tight flex items-center gap-1">
-                          Instalar en PC / Celular
-                          <span className="text-[8px] bg-emerald-700 text-white px-1 rounded uppercase">PWA</span>
-                        </p>
-                        <p className="text-[9px] text-zinc-400 font-normal">Acceso directo y código QR</p>
-                      </div>
-                    </button>
+                  </button>
 
-                    {/* Generación de KML con Ubicación Real para Google Earth */}
-                    <button
-                      onClick={downloadRealDeviceKmlFromApp}
-                      className="w-full text-left px-2 py-2 bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-300 rounded flex items-center gap-2 transition-all cursor-pointer border border-cyan-700/60 mt-1 mb-1"
-                      title="Genera y descarga el archivo KML con la posición real capturada por el GPS del dispositivo"
-                    >
-                      <Globe className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-                      <div>
-                        <p className="font-bold leading-tight flex items-center gap-1">
-                          GPS Real // KML Google Earth
-                          <span className="text-[8px] bg-cyan-700 text-white px-1 rounded uppercase">KML</span>
-                        </p>
-                        <p className="text-[9px] text-zinc-400 font-normal">Ubicación actual y real del dispositivo</p>
-                      </div>
-                    </button>
+                  {/* Generación de KML con Ubicación Real para Google Earth */}
+                  <button
+                    onClick={downloadRealDeviceKmlFromApp}
+                    className="w-full text-left px-2 py-2 bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-300 rounded flex items-center gap-2 transition-all cursor-pointer border border-cyan-700/60 mt-1 mb-1"
+                    title="Genera y descarga el archivo KML con la posición real capturada por el GPS del dispositivo"
+                  >
+                    <Globe className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                    <div>
+                      <p className="font-bold leading-tight flex items-center gap-1">
+                        GPS Real // KML Google Earth
+                        <span className="text-[8px] bg-cyan-700 text-white px-1 rounded uppercase">KML</span>
+                      </p>
+                      <p className="text-[9px] text-zinc-400 font-normal">Ubicación actual y real del dispositivo</p>
+                    </div>
+                  </button>
 
-                    <button
-                      onClick={() => {
-                        setShowGlobalGoogleEarthModal(true);
-                        setShowDownloadMenu(false);
-                      }}
-                      className="w-full text-left px-2 py-2 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-white rounded flex items-center gap-2 transition-all cursor-pointer mt-1"
-                      title="Abre el visor 3D interactivo de Google Earth con la ubicación real del dispositivo"
-                    >
-                      <Globe className="w-3.5 h-3.5 text-cyan-500" />
-                      <div>
-                        <p className="font-bold leading-tight">Visor Google Earth 3D</p>
-                        <p className="text-[9px] text-zinc-500 font-normal">Telemetría satelital 3D en vivo</p>
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => {
-                        downloadJSONDatabase();
-                        setShowDownloadMenu(false);
-                      }}
-                      className="w-full text-left px-2 py-2 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-white rounded flex items-center gap-2 transition-all cursor-pointer mt-1"
-                    >
-                      <Download className="w-3.5 h-3.5 text-blue-500" />
-                      <div>
-                        <p className="font-bold leading-tight">Base de Datos (.json)</p>
-                        <p className="text-[9px] text-zinc-500 font-normal">Paquete completo de telemetría</p>
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => {
-                        downloadMarkdownReport();
-                        setShowDownloadMenu(false);
-                      }}
-                      className="w-full text-left px-2 py-2 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-white rounded flex items-center gap-2 transition-all cursor-pointer mt-1"
-                    >
-                      <Download className="w-3.5 h-3.5 text-orange-500" />
-                      <div>
-                        <p className="font-bold leading-tight">Informe Táctico (.md)</p>
-                        <p className="text-[9px] text-zinc-500 font-normal">Resumen doctrinal en Markdown</p>
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => {
-                        downloadDesktopApp();
-                        setShowDownloadMenu(false);
-                      }}
-                      className="w-full text-left px-2 py-2 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-white rounded flex items-center gap-2 transition-all cursor-pointer mt-1 border-t border-zinc-900 pt-2"
-                    >
-                      <Download className="w-3.5 h-3.5 text-emerald-500" />
-                      <div>
-                        <p className="font-bold leading-tight">Programa PC (.tar.gz)</p>
-                        <p className="text-[9px] text-zinc-500 font-normal">Instalador local con lanzadores .bat/.sh</p>
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => {
-                        downloadMobileApp();
-                        setShowDownloadMenu(false);
-                      }}
-                      className="w-full text-left px-2 py-2 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-white rounded flex items-center gap-2 transition-all cursor-pointer mt-1 border-t border-zinc-900 pt-2"
-                    >
-                      <Download className="w-3.5 h-3.5 text-cyan-500" />
-                      <div>
-                        <p className="font-bold leading-tight">Programa Móvil/Tablet (.tar.gz)</p>
-                        <p className="text-[9px] text-zinc-500 font-normal">PWA autónomo con sincronización táctica</p>
-                      </div>
-                    </button>
-                  </div>
-                )}
-                
-                <button
-                  onClick={() => {
-                    logout();
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded bg-red-950/20 text-red-400 hover:bg-red-900/30 hover:text-red-300 border border-red-900/30 transition-colors cursor-pointer text-xs font-mono font-bold"
-                  title="Cerrar Sesión Segura y Salir al Terminal de Acceso (CAD-C2)"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Cerrar Sesión</span>
-                </button>
-              </div>
-            )}
-          </div>
+                  <button
+                    onClick={() => {
+                      setShowGlobalGoogleEarthModal(true);
+                      setShowDownloadMenu(false);
+                    }}
+                    className="w-full text-left px-2 py-2 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-white rounded flex items-center gap-2 transition-all cursor-pointer mt-1"
+                    title="Abre el visor 3D interactivo de Google Earth con la ubicación real del dispositivo"
+                  >
+                    <Globe className="w-3.5 h-3.5 text-cyan-500" />
+                    <div>
+                      <p className="font-bold leading-tight">Visor Google Earth 3D</p>
+                      <p className="text-[9px] text-zinc-500 font-normal">Telemetría satelital 3D en vivo</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      downloadJSONDatabase();
+                      setShowDownloadMenu(false);
+                    }}
+                    className="w-full text-left px-2 py-2 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-white rounded flex items-center gap-2 transition-all cursor-pointer mt-1"
+                  >
+                    <Download className="w-3.5 h-3.5 text-blue-500" />
+                    <div>
+                      <p className="font-bold leading-tight">Base de Datos (.json)</p>
+                      <p className="text-[9px] text-zinc-500 font-normal">Paquete completo de telemetría</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      downloadMarkdownReport();
+                      setShowDownloadMenu(false);
+                    }}
+                    className="w-full text-left px-2 py-2 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-white rounded flex items-center gap-2 transition-all cursor-pointer mt-1"
+                  >
+                    <Download className="w-3.5 h-3.5 text-orange-500" />
+                    <div>
+                      <p className="font-bold leading-tight">Informe Táctico (.md)</p>
+                      <p className="text-[9px] text-zinc-500 font-normal">Resumen doctrinal en Markdown</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      downloadDesktopApp();
+                      setShowDownloadMenu(false);
+                    }}
+                    className="w-full text-left px-2 py-2 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-white rounded flex items-center gap-2 transition-all cursor-pointer mt-1 border-t border-zinc-900 pt-2"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-500" />
+                    <div>
+                      <p className="font-bold leading-tight">Programa PC (.tar.gz)</p>
+                      <p className="text-[9px] text-zinc-500 font-normal">Instalador local con lanzadores .bat/.sh</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      downloadMobileApp();
+                      setShowDownloadMenu(false);
+                    }}
+                    className="w-full text-left px-2 py-2 text-[11px] text-zinc-300 hover:bg-zinc-900 hover:text-white rounded flex items-center gap-2 transition-all cursor-pointer mt-1 border-t border-zinc-900 pt-2"
+                  >
+                    <Download className="w-3.5 h-3.5 text-cyan-500" />
+                    <div>
+                      <p className="font-bold leading-tight">Programa Móvil/Tablet (.tar.gz)</p>
+                      <p className="text-[9px] text-zinc-500 font-normal">PWA autónomo con sincronización táctica</p>
+                    </div>
+                  </button>
+                </div>
+              )}
+              
+              {/* Primary Logout Button - Fully visible with label on cellphones and desktops */}
+              <button
+                type="button"
+                id="btn-header-logout"
+                onClick={() => {
+                  playCyberClick('laser', 0.08);
+                  setShowLogoutConfirmModal(true);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-950/40 text-red-300 hover:bg-red-900/60 hover:text-white border border-red-700/60 shadow-[0_0_10px_rgba(239,68,68,0.2)] transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap active:scale-95"
+                title="Cerrar Sesión Segura y Salir al Terminal de Acceso (CAD-C2)"
+              >
+                <LogOut className="w-3.5 h-3.5 text-red-400" />
+                <span>Cerrar Sesión</span>
+              </button>
+            </div>
+          )}
 
           {/* Core Module Indicator (Exclusivo por Órgano Doctrinal Autenticado) */}
           <div className="flex bg-[#0a0a0a] border border-[#1a1a1a] p-1.5 rounded-lg self-start md:self-auto w-full md:w-auto items-center flex-wrap gap-2">
@@ -2079,7 +2412,7 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
       </div>
 
       {/* Main Container Workspace */}
-      <main className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-8 relative">
+      <main className="max-w-7xl mx-auto px-4 md:px-6 py-6 pb-28 md:pb-8 space-y-8 relative">
 
         {securityError && (
           <div className="bg-red-950/40 border border-red-500/30 text-red-400 p-4 rounded-lg flex items-center gap-3 font-mono text-xs animate-pulse">
@@ -2421,6 +2754,7 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                         if (prev.some(a => a.id === newAlert.id)) return prev;
                         return [newAlert, ...prev];
                       });
+                      sendWsMessage('SEND_FIELD_REPORT', { report: newAlert });
                     }}
                   />
                 </div>
@@ -2567,6 +2901,33 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
         </div>
       )}
 
+      {/* REAL-TIME MULTI-TERMINAL SYNC HUD TOAST */}
+      {realtimeSyncToast && (
+        <div className="fixed top-16 right-4 md:right-6 z-[1050] max-w-md w-full px-2 pointer-events-auto animate-fade-in">
+          <div className="bg-[#06140e]/95 border border-emerald-500/60 text-emerald-300 p-3 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.3)] backdrop-blur-md flex items-center justify-between gap-3 font-mono text-xs">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+              <Radio className="w-4 h-4 text-emerald-400 shrink-0" />
+              <div className="text-left">
+                <span className="font-bold text-white block text-[11px] tracking-wider uppercase flex items-center gap-1.5">
+                  SINCRONIZACIÓN EN TIEMPO REAL
+                  <span className="text-[9px] px-1.5 py-0.2 bg-emerald-950 border border-emerald-500/40 text-emerald-300 rounded font-normal">CAD-C2</span>
+                </span>
+                <span className="text-[10px] text-emerald-300/90 font-sans block leading-tight mt-0.5">
+                  {realtimeSyncToast.message}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setRealtimeSyncToast(null)}
+              className="p-1 hover:bg-emerald-900/40 rounded text-emerald-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* RE-ESTABLISHMENT AND PATCH APPLIED BANNER */}
       {justUpdatedToast && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[1000] max-w-xl w-full px-4 animate-bounce">
@@ -2588,7 +2949,7 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
       )}
 
       {/* Floating Tactical Notifications System (EN TODOS LOS NIVELES) */}
-      <div className="fixed bottom-6 right-6 z-[1001] max-w-sm w-full space-y-3 pointer-events-none">
+      <div className="fixed bottom-16 md:bottom-6 right-4 md:right-6 z-[1001] max-w-sm w-full space-y-3 pointer-events-none">
         {notifications.map(notif => {
           const { id, alert } = notif;
           return (
@@ -2812,12 +3173,14 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
       )}
 
       {/* Cross-Platform PWA & App Download Modal (PC & Mobile) */}
-      <AppInstallModal
-        isOpen={showInstallModal}
-        onClose={() => setShowInstallModal(false)}
-        onDownloadDesktopPackage={downloadDesktopApp}
-        onDownloadMobilePackage={downloadMobileApp}
-      />
+      {showInstallModal && (
+        <AppInstallModal
+          isOpen={showInstallModal}
+          onClose={() => setShowInstallModal(false)}
+          onDownloadDesktopPackage={downloadDesktopApp}
+          onDownloadMobilePackage={downloadMobileApp}
+        />
+      )}
 
       {/* Interactive Per-Module Background Manager Modal (Legacy) */}
       <ModuleBackgroundModal
@@ -2901,6 +3264,186 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
         tacticalUnits={tacticalUnits}
         onRestoreAllData={handleRestoreAllData}
       />
+
+      {/* Fleet-Wide Multi-Device & Cross-Version Synchronization Control Modal */}
+      <MultiDeviceSyncModal
+        isOpen={showMultiDeviceSyncModal}
+        onClose={() => setShowMultiDeviceSyncModal(false)}
+        appVersion={appVersion}
+        isOnline={typeof navigator !== 'undefined' ? navigator.onLine : true}
+        onTriggerSyncNow={async () => {
+          await sendWsMessage('TRIGGER_FORCE_BROADCAST', {});
+        }}
+        clansCount={clans.length}
+        alertsCount={rawAlerts.length}
+        ordersCount={activeOrders.length}
+        unitsCount={tacticalUnits.length}
+        expedientesCount={expedientes.length}
+      />
+
+      {/* Comprehensive Source Code Viewer & Copier Modal */}
+      {showCodeViewerModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-fade-in">
+          <div className="w-full max-w-6xl max-h-[92vh] flex flex-col">
+            <CodeViewer 
+              isModal={true} 
+              onClose={() => setShowCodeViewerModal(false)} 
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Persistent Mobile Tactical Command Dock (Permanently visible on screen in ALL modules for mobile phones) */}
+      <div 
+        id="mobile-tactical-dock" 
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#080a0f]/95 backdrop-blur-lg border-t border-zinc-800/90 shadow-[0_-5px_25px_rgba(0,0,0,0.9)] px-2.5 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] flex items-center justify-between gap-1.5 safe-area-inset-bottom"
+      >
+        {/* Active Module / Role Badge */}
+        <div 
+          className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-zinc-900/90 border border-zinc-800 text-[10px] font-mono text-zinc-300 shrink-0 max-w-[85px] truncate"
+          title={`Módulo activo: ${activeModuleMeta?.name || currentRole}`}
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+          <span className="truncate font-bold text-white uppercase tracking-tighter text-[9px]">
+            {currentRole === 'ROL_CEO' ? 'CEO' : 
+             currentRole === 'ROL_FUSION' ? 'FUSIÓN' : 
+             currentRole === 'ROL_BUSQUEDA' ? 'S-2' : 'PATRULLA'}
+          </span>
+        </div>
+
+        {/* Mobile Action 1: Sincronizar Dispositivos */}
+        <button
+          type="button"
+          id="btn-mobile-dock-sync"
+          onClick={() => {
+            setShowMultiDeviceSyncModal(true);
+            playCyberClick('laser', 0.08);
+          }}
+          className="flex-1 min-w-0 flex items-center justify-center gap-1 py-2 px-1.5 rounded-lg bg-cyan-950/90 hover:bg-cyan-900 active:bg-cyan-800 text-cyan-200 active:text-white border border-cyan-500/80 shadow-[0_0_12px_rgba(6,182,212,0.3)] transition-all cursor-pointer text-[11px] font-mono font-bold active:scale-95"
+          title="Sincronizar Datos con Todos los Dispositivos y Versiones Instaladas"
+        >
+          <Radio className="w-3.5 h-3.5 text-cyan-400 shrink-0 animate-pulse" />
+          <span className="truncate">Sync ({syncedDevicesCount})</span>
+        </button>
+
+        {/* Mobile Action 2: Copiar Código Fuente */}
+        <button
+          type="button"
+          id="btn-mobile-dock-code"
+          onClick={() => {
+            setShowCodeViewerModal(true);
+            playCyberClick('laser', 0.08);
+          }}
+          className="flex-1 min-w-0 flex items-center justify-center gap-1 py-2 px-1.5 rounded-lg bg-blue-950/90 hover:bg-blue-900 active:bg-blue-800 text-blue-200 active:text-white border border-blue-500/80 shadow-[0_0_12px_rgba(59,130,246,0.3)] transition-all cursor-pointer text-[11px] font-mono font-bold active:scale-95"
+          title="Ver y Copiar el Código Fuente del Sistema"
+        >
+          <Code className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+          <span className="truncate">Código</span>
+        </button>
+
+        {/* Mobile Action 3: Instalar App */}
+        <button
+          type="button"
+          id="btn-mobile-dock-install"
+          onClick={() => {
+            setShowInstallModal(true);
+            playSyntheticBeep(700, 0.1);
+          }}
+          className="flex-1 min-w-0 flex items-center justify-center gap-1 py-2 px-1.5 rounded-lg bg-emerald-950/90 hover:bg-emerald-900 active:bg-emerald-800 text-emerald-300 active:text-white border border-emerald-500/80 shadow-[0_0_15px_rgba(16,185,129,0.35)] transition-all cursor-pointer text-[11px] font-mono font-bold active:scale-95"
+          title="Instalar la App en el Celular (PWA Nativa / APK / Acceso Directo)"
+        >
+          <Smartphone className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span className="truncate">Instalar</span>
+        </button>
+
+        {/* Mobile Action 3: Cerrar Sesión */}
+        <button
+          type="button"
+          id="btn-mobile-dock-logout"
+          onClick={() => {
+            playCyberClick('laser', 0.08);
+            setShowLogoutConfirmModal(true);
+          }}
+          className="flex-1 min-w-0 flex items-center justify-center gap-1 py-2 px-1.5 rounded-lg bg-red-950/80 hover:bg-red-900 active:bg-red-800 text-red-200 active:text-white border border-red-600/80 shadow-[0_0_12px_rgba(239,68,68,0.3)] transition-all cursor-pointer text-[11px] font-mono font-bold active:scale-95"
+          title="Cerrar Sesión Táctica y Salir al Terminal Militar CAD-C2"
+        >
+          <LogOut className="w-3.5 h-3.5 text-red-400 shrink-0" />
+          <span className="truncate">Cerrar</span>
+        </button>
+      </div>
+
+      {/* Tactical Logout Confirmation Modal (CAD-C2) */}
+      {showLogoutConfirmModal && (
+        <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in font-mono">
+          <div className="bg-[#0b0c10] border-2 border-red-600/80 rounded-2xl max-w-md w-full p-5 shadow-[0_0_45px_rgba(239,68,68,0.4)] text-left space-y-4">
+            <div className="flex items-center justify-between border-b border-red-900/40 pb-3">
+              <div className="flex items-center gap-2 text-red-400 font-bold text-sm">
+                <div className="p-2 rounded-lg bg-red-950/80 border border-red-600/60">
+                  <LogOut className="w-4 h-4 text-red-400" />
+                </div>
+                <div>
+                  <span className="block leading-none uppercase text-xs text-red-300">TERMINAL MILITAR CAD-C2</span>
+                  <span className="block text-white font-bold text-sm mt-0.5">Confirmar Cierre de Sesión</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowLogoutConfirmModal(false)}
+                className="text-zinc-500 hover:text-white transition-colors p-1 rounded-lg hover:bg-zinc-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-red-950/20 border border-red-900/40 rounded-xl p-3.5 space-y-2">
+              <p className="text-xs text-zinc-300 font-sans leading-relaxed">
+                ¿Está seguro de que desea cerrar la sesión táctica del operador activo?
+              </p>
+              <div className="bg-black/60 rounded-lg p-2.5 border border-zinc-800 text-[11px] space-y-1">
+                <div className="flex items-center justify-between text-zinc-400">
+                  <span>Operador:</span>
+                  <strong className="text-white">
+                    {currentRole === 'ROL_CEO' ? 'GRAL. E. MARTÍNEZ' : 
+                     currentRole === 'ROL_FUSION' ? 'TTE. CNEL. S. ROJAS' : 
+                     currentRole === 'ROL_BUSQUEDA' ? 'MY. R. VARGAS' : 'CB1. F. VALENZUELA'}
+                  </strong>
+                </div>
+                <div className="flex items-center justify-between text-zinc-400">
+                  <span>Órgano Militar:</span>
+                  <span className="text-emerald-400 font-bold">
+                    {currentRole === 'ROL_CEO' ? 'CEO-LCC MANDO' : 
+                     currentRole === 'ROL_FUSION' ? 'CFI CENTRAL FUSIÓN' : 
+                     currentRole === 'ROL_BUSQUEDA' ? 'S-2 BÚSQUEDA' : 'BÚSQUEDA EN TERRENO'}
+                  </span>
+                </div>
+              </div>
+              <p className="text-[10px] text-zinc-500 font-mono">
+                Se revocarán los permisos temporales en este dispositivo móvil/PC y volverá a la pantalla de autenticación CAD-C2.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowLogoutConfirmModal(false)}
+                className="w-full sm:flex-1 py-2.5 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-700 text-xs font-bold transition-all cursor-pointer active:scale-95 text-center"
+              >
+                Cancelar y Continuar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLogoutConfirmModal(false);
+                  logout();
+                }}
+                className="w-full sm:flex-1 py-2.5 px-4 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shadow-[0_0_20px_rgba(239,68,68,0.4)] transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1.5 text-center"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Confirmar y Salir</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

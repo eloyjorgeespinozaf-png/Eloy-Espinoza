@@ -313,7 +313,7 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
 
             {/* Active Raw Detection Alerts from Órganos de Búsqueda S-2 */}
             {(activeLayer === 'ALL' || activeLayer === 'ALERTS_ONLY') &&
-              rawAlerts.map(alert => {
+              (rawAlerts || []).map(alert => {
                 const pos = projectToMap(alert.coordinates);
                 const isPending = alert.status === 'PENDING';
                 return (
@@ -348,7 +348,7 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
 
             {/* Patrol Units & Breadcrumbs Trail */}
             {(activeLayer === 'ALL' || activeLayer === 'UNITS_ONLY') &&
-              tacticalUnits.map((unit, idx) => {
+              (tacticalUnits || []).map((unit, idx) => {
                 const pos = projectToMap(unit.coordinates, idx);
                 const isSelected = internalSelectedUnit === unit.name;
                 const isIntercepting = unit.status === 'INTERCEPTING';
@@ -509,7 +509,7 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
                   No hay patrullas registradas en la red táctica.
                 </div>
               ) : (
-                tacticalUnits.map(unit => {
+                (tacticalUnits || []).map(unit => {
                   const isSelected = internalSelectedUnit === unit.name;
                   const isMoving = unit.status === 'PATROLLING' || unit.status === 'INTERCEPTING';
 
