@@ -46,7 +46,7 @@ export const SecureElement: React.FC<Props> = ({ children }) => {
             id="secure-element-password-input"
             type="password" 
             placeholder="Clave de nodo operativo" 
-            value={pass}
+            value={pass || ''}
             onChange={(e) => setPass(e.target.value)} 
             className="w-full bg-[#18130b] border border-amber-600/30 rounded-lg py-2 pl-9 pr-4 text-xs text-white placeholder-amber-500/30 focus:outline-none focus:border-amber-500/80 font-mono"
           />

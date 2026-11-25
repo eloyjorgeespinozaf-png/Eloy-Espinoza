@@ -172,7 +172,7 @@ export const NewG2RecordModal: React.FC<NewG2RecordModalProps> = ({
             <textarea
               rows={4}
               required
-              value={contenidoDetallado}
+              value={contenidoDetallado || ''}
               onChange={(e) => setContenidoDetallado(e.target.value)}
               placeholder="Describa la caravana clandestina, comiso de mercadería, cisternas de combustible, vehículos indocumentados, zanjas o pasos no habilitados..."
               className="w-full bg-[#121826] border border-[#222c40] rounded p-3 text-white focus:outline-none focus:border-[#f97316] font-sans"
@@ -184,17 +184,16 @@ export const NewG2RecordModal: React.FC<NewG2RecordModalProps> = ({
               <label className="block text-[#94a3b8] mb-1 font-bold">Coordenadas Cuadrícula MGRS</label>
               <input
                 type="text"
-                value={coordenadas}
+                value={coordenadas || ''}
                 onChange={(e) => setCoordenadas(e.target.value)}
                 className="w-full bg-[#121826] border border-[#222c40] rounded px-3 py-2 text-white focus:outline-none focus:border-[#f97316]"
-              >
-              </input>
+              />
             </div>
             <div>
               <label className="block text-[#94a3b8] mb-1 font-bold">Analista Evaluador LCC</label>
               <input
                 type="text"
-                value={operadorRegistro}
+                value={operadorRegistro || ''}
                 onChange={(e) => setOperadorRegistro(e.target.value)}
                 className="w-full bg-[#121826] border border-[#222c40] rounded px-3 py-2 text-white focus:outline-none focus:border-[#f97316]"
               />
@@ -205,7 +204,7 @@ export const NewG2RecordModal: React.FC<NewG2RecordModalProps> = ({
             <div>
               <label className="block text-[#f97316] mb-1 font-bold">Confiabilidad Fuente (A-D)</label>
               <select
-                value={confiabilidad}
+                value={confiabilidad || 'A'}
                 onChange={(e) => setConfiabilidad(e.target.value)}
                 className="w-full bg-[#0b0f19] border border-[#334155] rounded px-2 py-1.5 text-white"
               >
@@ -218,7 +217,7 @@ export const NewG2RecordModal: React.FC<NewG2RecordModalProps> = ({
             <div>
               <label className="block text-[#f97316] mb-1 font-bold">Exactitud Información (1-4)</label>
               <select
-                value={exactitud}
+                value={exactitud || '1'}
                 onChange={(e) => setExactitud(e.target.value)}
                 className="w-full bg-[#0b0f19] border border-[#334155] rounded px-2 py-1.5 text-white"
               >
@@ -234,7 +233,7 @@ export const NewG2RecordModal: React.FC<NewG2RecordModalProps> = ({
             <label className="block text-[#94a3b8] mb-1 font-bold">Ideas Fuerza Extraídas (una por línea)</label>
             <textarea
               rows={3}
-              value={ideasFuerzaText}
+              value={ideasFuerzaText || ''}
               onChange={(e) => setIdeasFuerzaText(e.target.value)}
               placeholder="Caravana de camiones detectada en Salar de Coipasa...&#10;Inutilización de paso clandestino en Hito 18..."
               className="w-full bg-[#121826] border border-[#222c40] rounded p-3 text-white focus:outline-none focus:border-[#f97316]"

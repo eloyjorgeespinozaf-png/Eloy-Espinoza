@@ -357,7 +357,7 @@ export const EmblemBackgroundControl: React.FC<EmblemControlProps> = ({
               min="0.08"
               max="0.45"
               step="0.02"
-              value={settings.opacity}
+              value={settings.opacity ?? 0.22}
               onChange={(e) => updateSettings({ opacity: parseFloat(e.target.value) })}
               className="w-full accent-emerald-500 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
             />

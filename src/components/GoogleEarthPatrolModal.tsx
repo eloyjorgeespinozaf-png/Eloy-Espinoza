@@ -761,11 +761,11 @@ export default function GoogleEarthPatrolModal({
                   type="range"
                   min="0"
                   max="360"
-                  value={cameraHeading}
+                  value={cameraHeading ?? 0}
                   onChange={(e) => setCameraHeading(Number(e.target.value))}
                   className="w-24 accent-cyan-500 cursor-pointer"
                 />
-                <span className="text-white font-bold">{cameraHeading}°</span>
+                <span className="text-white font-bold">{cameraHeading ?? 0}°</span>
               </div>
             </div>
           </div>

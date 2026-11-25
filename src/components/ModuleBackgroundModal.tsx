@@ -398,7 +398,7 @@ export const ModuleBackgroundModal: React.FC<ModuleBackgroundModalProps> = ({
                     min="0.10"
                     max="1.0"
                     step="0.05"
-                    value={currentConfig.opacity}
+                    value={currentConfig.opacity ?? 0.8}
                     onChange={(e) => onUpdateBackground(selectedModuleId, { opacity: parseFloat(e.target.value) })}
                     className="w-full accent-blue-500 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
                   />
@@ -420,7 +420,7 @@ export const ModuleBackgroundModal: React.FC<ModuleBackgroundModalProps> = ({
                     min="0"
                     max="6"
                     step="1"
-                    value={currentConfig.blur}
+                    value={currentConfig.blur ?? 0}
                     onChange={(e) => onUpdateBackground(selectedModuleId, { blur: parseInt(e.target.value, 10) })}
                     className="w-full accent-purple-500 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
                   />

@@ -263,7 +263,7 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
                 <div className="flex items-center gap-1.5 pt-1">
                   <input
                     type="text"
-                    value={tempName}
+                    value={tempName || ''}
                     onChange={(e) => setTempName(e.target.value)}
                     placeholder="Nombre del terminal"
                     className="flex-1 bg-black border border-cyan-500/60 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-cyan-400"
@@ -367,7 +367,7 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
               <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   type="text"
-                  value={hubInput}
+                  value={hubInput || ''}
                   onChange={(e) => setHubInput(e.target.value)}
                   placeholder={`Por defecto: ${window.location.origin}`}
                   className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-400"

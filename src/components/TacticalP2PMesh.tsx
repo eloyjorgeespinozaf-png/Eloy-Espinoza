@@ -54,6 +54,7 @@ export default function TacticalP2PMesh({ user, sendWsMessage, rawAlerts, onAddP
   const [selectedPeerId, setSelectedPeerId] = useState<string | null>(null);
   const [chatLogs, setChatLogs] = useState<Record<string, PeerMessage[]>>({});
   const [inputText, setInputText] = useState('');
+  const [shareAlertSelect, setShareAlertSelect] = useState('');
   const [logs, setLogs] = useState<string[]>([]);
 
   // WebRTC references
@@ -751,15 +752,17 @@ export default function TacticalP2PMesh({ user, sendWsMessage, rawAlerts, onAddP
 
               <div className="relative group">
                 <select
+                  value={shareAlertSelect || ''}
                   onChange={(e) => {
-                    if (e.target.value) {
-                      handleShareAlertDirectly(e.target.value);
-                      e.target.value = ''; // Reset
+                    const val = e.target.value;
+                    if (val) {
+                      handleShareAlertDirectly(val);
+                      setShareAlertSelect('');
                     }
                   }}
                   className="w-full py-1.5 px-2 bg-zinc-900 hover:bg-zinc-850 text-zinc-300 hover:text-white border border-zinc-800 rounded font-bold text-[9px] uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer transition text-center appearance-none"
                 >
-                  <option value="" disabled selected>⚠️ Compartir Alerta P2P</option>
+                  <option value="" disabled>⚠️ Compartir Alerta P2P</option>
                   {rawAlerts.map(alert => (
                     <option key={alert.id} value={alert.id}>
                       [{alert.sourceType}] {alert.details.slice(0, 25)}...
@@ -773,7 +776,7 @@ export default function TacticalP2PMesh({ user, sendWsMessage, rawAlerts, onAddP
             <form onSubmit={handleSendChat} className="flex gap-2 mt-3">
               <input
                 type="text"
-                value={inputText}
+                value={inputText || ''}
                 onChange={(e) => setInputText(e.target.value)}
                 placeholder="Escriba un mensaje de radio táctico encriptado..."
                 className="flex-1 bg-black/60 border border-zinc-900 rounded p-2 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-[#3b82f6] text-[11px] font-mono"

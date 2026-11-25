@@ -264,7 +264,7 @@ export default function InterdictionOrderModal({
             <div className="flex items-center gap-2 bg-[#040811] p-1.5 rounded-lg border border-[#1e293b]">
               <span className="text-[10px] font-mono text-zinc-400 uppercase">Órdenes LCC:</span>
               <select
-                value={order.id}
+                value={order?.id || ''}
                 onChange={(e) => {
                   const target = allOrders.find(o => o.id === e.target.value);
                   if (target) onSelectOrder(target);
@@ -628,7 +628,7 @@ export default function InterdictionOrderModal({
                 <form onSubmit={handleSendProgressUpdate} className="flex gap-2">
                   <input
                     type="text"
-                    value={newUpdateText}
+                    value={newUpdateText || ''}
                     onChange={(e) => setNewUpdateText(e.target.value)}
                     placeholder="Escriba reporte de avance para transmitir al Mando LCC..."
                     className="flex-1 bg-[#050912] text-xs font-mono text-white border border-[#1e293b] rounded-lg px-3 py-2 focus:outline-none focus:border-cyan-500"

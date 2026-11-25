@@ -125,13 +125,16 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
     });
 
     if (registeredUser) {
-      setUsername(registeredUser.username);
-      setPassword(registeredUser.cellphone || registeredUser.password);
+      setUsername(registeredUser.username || '');
+      setPassword(registeredUser.cellphone || registeredUser.password || '');
     } else {
       const cred = PRESET_CREDENTIALS.find(c => c.role === role);
       if (cred) {
-        setUsername(cred.username);
-        setPassword(cred.defaultPassword);
+        setUsername(cred.username || '');
+        setPassword(cred.defaultPassword || '');
+      } else {
+        setUsername('');
+        setPassword('');
       }
     }
 
@@ -537,7 +540,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
                   </div>
                   <input
                     type="text"
-                    value={username}
+                    value={username || ''}
                     onChange={(e) => setUsername(e.target.value)}
                     placeholder="Ej: ceo.mando, busqueda.s2"
                     className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-[#080d10] border border-[#213129] focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-white font-mono text-xs placeholder:text-[#42554a] outline-none transition-all"
@@ -562,7 +565,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
                   </div>
                   <input
                     type={showPassword ? 'text' : 'password'}
-                    value={password}
+                    value={password || ''}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Ej: 71200001 (N° de Celular)"
                     className="w-full pl-10 pr-10 py-2.5 rounded-lg bg-[#080d10] border border-[#213129] focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-white font-mono text-xs placeholder:text-[#42554a] outline-none transition-all"
@@ -600,8 +603,8 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
                       key={u.id}
                       type="button"
                       onClick={() => {
-                        setUsername(u.username);
-                        setPassword(u.cellphone || u.password);
+                        setUsername(u.username || '');
+                        setPassword(u.cellphone || u.password || '');
                         if (soundEnabled) playCyberClick('crisp', 0.08);
                       }}
                       className={`p-2 rounded border text-left font-mono transition-all cursor-pointer ${

@@ -351,7 +351,7 @@ export default function CodeViewer({ onClose, isModal = false }: CodeViewerProps
             <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              value={searchQuery}
+              value={searchQuery || ''}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Buscar archivo (ej: App.tsx, server)..."
               className="w-full bg-[#0b0e14] border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-cyan-500/60 font-mono"

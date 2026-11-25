@@ -5,10 +5,11 @@
 
 import React, { useState } from 'react';
 import { AutomatedOrder, Clan, ActionableIntel, TacticalUnit, RawAlert, G2RegistryRecord } from '../types';
-import { Shield, Zap, TrendingUp, AlertTriangle, Play, MapPin, Send, Eye, RefreshCw, Layers, CheckCircle, Radio, Camera, Maximize2, ExternalLink, Navigation, Compass, Globe } from 'lucide-react';
+import { Shield, Zap, TrendingUp, AlertTriangle, Play, MapPin, Send, Eye, RefreshCw, Layers, CheckCircle, Radio, Camera, Maximize2, ExternalLink, Navigation, Compass, Globe, Map as MapIcon } from 'lucide-react';
 import { TacticalPhotoViewerModal } from './fusion/TacticalPhotoViewerModal';
 import { PatrolTrackingRadar } from './PatrolTrackingRadar';
 import GoogleEarthPatrolModal from './GoogleEarthPatrolModal';
+import LeafletTacticalMap from './LeafletTacticalMap';
 
 interface StrategicViewProps {
   activeOrders: AutomatedOrder[];
@@ -108,7 +109,7 @@ export default function StrategicView({
   const [assignedUnit, setAssignedUnit] = useState<string>('');
   const [customObjective, setCustomObjective] = useState<string>('');
   const [activeHotspot, setActiveHotspot] = useState<string | null>(null);
-  const [showPatrolRadar, setShowPatrolRadar] = useState<boolean>(false);
+  const [mapViewMode, setMapViewMode] = useState<'LEAFLET_COP' | 'VECTOR_MAP' | 'RADAR_GNSS'>('LEAFLET_COP');
   const [isGoogleEarthModalOpen, setIsGoogleEarthModalOpen] = useState<boolean>(false);
   const [selectedPatrolForEarth, setSelectedPatrolForEarth] = useState<TacticalUnit | null>(null);
 
@@ -359,14 +360,18 @@ export default function StrategicView({
         {/* Left Column: Vector Tactical Map */}
         <div className="lg:col-span-7 bg-[#0a0a0a]/85 backdrop-blur-md border border-[#1e293b]/70 rounded-xl p-5 shadow-lg flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between border-b border-[#1a1a1a] pb-3 mb-4">
+            <div className="flex flex-wrap items-center justify-between border-b border-[#1a1a1a] pb-3 mb-4 gap-2">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-[#3b82f6] animate-ping" />
                 <h3 className="text-sm font-mono font-bold text-white uppercase">
-                  {showPatrolRadar ? 'Centro de Situación // Radar GNSS de Patrullas' : 'Centro de Situación // Mapa Vectorial de la Frontera'}
+                  {mapViewMode === 'LEAFLET_COP'
+                    ? 'Centro de Situación // Cuadro Operacional Común (COP Leaflet OSM)'
+                    : mapViewMode === 'RADAR_GNSS'
+                    ? 'Centro de Situación // Radar GNSS de Patrullas'
+                    : 'Centro de Situación // Mapa Vectorial de la Frontera'}
                 </h3>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -380,24 +385,81 @@ export default function StrategicView({
                   <span>Google Earth 3D ({tacticalUnits.length})</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => setShowPatrolRadar(prev => !prev)}
-                  className={`text-[10px] font-mono px-2.5 py-1 rounded flex items-center gap-1.5 transition-all cursor-pointer font-bold border ${
-                    showPatrolRadar
-                      ? 'bg-emerald-600 text-black border-emerald-400 shadow-md'
-                      : 'bg-[#111] hover:bg-[#1a1a1a] text-emerald-400 border-emerald-500/40'
-                  }`}
-                  title="Alternar entre mapa vectorial y radar de telemetría de patrullas"
-                >
-                  <Compass className={`w-3.5 h-3.5 ${showPatrolRadar ? 'animate-spin' : ''}`} />
-                  <span>{showPatrolRadar ? 'Ver Mapa Vectorial' : `Radar GNSS (${tacticalUnits.length})`}</span>
-                </button>
-                <span className="text-[10px] font-mono text-[#666]">ENLACE LCC</span>
+                {/* 3-Mode Selector: Leaflet COP OSM, Vector Map, Radar GNSS */}
+                <div className="flex items-center bg-[#090e17] p-0.5 rounded-lg border border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => setMapViewMode('LEAFLET_COP')}
+                    className={`text-[10px] font-mono px-2 py-1 rounded flex items-center gap-1 transition-all cursor-pointer font-bold ${
+                      mapViewMode === 'LEAFLET_COP'
+                        ? 'bg-cyan-600 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                    title="Cuadro Operacional Común interactivo (OpenStreetMap / Leaflet centrado en Bolivia)"
+                  >
+                    <MapIcon className="w-3 h-3" />
+                    <span>COP Leaflet</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMapViewMode('VECTOR_MAP')}
+                    className={`text-[10px] font-mono px-2 py-1 rounded flex items-center gap-1 transition-all cursor-pointer font-bold ${
+                      mapViewMode === 'VECTOR_MAP'
+                        ? 'bg-blue-600 text-white shadow-[0_0_10px_rgba(59,130,246,0.4)]'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                    title="Mapa Vectorial Cibernético de la Frontera"
+                  >
+                    <Layers className="w-3 h-3" />
+                    <span>Vectorial</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMapViewMode('RADAR_GNSS')}
+                    className={`text-[10px] font-mono px-2 py-1 rounded flex items-center gap-1 transition-all cursor-pointer font-bold ${
+                      mapViewMode === 'RADAR_GNSS'
+                        ? 'bg-emerald-600 text-black shadow-[0_0_10px_rgba(16,185,129,0.4)]'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                    title="Radar GNSS continuo de telemetría de patrullas"
+                  >
+                    <Compass className="w-3 h-3" />
+                    <span>Radar GNSS</span>
+                  </button>
+                </div>
               </div>
             </div>
 
-            {showPatrolRadar ? (
+            {mapViewMode === 'LEAFLET_COP' ? (
+              <div className="mb-2">
+                <LeafletTacticalMap
+                  rawAlerts={rawAlerts}
+                  tacticalUnits={tacticalUnits}
+                  activeOrders={activeOrders}
+                  actionableIntel={actionableIntel}
+                  selectedAlertId={activeHotspot}
+                  onSelectAlert={(alert) => {
+                    setActiveHotspot(alert.id);
+                  }}
+                  onOpenGoogleEarth={(unit) => {
+                    setSelectedPatrolForEarth(unit);
+                    setIsGoogleEarthModalOpen(true);
+                  }}
+                  onIssueOrderForAlert={(alert) => {
+                    const match = actionableIntel.find(i => i.rawAlertId === alert.id || i.coordinates === alert.coordinates);
+                    if (match) {
+                      handleIntelChange(match.id);
+                    } else {
+                      setCodeName(`OP_${alert.id.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`);
+                      setCustomObjective(`Interdicción táctica inmediata en ${alert.coordinates}: ${alert.details.slice(0, 80)}`);
+                      setAssignedUnit(tacticalUnits[0]?.name || 'Patrulla Delta-3');
+                    }
+                  }}
+                />
+              </div>
+            ) : mapViewMode === 'RADAR_GNSS' ? (
               <div className="mb-2">
                 <PatrolTrackingRadar
                   tacticalUnits={tacticalUnits}

@@ -118,9 +118,9 @@ export const ClanManagementModal: React.FC<ClanManagementModalProps> = ({
 
   const openEditForm = (clan: Clan) => {
     setEditingClanId(clan.id);
-    setName(clan.name);
-    setThreatLevel(clan.threatLevel);
-    setMembersCount(clan.membersCount || 10);
+    setName(clan.name || '');
+    setThreatLevel(clan.threatLevel || 'HIGH');
+    setMembersCount(clan.membersCount ?? 20);
     setTactics(clan.tactics || '');
     setStatus(clan.status || 'ACTIVO');
     setNotes(clan.notes || '');
@@ -499,7 +499,7 @@ export const ClanManagementModal: React.FC<ClanManagementModalProps> = ({
                   <input
                     type="text"
                     required
-                    value={name}
+                    value={name || ''}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Ej: Clan Los Coyotes de Pisiga"
                     className="w-full bg-[#151c2c] border border-[#242f46] rounded-xl px-3 py-2 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
@@ -511,7 +511,7 @@ export const ClanManagementModal: React.FC<ClanManagementModalProps> = ({
                     Nivel de Amenaza:
                   </label>
                   <select
-                    value={threatLevel}
+                    value={threatLevel || 'HIGH'}
                     onChange={(e) => setThreatLevel(e.target.value as any)}
                     className="w-full bg-[#151c2c] border border-[#242f46] rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-emerald-500"
                   >
@@ -532,7 +532,7 @@ export const ClanManagementModal: React.FC<ClanManagementModalProps> = ({
                   <input
                     type="number"
                     min={1}
-                    value={membersCount}
+                    value={membersCount ?? 20}
                     onChange={(e) => setMembersCount(Number(e.target.value))}
                     className="w-full bg-[#151c2c] border border-[#242f46] rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-emerald-500"
                   />
@@ -737,7 +737,7 @@ export const ClanManagementModal: React.FC<ClanManagementModalProps> = ({
                 </label>
                 <textarea
                   rows={2}
-                  value={tactics}
+                  value={tactics || ''}
                   onChange={(e) => setTactics(e.target.value)}
                   placeholder="Ej: Marcha nocturna sin luces por caminos de herradura, uso de vigías en cerros fronterizos..."
                   className="w-full bg-[#151c2c] border border-[#242f46] rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none"
@@ -750,7 +750,7 @@ export const ClanManagementModal: React.FC<ClanManagementModalProps> = ({
                 </label>
                 <textarea
                   rows={2}
-                  value={notes}
+                  value={notes || ''}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="Antecedentes doctrinales, expedientes vinculados o decomisos previos..."
                   className="w-full bg-[#151c2c] border border-[#242f46] rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none"

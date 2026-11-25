@@ -236,3 +236,17 @@ export interface ModuleBackgroundConfig {
 }
 
 export type ModuleBackgroundsMap = Record<TacticalModuleId, ModuleBackgroundConfig>;
+
+export interface TacticalRoute {
+  id: string;
+  name: string;
+  sector: string;
+  coordinates: string;
+  threatLevel: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  patrolId?: string;
+  patrolName?: string;
+  checkpoints?: string[];
+  description?: string;
+  lastUpdated?: string;
+  isPatrolGenerated?: boolean;
+}

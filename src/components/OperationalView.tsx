@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { RawAlert, Clan, ActionableIntel, G2RegistryRecord, TacticalUnit } from '../types';
+import { RawAlert, Clan, ActionableIntel, G2RegistryRecord, TacticalUnit, TacticalRoute } from '../types';
 import { initialG2Records } from '../utils/g2Records';
 import { calculateDistanceKm } from '../utils/geo';
 import { PatrolTrackingRadar } from './PatrolTrackingRadar';
@@ -15,6 +15,7 @@ import { G2DoctrinalViewer } from './fusion/G2DoctrinalViewer';
 import { SearchOrganAlertViewer } from './fusion/SearchOrganAlertViewer';
 import { NewG2RecordModal } from './fusion/NewG2RecordModal';
 import { TacticalPhotoViewerModal } from './fusion/TacticalPhotoViewerModal';
+import { TacticalRouteManagerModal, DEFAULT_TACTICAL_ROUTES } from './fusion/TacticalRouteManagerModal';
 import {
   TrendingUp,
   Database,
@@ -44,10 +45,12 @@ import {
   Smartphone,
   Truck,
   ShieldCheck,
-  PlusCircle
+  PlusCircle,
+  Route
 } from 'lucide-react';
 import GoogleEarthPatrolModal from './GoogleEarthPatrolModal';
 import ClanManagementModal from './ClanManagementModal';
+import { playSyntheticBeep, playCyberClick } from '../utils/audio';
 
 interface OperationalViewProps {
   rawAlerts: RawAlert[];
@@ -140,6 +143,71 @@ export default function OperationalView({
   const [selectedIdeas, setSelectedIdeas] = useState<string[]>([]);
   const [filterRubro, setFilterRubro] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
+
+  // Tactical Routes State & Persistence (CFI Module)
+  const [tacticalRoutes, setTacticalRoutes] = useState<TacticalRoute[]>(() => {
+    try {
+      const stored = localStorage.getItem('PII_LCC_TACTICAL_ROUTES');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn('Error reading stored tactical routes:', e);
+    }
+    return DEFAULT_TACTICAL_ROUTES;
+  });
+  const [isRouteModalOpen, setIsRouteModalOpen] = useState<boolean>(false);
+
+  const handleSaveTacticalRoute = (route: TacticalRoute) => {
+    setTacticalRoutes(prev => {
+      const exists = prev.some(r => r.id === route.id);
+      const updated = exists ? prev.map(r => r.id === route.id ? route : r) : [route, ...prev];
+      try {
+        localStorage.setItem('PII_LCC_TACTICAL_ROUTES', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+    setRouteId(route.name);
+  };
+
+  const handleDeleteTacticalRoute = (id: string) => {
+    setTacticalRoutes(prev => {
+      const updated = prev.filter(r => r.id !== id);
+      try {
+        localStorage.setItem('PII_LCC_TACTICAL_ROUTES', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+  };
+
+  const handleAdoptPatrolVector = (unit: TacticalUnit) => {
+    const routeName = `Vector ${unit.name} (${unit.sector || unit.coordinates.slice(0, 16)})`;
+    const newRoute: TacticalRoute = {
+      id: `route-patrol-${unit.id}-${Date.now()}`,
+      name: routeName,
+      sector: unit.sector || `Sector Operativo ${unit.name}`,
+      coordinates: unit.coordinates,
+      threatLevel: unit.status === 'INTERCEPTING' ? 'CRITICAL' : 'HIGH',
+      patrolId: unit.id,
+      patrolName: unit.name,
+      description: `Ruta táctica activa transmitida en tiempo real por ${unit.name} (Cmdte: ${unit.commander || 'S-2'}). Estado: ${unit.status}.`,
+      checkpoints: ['Puesto Base', `GPS Actual: ${unit.coordinates}`, 'Línea de Contención'],
+      lastUpdated: new Date().toISOString(),
+      isPatrolGenerated: true
+    };
+    handleSaveTacticalRoute(newRoute);
+    setRouteId(routeName);
+    setRecommendedAction(prev => {
+      if (prev.includes(unit.name)) return prev;
+      return `${prev} // Enlace inmediato con patrulla táctica ${unit.name} en ${unit.coordinates}.`;
+    });
+    playSyntheticBeep(980, 0.12);
+  };
 
   // Right column state
   const [selectedClanId, setSelectedClanId] = useState<string | null>(clans[0]?.id || null);
@@ -1274,41 +1342,112 @@ ${recommendedAction}
                   </div>
                 </div>
 
-                {/* Route & Hostile Clan Target */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[#94a3b8] mb-1 font-bold">
-                      [Ruta / Vector Contrastado]
-                    </label>
-                    <select
-                      value={routeId || ''}
-                      onChange={(e) => setRouteId(e.target.value)}
-                      className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
-                    >
-                      <option value="Ruta Colchane">Ruta Colchane</option>
-                      <option value="Paso Pisiga">Paso Pisiga</option>
-                      <option value="Salar de Coipasa">Salar de Coipasa</option>
-                      <option value="Hito 14">Hito 14</option>
-                      <option value="Tambo Quemado">Tambo Quemado</option>
-                    </select>
+                {/* Route & Hostile Clan Target with Editable Route & Live Patrol Vectors */}
+                <div className="space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[#94a3b8] font-bold flex items-center gap-1.5">
+                          <Route className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>[Ruta / Vector Contrastado] *</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsRouteModalOpen(true);
+                            playCyberClick('laser', 0.08);
+                          }}
+                          className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950/70 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/40 flex items-center gap-1 cursor-pointer transition shadow-[0_0_8px_rgba(6,182,212,0.2)]"
+                          title="Abrir editor doctrinal y gestor de rutas"
+                        >
+                          <Navigation className="w-3 h-3 text-cyan-400" />
+                          <span>Gestor / Editor ({tacticalRoutes.length})</span>
+                        </button>
+                      </div>
+
+                      <div className="relative">
+                        <input
+                          type="text"
+                          required
+                          list="cfi-tactical-routes-list"
+                          value={routeId || ''}
+                          onChange={(e) => setRouteId(e.target.value)}
+                          placeholder="Escriba o seleccione una ruta táctica..."
+                          className="w-full bg-[#121722] text-white border border-[#22293a] focus:border-cyan-400 rounded px-2.5 py-1.5 text-xs font-mono focus:outline-none pr-8 transition-colors"
+                        />
+                        <datalist id="cfi-tactical-routes-list">
+                          {tacticalRoutes.map((r) => (
+                            <option key={r.id} value={r.name}>
+                              {r.sector} ({r.threatLevel})
+                            </option>
+                          ))}
+                        </datalist>
+                        <span className="absolute right-2 top-2 text-[10px] text-zinc-500 pointer-events-none font-mono">
+                          EDIT
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[#94a3b8] mb-1 font-bold">
+                        [Facción / Clan Implicado]
+                      </label>
+                      <select
+                        value={targetClan || ''}
+                        onChange={(e) => setTargetClan(e.target.value)}
+                        className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
+                      >
+                        {clans.map((clan) => (
+                          <option key={clan.id} value={clan.name}>
+                            {clan.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-[#94a3b8] mb-1 font-bold">
-                      [Facción / Clan Implicado]
-                    </label>
-                    <select
-                      value={targetClan || ''}
-                      onChange={(e) => setTargetClan(e.target.value)}
-                      className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
-                    >
-                      {clans.map((clan) => (
-                        <option key={clan.id} value={clan.name}>
-                          {clan.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {/* Live Patrol Ingestion Bar: Colocar rutas enviadas por patrullas en tiempo real */}
+                  {tacticalUnits && tacticalUnits.length > 0 && (
+                    <div className="bg-[#0b121e] border border-cyan-900/50 rounded-lg p-2.5 shadow-md">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <Radio className="w-3 h-3 text-emerald-400 animate-pulse" />
+                          <span className="text-[10px] font-bold text-cyan-300 uppercase tracking-wider">
+                            Vectores de Patrullas en Tiempo Real:
+                          </span>
+                        </div>
+                        <span className="text-[9px] text-zinc-400 font-mono">
+                          Haga clic en una patrulla para colocar su ruta instantáneamente
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1.5">
+                        {tacticalUnits.map((unit) => {
+                          const isAssigned = routeId.includes(unit.name);
+
+                          return (
+                            <button
+                              key={unit.id}
+                              type="button"
+                              onClick={() => handleAdoptPatrolVector(unit)}
+                              className={`text-[10px] font-mono px-2 py-1 rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
+                                isAssigned
+                                  ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.35)] ring-1 ring-emerald-500/50'
+                                  : 'bg-[#131c2a] hover:bg-cyan-950/70 text-zinc-300 hover:text-cyan-200 border border-zinc-800 hover:border-cyan-500/40'
+                              }`}
+                              title={`Adoptar vector táctico de ${unit.name} (${unit.coordinates})`}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${unit.status === 'INTERCEPTING' ? 'bg-red-400 animate-ping' : 'bg-emerald-400'}`} />
+                              <span className="font-bold">{unit.name}</span>
+                              <span className="text-[9px] text-zinc-400 max-w-[100px] truncate">
+                                [{unit.sector || unit.coordinates.slice(0, 14)}]
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Threat Score Slider */}
@@ -1653,6 +1792,20 @@ ${recommendedAction}
           if (onBatchImportClans) onBatchImportClans(imported);
         }}
         initialSelectedClanId={clanModalInitialId || undefined}
+      />
+
+      {/* Tactical Route Manager & Field Patrol Vector Modal */}
+      <TacticalRouteManagerModal
+        isOpen={isRouteModalOpen}
+        onClose={() => setIsRouteModalOpen(false)}
+        routes={tacticalRoutes}
+        onSaveRoute={handleSaveTacticalRoute}
+        onDeleteRoute={handleDeleteTacticalRoute}
+        onSelectRouteForFusion={(name) => {
+          setRouteId(name);
+        }}
+        tacticalUnits={tacticalUnits}
+        activeRouteName={routeId}
       />
     </div>
   );

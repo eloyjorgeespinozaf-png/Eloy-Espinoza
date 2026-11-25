@@ -20,9 +20,10 @@ export interface SyncedDeviceRecord {
   userName?: string;
   connectedAt: string;
   lastSeenAt: string;
-  transport: 'WEBSOCKET' | 'HTTP_POLL';
+  transport: 'WEBSOCKET' | 'HTTP_POLL' | 'WEBRTC_P2P' | string;
   isOnline: boolean;
   ipAddress?: string;
+  latencyMs?: number;
 }
 
 export interface SyncEngineStatus {
@@ -313,5 +314,54 @@ export async function sendDirectSyncAction(type: string, payload: any): Promise<
     console.warn('[MultiDeviceSync] Error sending direct sync action:', err);
     return false;
   }
+}
+
+/**
+ * Measures round-trip time (RTT latency) in milliseconds to the active sync hub.
+ */
+export async function measureServerLatency(): Promise<number> {
+  const hubUrl = getActiveSyncHubUrl();
+  const start = performance.now();
+  try {
+    const res = await fetch(`${hubUrl}/api/version`, {
+      cache: 'no-store',
+      headers: {
+        'X-Device-Id': getOrCreateDeviceId()
+      }
+    });
+    if (res.ok) {
+      const elapsed = Math.round(performance.now() - start);
+      return elapsed;
+    }
+  } catch {
+    // Network error
+  }
+  return 0;
+}
+
+/**
+ * Broadcasts patrol / tactical unit GPS coordinates in real-time to all devices.
+ */
+export async function broadcastUnitCoordinatesSync(unitName: string, newCoords: string, unitId?: string): Promise<boolean> {
+  broadcastLocalTabSync('UPDATE_UNIT_COORDINATES', { unitName, unitId, newCoords });
+  return sendDirectSyncAction('UPDATE_UNIT_COORDINATES', { unitName, unitId, newCoords });
+}
+
+/**
+ * Broadcasts an encrypted tactical comms radio message across all devices in real-time.
+ */
+export async function broadcastTacticalCommsSync(message: {
+  senderName: string;
+  role: string;
+  text: string;
+  channel?: string;
+  timestamp?: string;
+}): Promise<boolean> {
+  const finalMsg = {
+    ...message,
+    timestamp: message.timestamp || new Date().toISOString()
+  };
+  broadcastLocalTabSync('TACTICAL_COMMS_BROADCAST', { commsMessage: finalMsg });
+  return sendDirectSyncAction('TACTICAL_RADIO_MESSAGE', { commsMessage: finalMsg });
 }
 

@@ -1107,7 +1107,7 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
                         min="0.10"
                         max="1.00"
                         step="0.05"
-                        value={currentStudioBg.opacity}
+                        value={currentStudioBg.opacity ?? 0.8}
                         onChange={(e) => handleUpdateOpacityForTarget(activeScope, parseFloat(e.target.value))}
                         className="w-full accent-emerald-500 cursor-pointer h-1.5 bg-zinc-800 rounded-lg"
                       />
@@ -1182,7 +1182,7 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
                         min="0"
                         max="10"
                         step="1"
-                        value={currentStudioBg.blur}
+                        value={currentStudioBg.blur ?? 0}
                         onChange={(e) => {
                           const val = parseInt(e.target.value, 10);
                           if (isGlobalScope) onUpdateGlobalSettings({ blur: val });
@@ -1197,14 +1197,14 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
                       <div className="space-y-1">
                         <div className="flex items-center justify-between text-[10px]">
                           <span className="text-zinc-400">Brillo:</span>
-                          <span className="text-amber-400 font-bold font-mono">{Math.round(currentStudioBg.brightness * 100)}%</span>
+                          <span className="text-amber-400 font-bold font-mono">{Math.round((currentStudioBg.brightness ?? 1) * 100)}%</span>
                         </div>
                         <input
                           type="range"
                           min="0.4"
                           max="1.5"
                           step="0.05"
-                          value={currentStudioBg.brightness}
+                          value={currentStudioBg.brightness ?? 1}
                           onChange={(e) => {
                             const val = parseFloat(e.target.value);
                             if (isGlobalScope) onUpdateGlobalSettings({ brightness: val });
@@ -1217,14 +1217,14 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
                       <div className="space-y-1">
                         <div className="flex items-center justify-between text-[10px]">
                           <span className="text-zinc-400">Contraste:</span>
-                          <span className="text-cyan-400 font-bold font-mono">{Math.round(currentStudioBg.contrast * 100)}%</span>
+                          <span className="text-cyan-400 font-bold font-mono">{Math.round((currentStudioBg.contrast ?? 1) * 100)}%</span>
                         </div>
                         <input
                           type="range"
                           min="0.5"
                           max="1.6"
                           step="0.05"
-                          value={currentStudioBg.contrast}
+                          value={currentStudioBg.contrast ?? 1}
                           onChange={(e) => {
                             const val = parseFloat(e.target.value);
                             if (isGlobalScope) onUpdateGlobalSettings({ contrast: val });
@@ -1357,7 +1357,7 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
 
               <input
                 type="url"
-                value={urlInputValue}
+                value={urlInputValue || ''}
                 onChange={(e) => setUrlInputValue(e.target.value)}
                 placeholder="https://ejemplo.com/fondo-militar.jpg"
                 className="w-full bg-black border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500"

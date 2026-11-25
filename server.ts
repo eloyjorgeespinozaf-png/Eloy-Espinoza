@@ -30,9 +30,10 @@ export interface SyncedDeviceRecord {
   userName?: string;
   connectedAt: string;
   lastSeenAt: string;
-  transport: "WEBSOCKET" | "HTTP_POLL";
+  transport: "WEBSOCKET" | "HTTP_POLL" | "WEBRTC_P2P" | string;
   isOnline: boolean;
   ipAddress?: string;
+  latencyMs?: number;
 }
 
 // Centralized in-memory synced database
@@ -291,49 +292,65 @@ const connectedPeers = new Map<WebSocket, {
 
 // Helper to broadcast P2P Peers list to all connected clients
 function broadcastPeersList() {
-  const peers = Array.from(connectedPeers.values());
-  const msgStr = JSON.stringify({
-    type: "P2P_PEERS_LIST",
-    payload: { peers }
-  });
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(msgStr);
-    }
-  });
+  try {
+    const peers = Array.from(connectedPeers.values());
+    const msgStr = JSON.stringify({
+      type: "P2P_PEERS_LIST",
+      payload: { peers }
+    });
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(msgStr, (err) => {
+            if (err && (err as any).code !== "EPIPE" && (err as any).code !== "ECONNRESET") {
+              // Ignore standard disconnect write errors
+            }
+          });
+        } catch {}
+      }
+    });
+  } catch {}
 }
 
 // Helper to broadcast active synchronized devices across all installed versions
 function broadcastSyncedDevices() {
-  const devices = Array.from(syncedDevicesMap.values());
-  const msgStr = JSON.stringify({
-    type: "SYNCED_DEVICES_UPDATE",
-    payload: {
-      devices,
-      serverVersion,
-      totalConnected: devices.filter(d => d.isOnline).length
-    }
-  });
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      try {
-        client.send(msgStr);
-      } catch (err) {}
-    }
-  });
+  try {
+    const devices = Array.from(syncedDevicesMap.values());
+    const msgStr = JSON.stringify({
+      type: "SYNCED_DEVICES_UPDATE",
+      payload: {
+        devices,
+        serverVersion,
+        totalConnected: devices.filter(d => d.isOnline).length
+      }
+    });
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(msgStr, (err) => {
+            if (err && (err as any).code !== "EPIPE" && (err as any).code !== "ECONNRESET") {
+              // Ignore standard disconnect write errors
+            }
+          });
+        } catch (err) {}
+      }
+    });
+  } catch {}
 }
 
 const wss = new WebSocketServer({ noServer: true });
 
-wss.on("error", (err) => {
-  console.warn("[PII-LCC Server] WebSocketServer runtime error:", err);
+wss.on("error", (err: any) => {
+  if (err?.code === "EPIPE" || err?.code === "ECONNRESET") return;
+  console.warn("[PII-LCC Server] WebSocketServer runtime error:", err?.message || err);
 });
 
 wss.on("connection", (ws: WebSocket) => {
   console.log("A device connected to PII-LCC real-time network.");
 
-  ws.on("error", (err) => {
-    console.warn("[PII-LCC Server] Client WebSocket connection error:", err);
+  ws.on("error", (err: any) => {
+    if (err?.code === "EPIPE" || err?.code === "ECONNRESET") return;
+    console.warn("[PII-LCC Server] Client WebSocket connection error:", err?.message || err);
   });
 
   // Send the current authoritative state to the newly connected terminal
@@ -459,11 +476,15 @@ wss.on("connection", (ws: WebSocket) => {
         }
 
         case "UPDATE_UNIT_COORDINATES": {
-          const { unitName, newCoords } = payload;
-          serverTacticalUnits = serverTacticalUnits.map(unit => 
-            unit.name === unitName ? { ...unit, coordinates: newCoords, lastReportTime: "Hace un momento" } : unit
-          );
-          shouldBroadcast = true;
+          const { unitName, unitId, newCoords } = payload || {};
+          if (newCoords) {
+            serverTacticalUnits = serverTacticalUnits.map(unit => 
+              (unit.name === unitName || (unitId && unit.id === unitId)) 
+                ? { ...unit, coordinates: newCoords, lastReportTime: "Hace un momento" } 
+                : unit
+            );
+            shouldBroadcast = true;
+          }
           break;
         }
 
@@ -689,7 +710,7 @@ wss.on("connection", (ws: WebSocket) => {
 
         case "REGISTER_DEVICE":
         case "DEVICE_HEARTBEAT": {
-          const { deviceId, deviceName, installedVersion, platform, role, userName, ipAddress } = payload || {};
+          const { deviceId, deviceName, installedVersion, platform, role, userName, ipAddress, latencyMs, transport } = payload || {};
           if (deviceId) {
             socketToDeviceIdMap.set(ws, deviceId);
             const existing = syncedDevicesMap.get(deviceId);
@@ -702,12 +723,35 @@ wss.on("connection", (ws: WebSocket) => {
               userName: userName || existing?.userName,
               connectedAt: existing?.connectedAt || new Date().toISOString(),
               lastSeenAt: new Date().toISOString(),
-              transport: "WEBSOCKET",
+              transport: transport || existing?.transport || "WEBSOCKET",
               isOnline: true,
-              ipAddress: ipAddress || existing?.ipAddress
+              ipAddress: ipAddress || existing?.ipAddress,
+              latencyMs: typeof latencyMs === "number" ? latencyMs : (existing?.latencyMs ?? 18)
             });
             broadcastSyncedDevices();
           }
+          break;
+        }
+
+        case "PING":
+        case "HEARTBEAT_PING": {
+          const { clientSentAt, deviceId, latencyMs, transport } = payload || {};
+          if (deviceId && syncedDevicesMap.has(deviceId)) {
+            const dev = syncedDevicesMap.get(deviceId)!;
+            if (typeof latencyMs === "number") dev.latencyMs = latencyMs;
+            if (transport) dev.transport = transport;
+            dev.lastSeenAt = new Date().toISOString();
+            dev.isOnline = true;
+          }
+          try {
+            ws.send(JSON.stringify({
+              type: "HEARTBEAT_PONG",
+              payload: {
+                clientSentAt: clientSentAt || Date.now(),
+                serverTime: Date.now()
+              }
+            }));
+          } catch {}
           break;
         }
 
@@ -936,12 +980,22 @@ wss.on("connection", (ws: WebSocket) => {
 });
 
 function broadcast(messageObj: any) {
-  const payloadStr = JSON.stringify(messageObj);
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(payloadStr);
-    }
-  });
+  try {
+    const payloadStr = JSON.stringify(messageObj);
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(payloadStr, (err) => {
+            if (err && (err as any).code !== "EPIPE" && (err as any).code !== "ECONNRESET") {
+              // Ignore standard disconnect write errors
+            }
+          });
+        } catch {}
+      }
+    });
+  } catch (err) {
+    console.warn("[PII-LCC Server] Broadcast payload error:", err);
+  }
 }
 
 async function startServer() {
@@ -1468,9 +1522,10 @@ async function startServer() {
         userName: req.body?.deviceInfo?.userName || existing?.userName,
         connectedAt: existing?.connectedAt || new Date().toISOString(),
         lastSeenAt: new Date().toISOString(),
-        transport: "HTTP_POLL",
+        transport: (req.headers["x-transport"] as any) || req.body?.deviceInfo?.transport || existing?.transport || "HTTP_POLL",
         isOnline: true,
-        ipAddress: req.ip || req.socket.remoteAddress
+        ipAddress: req.ip || req.socket.remoteAddress,
+        latencyMs: typeof req.body?.deviceInfo?.latencyMs === 'number' ? req.body.deviceInfo.latencyMs : (existing?.latencyMs ?? 25)
       });
     }
 
@@ -1749,11 +1804,15 @@ async function startServer() {
           }
 
           case "UPDATE_UNIT_COORDINATES": {
-            const { unitName, newCoords } = payload;
-            serverTacticalUnits = serverTacticalUnits.map(unit => 
-              unit.name === unitName ? { ...unit, coordinates: newCoords, lastReportTime: "Hace un momento" } : unit
-            );
-            shouldBroadcast = true;
+            const { unitName, unitId, newCoords } = payload || {};
+            if (newCoords) {
+              serverTacticalUnits = serverTacticalUnits.map(unit => 
+                (unit.name === unitName || (unitId && unit.id === unitId)) 
+                  ? { ...unit, coordinates: newCoords, lastReportTime: "Hace un momento" } 
+                  : unit
+              );
+              shouldBroadcast = true;
+            }
             break;
           }
 
@@ -2232,15 +2291,25 @@ async function startServer() {
   });
 
   httpServer.on("upgrade", (request, socket, head) => {
-    socket.on("error", (err) => {
-      console.warn("[PII-LCC Server] Upgrade socket error:", err);
+    socket.on("error", (err: any) => {
+      // Cleanly suppress standard disconnect/abort errors like write EPIPE, ECONNRESET, etc.
+      if (err?.code === "EPIPE" || err?.code === "ECONNRESET" || err?.code === "ERR_STREAM_WRITE_AFTER_END") {
+        return;
+      }
+      console.warn("[PII-LCC Server] Upgrade socket error:", err?.message || err);
     });
 
     const url = request.url || "";
     if (url.startsWith("/ws-sync")) {
+      if (socket.destroyed) return;
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit("connection", ws, request);
       });
+    } else {
+      // Cleanly destroy unrecognized upgrade sockets so they don't linger or error with EPIPE
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
     }
   });
 

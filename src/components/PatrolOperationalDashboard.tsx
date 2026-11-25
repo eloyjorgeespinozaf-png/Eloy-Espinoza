@@ -1027,21 +1027,40 @@ ${recommendedAction}
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-mono text-[#94a3b8] uppercase block mb-1">
-                        Vector / Ruta Clandestina:
-                      </label>
-                      <select
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[10px] font-mono text-[#94a3b8] uppercase">
+                          Vector / Ruta Clandestina:
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const myVector = `Vector ${patrol.name} (${patrol.sector || patrol.coordinates.slice(0, 16)})`;
+                            setRouteId(myVector);
+                            playSyntheticBeep(980, 0.1);
+                          }}
+                          className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 cursor-pointer"
+                          title="Colocar mi posición y sector actual como vector"
+                        >
+                          Usar Mi Vector
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        list="patrol-tactical-routes-list"
                         value={routeId || ''}
                         onChange={(e) => setRouteId(e.target.value)}
-                        className="w-full bg-[#121722] text-white border border-[#22293a] rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-[#f97316]"
-                      >
-                        <option value="Ruta Colchane">Ruta Colchane</option>
-                        <option value="Salar de Coipasa">Salar de Coipasa</option>
-                        <option value="Tambo Quemado">Tambo Quemado</option>
-                        <option value="Paso Pisiga">Paso Pisiga</option>
-                        <option value="Hito 14">Hito 14</option>
-                        <option value="Hito 18">Hito 18</option>
-                      </select>
+                        placeholder="Ruta o corredor táctico..."
+                        className="w-full bg-[#121722] text-white border border-[#22293a] focus:border-cyan-400 rounded px-2.5 py-1.5 text-xs font-mono focus:outline-none"
+                      />
+                      <datalist id="patrol-tactical-routes-list">
+                        <option value="Ruta Colchane" />
+                        <option value="Paso Pisiga" />
+                        <option value="Salar de Coipasa" />
+                        <option value="Hito 14" />
+                        <option value="Hito 18" />
+                        <option value="Tambo Quemado" />
+                        <option value={`Vector ${patrol.name} (${patrol.coordinates})`} />
+                      </datalist>
                     </div>
                   </div>
 
