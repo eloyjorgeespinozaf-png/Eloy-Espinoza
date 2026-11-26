@@ -1,6 +1,6 @@
 {
-  "version": "v2.6.1-OTA",
-  "buildId": "ais-build-2026-11-26-default-bgs",
-  "builtAt": "2026-11-26T23:05:00.000Z",
-  "changelog": "Fondos tácticos actuales fijados como predeterminados permanentes para la interfaz general y los 7 módulos en todos los dispositivos."
+  "version": "v2.6.2-OTA",
+  "buildId": "ais-build-2026-11-26-vercel-ota",
+  "builtAt": "2026-11-26T23:45:00.000Z",
+  "changelog": "Soporte completo para despliegues en Vercel: caché sin bloqueo de HTML/SW, actualización OTA automática vía /version.json, geocodificación directa de Bolivia y fondos tácticos predeterminados."
 }

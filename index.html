@@ -88,7 +88,16 @@
           window.WebSocket = SilentHmrWS;
         }
 
-        // Unregister any stale dev service worker and purge dev caches to avoid dual React instances
+        // Clean up temporary OTA cache-bust query parameter from URL bar
+        try {
+          var locUrl = new URL(window.location.href);
+          if (locUrl.searchParams.has('_ota')) {
+            locUrl.searchParams.delete('_ota');
+            window.history.replaceState({}, '', locUrl.pathname + (locUrl.search || '') + (locUrl.hash || ''));
+          }
+        } catch (e) {}
+
+        // Unregister any stale dev service worker; in production (Vercel/PWA), trigger immediate SW update check
         if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
           if (window.location.hostname === 'localhost' || window.location.hostname.includes('ais-dev')) {
             navigator.serviceWorker.getRegistrations().then(function(regs) {
@@ -103,6 +112,12 @@
                 }
               }).catch(function() {});
             }
+          } else {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              for (var k = 0; k < regs.length; k++) {
+                regs[k].update().catch(function() {});
+              }
+            }).catch(function() {});
           }
         }
       })();

@@ -199,8 +199,9 @@ export async function resolveBoliviaLocation(query: string): Promise<ResolvedLoc
   // If we have an exact match in our local gazetteer, put it first immediately
   const exactLocal = localMatches.find(m => normalizeLocationText(m.name) === qNorm);
 
-  // Query backend Nominatim proxy to cover ANY village, river, hito, or locality in Bolivia
+  // Query backend Nominatim proxy first; if deployed on static hosting (e.g. Vercel), fall back directly to Nominatim CORS API
   let remoteResults: ResolvedLocationResult[] = [];
+  let proxyWorked = false;
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
@@ -208,9 +209,11 @@ export async function resolveBoliviaLocation(query: string): Promise<ResolvedLoc
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-    if (resp.ok) {
+    const ct = resp.headers.get('content-type') || '';
+    if (resp.ok && ct.includes('application/json')) {
       const data = await resp.json();
       if (Array.isArray(data.results)) {
+        proxyWorked = true;
         remoteResults = data.results
           .filter((r: any) => Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lon)))
           .map((r: any) => {
@@ -229,7 +232,48 @@ export async function resolveBoliviaLocation(query: string): Promise<ResolvedLoc
       }
     }
   } catch {
-    // Offline or timeout — localMatches still works seamlessly
+    // Fall through to direct Nominatim CORS lookup
+  }
+
+  if (!proxyWorked) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5500);
+      const nomUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=bo&limit=8&accept-language=es&q=${encodeURIComponent(trimmed)}`;
+      const resp = await fetch(nomUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (resp.ok) {
+        const items = await resp.json();
+        if (Array.isArray(items)) {
+          remoteResults = items
+            .filter((item: any) => Number.isFinite(Number(item.lat)) && Number.isFinite(Number(item.lon)))
+            .map((item: any) => {
+              const lat = Number(item.lat);
+              const lon = Number(item.lon);
+              const addr = item.address || {};
+              const dept = addr.state || addr.region || addr.county || '';
+              const shortName =
+                item.name ||
+                addr.city ||
+                addr.town ||
+                addr.village ||
+                addr.municipality ||
+                String(item.display_name || trimmed).split(',')[0].trim();
+              return {
+                name: shortName,
+                displayName: item.display_name || shortName,
+                department: dept,
+                lat,
+                lon,
+                dms: formatToMilitaryDMS(lat, lon),
+                source: 'OSM_NOMINATIM' as const
+              };
+            });
+        }
+      }
+    } catch {
+      // Offline or timeout — localMatches still works seamlessly
+    }
   }
 
   // Combine: exact local match first, then local matches + unique remote results
@@ -261,9 +305,36 @@ export async function reverseGeocodeBolivia(lat: number, lon: number): Promise<s
       signal: controller.signal
     });
     clearTimeout(timeoutId);
-    if (resp.ok) {
+    const ct = resp.headers.get('content-type') || '';
+    if (resp.ok && ct.includes('application/json')) {
       const data = await resp.json();
       if (data?.name) return String(data.name);
+    }
+  } catch {
+    // fall through to direct Nominatim CORS reverse lookup
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const revUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=14&addressdetails=1&accept-language=es`;
+    const resp = await fetch(revUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (resp.ok) {
+      const item = await resp.json();
+      const addr = item?.address || {};
+      const place =
+        item?.name ||
+        addr.village ||
+        addr.town ||
+        addr.city ||
+        addr.municipality ||
+        addr.county ||
+        addr.state;
+      const dept = addr.state || addr.region || '';
+      if (place) {
+        return dept && place !== dept ? `${place}, ${dept}` : String(place);
+      }
     }
   } catch {
     // fallback below

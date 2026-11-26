@@ -351,7 +351,8 @@ export async function loadModuleBackgroundsLocal(): Promise<ModuleBackgroundsMap
 export async function fetchServerModuleBackgrounds(): Promise<ModuleBackgroundsMap | null> {
   try {
     const res = await fetch('/api/module-backgrounds');
-    if (!res.ok) return null;
+    const ct = res.headers.get('content-type') || '';
+    if (!res.ok || !ct.includes('application/json')) return null;
     const data = await res.json();
     if (data && data.backgrounds) {
       const backgrounds = data.backgrounds as ModuleBackgroundsMap;

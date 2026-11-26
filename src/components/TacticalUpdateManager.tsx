@@ -124,9 +124,15 @@ export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
           } catch {}
         }
 
-        // 3. Reload the installed app / browser cleanly
+        // 3. Reload cleanly bypassing HTTP disk cache so Vercel / PWA immediately serves latest build
         setTimeout(() => {
-          window.location.reload();
+          try {
+            const nextUrl = new URL(window.location.href);
+            nextUrl.searchParams.set('_ota', String(Date.now()));
+            window.location.replace(nextUrl.toString());
+          } catch {
+            window.location.reload();
+          }
         }, 280);
       } catch (err) {
         console.error('[OTA] Update execution error:', err);
@@ -187,50 +193,68 @@ export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
       }
 
       try {
-        const res = await fetch(`/api/app-version?t=${Date.now()}`, {
-          cache: 'no-store',
-          headers: { 'Cache-Control': 'no-cache' }
-        });
-        if (res.ok) {
-          const data = await res.json();
+        // Query /api/app-version (Express/AI Studio) and fall back cleanly to static /version.json (Vercel/CDN)
+        let data: any = null;
+        const ts = Date.now();
+        const endpoints = [`/api/app-version?t=${ts}`, `/version.json?t=${ts}`];
+
+        for (const endpoint of endpoints) {
+          try {
+            const res = await fetch(endpoint, {
+              cache: 'no-store',
+              headers: { 'Cache-Control': 'no-cache' }
+            });
+            const contentType = res.headers.get('content-type') || '';
+            if (res.ok && contentType.includes('application/json')) {
+              const parsed = await res.json();
+              if (parsed && parsed.buildId) {
+                data = parsed;
+                break;
+              }
+            }
+          } catch {
+            // Try next endpoint
+          }
+        }
+
+        if (data && data.buildId) {
           setLastCheckedTime(new Date().toLocaleTimeString('es-BO', { hour12: false }));
 
-          if (data && data.buildId) {
-            const remoteBuildId = String(data.buildId);
-            serverBuildIdRef.current = remoteBuildId;
-            setServerBuildId(remoteBuildId);
-            setServerVersion(data.version || AI_STUDIO_BUILD.version);
-            if (data.changelog) setChangelog(data.changelog);
+          const remoteBuildId = String(data.buildId);
+          serverBuildIdRef.current = remoteBuildId;
+          setServerBuildId(remoteBuildId);
+          setServerVersion(data.version || AI_STUDIO_BUILD.version);
+          if (data.changelog) setChangelog(data.changelog);
 
-            // Already running the latest compiled build
-            if (remoteBuildId === AI_STUDIO_BUILD.buildId) {
-              setHasUpdate(false);
-              setAutoUpdateCountdown(null);
-              if (manual) {
-                setSyncStatusMsg(`Dispositivo al día: versión actual (${AI_STUDIO_BUILD.version}).`);
-                setTimeout(() => setSyncStatusMsg(null), 4000);
-              }
-              return;
-            }
-
-            // Respect explicit manual dismissal only for non-manual checks when auto-OTA is disabled
-            const dismissedBuildId = safeStorage.getItem('PII_LCC_DISMISSED_BUILD_ID');
-            if (!manual && !autoOtaEnabledRef.current && dismissedBuildId === remoteBuildId) {
-              setHasUpdate(false);
-              return;
-            }
-
-            // A newer build is published on the server!
-            if (manual) {
-              setHasUpdate(true);
-              setSyncStatusMsg(`Nueva versión ${data.version} disponible. Lista para aplicar.`);
-              setTimeout(() => setSyncStatusMsg(null), 5000);
-            } else {
-              scheduleAutoUpdateIfAllowed(remoteBuildId, false);
-            }
-          } else {
+          // Already running the latest compiled build
+          if (remoteBuildId === AI_STUDIO_BUILD.buildId) {
             setHasUpdate(false);
+            setAutoUpdateCountdown(null);
+            if (manual) {
+              setSyncStatusMsg(`Dispositivo al día: versión actual (${AI_STUDIO_BUILD.version}).`);
+              setTimeout(() => setSyncStatusMsg(null), 4000);
+            }
+            return;
           }
+
+          // Respect explicit manual dismissal only for non-manual checks when auto-OTA is disabled
+          const dismissedBuildId = safeStorage.getItem('PII_LCC_DISMISSED_BUILD_ID');
+          if (!manual && !autoOtaEnabledRef.current && dismissedBuildId === remoteBuildId) {
+            setHasUpdate(false);
+            return;
+          }
+
+          // A newer build is published on the server / Vercel!
+          if (manual) {
+            setHasUpdate(true);
+            setSyncStatusMsg(`Nueva versión ${data.version} disponible. Lista para aplicar.`);
+            setTimeout(() => setSyncStatusMsg(null), 5000);
+          } else {
+            scheduleAutoUpdateIfAllowed(remoteBuildId, false);
+          }
+        } else if (manual) {
+          setSyncStatusMsg(`Versión instalada: ${AI_STUDIO_BUILD.version}.`);
+          setTimeout(() => setSyncStatusMsg(null), 4000);
         }
       } catch (err) {
         console.warn('[OTA Updater] Could not check app version:', err);
@@ -388,7 +412,8 @@ export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
           changelog: 'Sincronización y actualización inmediata propagada a todos los dispositivos instalados.'
         })
       });
-      if (resp.ok) {
+      const contentType = resp.headers.get('content-type') || '';
+      if (resp.ok && contentType.includes('application/json')) {
         const data = await resp.json();
         playChime(650, 1050, 0.25);
         setSyncStatusMsg(
@@ -396,12 +421,17 @@ export const TacticalUpdateManager: React.FC<TacticalUpdateManagerProps> = ({
         );
         setTimeout(() => setSyncStatusMsg(null), 6000);
       } else {
-        setSyncStatusMsg('No se pudo propagar la señal OTA al servidor central.');
-        setTimeout(() => setSyncStatusMsg(null), 4000);
+        // Static CDN deployment (e.g. Vercel): every deploy publishes /version.json automatically
+        await checkForUpdates(true);
+        setSyncStatusMsg(
+          'Despliegue web estático (Vercel): cada nueva publicación se propaga automáticamente vía /version.json a todos los dispositivos al abrirse.'
+        );
+        setTimeout(() => setSyncStatusMsg(null), 6000);
       }
     } catch {
-      setSyncStatusMsg('Error de red al propagar la actualización.');
-      setTimeout(() => setSyncStatusMsg(null), 4000);
+      await checkForUpdates(true);
+      setSyncStatusMsg('Verificación OTA completada contra el manifiesto de versión publicado.');
+      setTimeout(() => setSyncStatusMsg(null), 4500);
     } finally {
       setIsBroadcastingPush(false);
     }

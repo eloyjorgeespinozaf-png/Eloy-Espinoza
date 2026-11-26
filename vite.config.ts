@@ -128,26 +128,37 @@ export default defineConfig(({ command }) => {
           ],
         },
         workbox: {
-          // Ensure installed PWAs activate new versions immediately and purge old caches
+          // Ensure installed PWAs and Vercel deployments activate new versions immediately
+          // and NEVER serve stale index.html from precache when online.
           skipWaiting: true,
           clientsClaim: true,
           cleanupOutdatedCaches: true,
+          navigateFallback: null,
           maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
-          globPatterns: ['**/*.{js,css,html,ico,png,jpg,svg,woff,woff2}'],
-          navigateFallbackDenylist: [/^\/api\//, /^\/ws-sync/, /^\/sw\.js$/],
+          globPatterns: [
+            'assets/*.{js,css}',
+            '**/*.{ico,svg,woff,woff2}',
+            'pwa-*.png',
+            'favicon.png',
+            'apple-touch-icon.png',
+            'default-interface-bg.jpg',
+            'backgrounds/default_*.png'
+          ],
+          globIgnores: ['**/index.html', '**/version.json', '**/server.cjs*', '**/assets/aistudio/**'],
           runtimeCaching: [
             {
-              // Never cache live API endpoints or version checks
-              urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+              // Never cache live API endpoints or version manifests
+              urlPattern: ({ url }) =>
+                url.pathname.startsWith('/api/') || url.pathname === '/version.json',
               handler: 'NetworkOnly',
             },
             {
-              // Always fetch latest HTML navigation from network first, falling back to cache offline
+              // Always fetch latest HTML navigation from network first (Vercel / AI Studio), falling back to cache only offline
               urlPattern: ({ request }) => request.mode === 'navigate',
               handler: 'NetworkFirst',
               options: {
-                cacheName: 'pii-lcc-pages-cache',
-                networkTimeoutSeconds: 4,
+                cacheName: 'pii-lcc-pages-cache-v2',
+                networkTimeoutSeconds: 3,
                 expiration: {
                   maxEntries: 10,
                   maxAgeSeconds: 60 * 60 * 24,

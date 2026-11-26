@@ -85,7 +85,11 @@ export function useFullDashboardBackground() {
   useEffect(() => {
     let isMounted = true;
     fetch('/api/full-dashboard-bg')
-      .then(res => res.json())
+      .then(res => {
+        const ct = res.headers.get('content-type') || '';
+        if (!res.ok || !ct.includes('application/json')) return null;
+        return res.json();
+      })
       .then(data => {
         if (isMounted && data?.success && data?.settings) {
           setSettings(prev => {
