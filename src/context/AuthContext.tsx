@@ -12,6 +12,12 @@ import {
   playCyberAccessGranted, 
   playCyberDenied 
 } from '../utils/audio';
+import {
+  fetchSystemUsersFromSupabase,
+  upsertSystemUserInSupabase,
+  upsertAllSystemUsersInSupabase,
+  deleteSystemUserFromSupabase
+} from '../lib/supabase';
 
 interface AuthContextType {
   user: User | null;
@@ -24,6 +30,7 @@ interface AuthContextType {
   addUser: (newUser: Omit<User, 'id' | 'signature'> & { id?: string; signature?: string }) => { success: boolean; user?: User; error?: string };
   updateUser: (id: string, updates: Partial<User>) => boolean;
   deleteUser: (id: string) => boolean;
+  replaceUsers: (restoredUsers: User[]) => void;
   resetUsersToDefault: () => void;
   auditLogs: AuditLogEntry[];
   setAuditLogs: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
@@ -229,6 +236,73 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [users]);
 
+  // Hydrate and reconcile system users with Supabase Cloud on startup
+  useEffect(() => {
+    let cancelled = false;
+    const hydrateUsersFromSupabase = async () => {
+      const remoteUsers = await fetchSystemUsersFromSupabase();
+      if (cancelled || !remoteUsers) return;
+
+      if (remoteUsers.length === 0) {
+        // Seed Supabase with current local/preset users if table is empty
+        upsertAllSystemUsersInSupabase(users).catch(() => {});
+        return;
+      }
+
+      setUsers(prev => {
+        const mergedById = new Map<string, User>();
+        const seenUsernames = new Set<string>();
+
+        // 1. Always preserve primary administrator preset if missing in cloud
+        const adminPreset = INITIAL_SYSTEM_USERS[0];
+        const remoteAdmin = remoteUsers.find(
+          u => u.id === adminPreset.id || u.username?.toLowerCase() === adminPreset.username?.toLowerCase()
+        );
+        const effectiveAdmin = remoteAdmin
+          ? { ...adminPreset, ...remoteAdmin, isAdmin: true }
+          : adminPreset;
+        mergedById.set(effectiveAdmin.id, effectiveAdmin);
+        if (effectiveAdmin.username) seenUsernames.add(effectiveAdmin.username.toLowerCase());
+
+        // 2. Load all authoritative cloud users from Supabase
+        for (const ru of remoteUsers) {
+          if (!ru || !ru.id) continue;
+          const uname = (ru.username || '').toLowerCase();
+          if (mergedById.has(ru.id)) continue;
+          if (uname && seenUsernames.has(uname)) continue;
+          mergedById.set(ru.id, ru);
+          if (uname) seenUsernames.add(uname);
+        }
+
+        // 3. Keep any local users not yet in Supabase and sync them upward
+        const missingInCloud: User[] = [];
+        for (const lu of prev) {
+          if (!lu || !lu.id) continue;
+          const uname = (lu.username || '').toLowerCase();
+          if (mergedById.has(lu.id) || (uname && seenUsernames.has(uname))) continue;
+          mergedById.set(lu.id, lu);
+          if (uname) seenUsernames.add(uname);
+          missingInCloud.push(lu);
+        }
+
+        if (!remoteAdmin) {
+          missingInCloud.push(effectiveAdmin);
+        }
+
+        if (missingInCloud.length > 0) {
+          upsertAllSystemUsersInSupabase(missingInCloud).catch(() => {});
+        }
+
+        return Array.from(mergedById.values());
+      });
+    };
+
+    hydrateUsersFromSupabase();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Sync audit logs to storage
   useEffect(() => {
     try {
@@ -331,6 +405,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setUsers(prev => [createdUser, ...prev]);
 
+    // Auto-persist new operator to Supabase Cloud
+    upsertSystemUserInSupabase(createdUser).catch(err => {
+      console.warn('[AuthContext] Error sincronizando nuevo usuario a Supabase:', err);
+    });
+
     // Record audit log
     logAction(
       `Administrador CEO-LCC dio de alta al usuario militar: ${createdUser.name} (${createdUser.rank}) en ${createdUser.organName}. ID: ${createdUser.id}. Clave Criptográfica Celular: [CONFIDENCIAL/REGISTRADA].`
@@ -351,14 +430,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
+    let updatedSnapshot: User | null = null;
     setUsers(prev => {
       const index = prev.findIndex(u => u.id === id);
       if (index === -1) return prev;
       const updated = { ...prev[index], ...normalizedUpdates };
+      updatedSnapshot = updated;
       const next = [...prev];
       next[index] = updated;
       return next;
     });
+
+    const existingUser = users.find(u => u.id === id);
+    const toSync = updatedSnapshot || (existingUser ? { ...existingUser, ...normalizedUpdates } : null);
+    if (toSync) {
+      upsertSystemUserInSupabase(toSync).catch(err => {
+        console.warn('[AuthContext] Error actualizando usuario en Supabase:', err);
+      });
+    }
 
     setUser(prev => (prev && prev.id === id ? { ...prev, ...normalizedUpdates } : prev));
 
@@ -375,14 +464,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     setUsers(prev => prev.filter(u => u.id !== id));
+    deleteSystemUserFromSupabase(id).catch(err => {
+      console.warn('[AuthContext] Error eliminando usuario de Supabase:', err);
+    });
     logAction(`Administrador CEO-LCC revocó acceso al operador: ${target.name} (${target.id}) de ${target.organName}.`);
     return true;
+  };
+
+  // Replace/merge users from cloud restore (always keeping primary administrator)
+  const replaceUsers = (restoredUsers: User[]) => {
+    if (!Array.isArray(restoredUsers) || restoredUsers.length === 0) return;
+    const adminPreset = INITIAL_SYSTEM_USERS[0];
+    const hasAdmin = restoredUsers.some(
+      u => u.id === adminPreset.id || u.username?.toLowerCase() === adminPreset.username?.toLowerCase()
+    );
+    const finalUsers = hasAdmin ? restoredUsers : [adminPreset, ...restoredUsers];
+    setUsers(finalUsers);
+    safeStorage.setItem('PII_LCC_SYSTEM_USERS', JSON.stringify(finalUsers));
+    logAction(`Directorio de operadores sincronizado desde Supabase Cloud (${finalUsers.length} operadores).`);
   };
 
   // Reset users to defaults
   const resetUsersToDefault = () => {
     setUsers(INITIAL_SYSTEM_USERS);
     safeStorage.setItem('PII_LCC_SYSTEM_USERS', JSON.stringify(INITIAL_SYSTEM_USERS));
+    upsertAllSystemUsersInSupabase(INITIAL_SYSTEM_USERS).catch(() => {});
     logAction('Administrador CEO-LCC restauró la plantilla doctrinal de usuarios a valores de fábrica.');
   };
 
@@ -545,6 +651,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         addUser,
         updateUser,
         deleteUser,
+        replaceUsers,
         resetUsersToDefault,
         auditLogs,
         setAuditLogs,

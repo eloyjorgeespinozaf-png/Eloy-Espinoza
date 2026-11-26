@@ -155,6 +155,323 @@ export async function testSupabaseConnection(): Promise<SupabaseHealthStatus> {
   }
 }
 
+/**
+ * Safely normalizes any timestamp value (ISO string, epoch ms, Date, or localized text like "Hace un momento")
+ * into a valid PostgreSQL TIMESTAMPTZ ISO-8601 string.
+ */
+export function toSafeIsoTimestamp(value?: string | number | Date | null): string {
+  if (!value) return new Date().toISOString();
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? new Date().toISOString() : value.toISOString();
+  }
+  if (typeof value === 'number') {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+  }
+  const str = String(value).trim();
+  if (!str) return new Date().toISOString();
+  // Reject localized relative strings ("Hace un momento", "Hace 5 minutos", "Hoy", etc.)
+  if (/^(hace|hoy|ayer|ahora|reciente|sin)/i.test(str)) {
+    return new Date().toISOString();
+  }
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime()) && parsed.getFullYear() >= 2000 && parsed.getFullYear() <= 2100) {
+    return parsed.toISOString();
+  }
+  return new Date().toISOString();
+}
+
+/**
+ * Normalizes a TacticalUnit into a Supabase `tactical_units` row with valid TIMESTAMPTZ
+ */
+export function mapTacticalUnitToSupabaseRow(u: TacticalUnit) {
+  const safeIso = toSafeIsoTimestamp(u.lastReportTime);
+  const safeCreatedAt = toSafeIsoTimestamp(u.createdAt);
+  const normalizedUnit: TacticalUnit = {
+    ...u,
+    id: u.id || `unit-${Date.now()}`,
+    name: (u.name || 'Patrulla Táctica').trim(),
+    status: u.status || 'PATROLLING',
+    coordinates: (u.coordinates || '19°13\'10"S 68°35\'50"W').trim(),
+    personnel: Number(u.personnel) || 6,
+    battery: Number.isFinite(Number(u.battery)) ? Number(u.battery) : 100,
+    fuel: Number.isFinite(Number(u.fuel)) ? Number(u.fuel) : 90,
+    ammo: Number.isFinite(Number(u.ammo)) ? Number(u.ammo) : 100,
+    lastReportTime: safeIso,
+    createdAt: safeCreatedAt
+  };
+  return {
+    id: normalizedUnit.id,
+    name: normalizedUnit.name,
+    status: normalizedUnit.status,
+    coordinates: normalizedUnit.coordinates,
+    battery: normalizedUnit.battery ?? 100,
+    comm_status: normalizedUnit.frequency || '142.850 MHz',
+    assigned_mission: normalizedUnit.sector || '',
+    last_report_at: safeIso,
+    metadata: normalizedUnit
+  };
+}
+
+/**
+ * Reconstructs a TacticalUnit from a Supabase `tactical_units` row
+ */
+export function mapSupabaseRowToTacticalUnit(row: any): TacticalUnit {
+  const meta = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+  return {
+    ...meta,
+    id: row.id || meta.id,
+    name: row.name || meta.name || 'Patrulla Táctica',
+    status: (row.status || meta.status || 'PATROLLING') as TacticalUnit['status'],
+    coordinates: row.coordinates || meta.coordinates || '19°13\'10"S 68°35\'50"W',
+    personnel: Number(meta.personnel) || 6,
+    commander: meta.commander || 'Comandante S-2',
+    sector: row.assigned_mission || meta.sector || 'Sector Fronterizo',
+    frequency: row.comm_status || meta.frequency || '142.850 MHz',
+    pin: meta.pin || '1234',
+    equipment: Array.isArray(meta.equipment) ? meta.equipment : ['Camioneta 4x4 Táctica', 'Radio VHF Harris'],
+    battery: Number.isFinite(Number(row.battery)) ? Number(row.battery) : (meta.battery ?? 100),
+    fuel: Number.isFinite(Number(meta.fuel)) ? Number(meta.fuel) : 90,
+    ammo: Number.isFinite(Number(meta.ammo)) ? Number(meta.ammo) : 100,
+    notes: meta.notes || '',
+    lastReportTime: row.last_report_at || meta.lastReportTime || new Date().toISOString(),
+    createdAt: meta.createdAt || row.last_report_at || new Date().toISOString()
+  };
+}
+
+/**
+ * Normalizes a User into a Supabase `system_users` row
+ */
+export function mapUserToSupabaseRow(u: User) {
+  const cleanUsername = (u.username || u.name || u.id || `op.${Date.now()}`)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '.');
+  return {
+    id: u.id,
+    username: cleanUsername,
+    name: (u.name || cleanUsername).trim(),
+    role: u.role || 'ROL_BUSQUEDA',
+    phone_number: (u.phoneNumber || u.cellphone || '').trim() || null,
+    rank: u.rank || null,
+    organ_name: u.organName || null,
+    station_id: u.stationId || null,
+    is_admin: Boolean(u.isAdmin || u.role === 'ROL_CEO'),
+    status: u.status || 'ACTIVO',
+    created_at: toSafeIsoTimestamp(u.createdAt)
+  };
+}
+
+/**
+ * Reconstructs a full User object from a Supabase `system_users` row
+ */
+export function mapSupabaseRowToUser(row: any): User {
+  const role = (row.role || 'ROL_BUSQUEDA') as User['role'];
+  const clearanceByRole: Record<string, number> = {
+    ROL_CEO: 4,
+    ROL_FUSION: 3,
+    ROL_BUSQUEDA: 2,
+    ROL_TERRENO: 1,
+    ROL_PATRULLA: 1
+  };
+  const subtitleByRole: Record<string, string> = {
+    ROL_CEO: 'Centro de Enlace y Operaciones — Administrador Supremo del Sistema C4ISR',
+    ROL_FUSION: 'Centro de Fusión de Inteligencia — Análisis de Búsqueda (Subordinado al CEO-LCC)',
+    ROL_BUSQUEDA: 'Captación IMINT/HUMINT/SIGINT & Sensores S-2 (Subordinado al CEO-LCC)',
+    ROL_TERRENO: 'Patrullas Tácticas de Búsqueda & Destacamentos (Subordinado al CEO-LCC)',
+    ROL_PATRULLA: 'Patrullas Tácticas de Búsqueda & Destacamentos (Subordinado al CEO-LCC)'
+  };
+  const organNameByRole: Record<string, string> = {
+    ROL_CEO: 'CEO-LCC Mando (Administrador)',
+    ROL_FUSION: 'Órgano de Fusión (CFI)',
+    ROL_BUSQUEDA: 'Órgano de Búsqueda S-2',
+    ROL_TERRENO: 'Órgano de Búsqueda en Terreno',
+    ROL_PATRULLA: 'Órgano de Búsqueda en Terreno'
+  };
+  const phone = row.phone_number ? String(row.phone_number).trim() : '';
+  return {
+    id: row.id,
+    role,
+    name: row.name || row.username || 'Operador Militar',
+    username: row.username || row.id.toLowerCase(),
+    phoneNumber: phone || undefined,
+    cellphone: phone || undefined,
+    password: phone || undefined,
+    rank: row.rank || 'Oficial Operador',
+    organName: row.organ_name || organNameByRole[role] || 'Órgano Operativo',
+    organSubtitle: subtitleByRole[role] || 'Unidad Operativa C4ISR',
+    signature: `SIG-AES256-${String(row.id || 'OP').replace(/[^A-Z0-9]/gi, '').slice(0, 12).toUpperCase()}`,
+    clearanceLevel: clearanceByRole[role] ?? 1,
+    stationId: row.station_id || `ESTACION-${role.replace('ROL_', '')}-01`,
+    isAdmin: Boolean(row.is_admin || role === 'ROL_CEO'),
+    status: (row.status === 'SUSPENDIDO' ? 'SUSPENDIDO' : 'ACTIVO') as 'ACTIVO' | 'SUSPENDIDO',
+    createdAt: row.created_at || new Date().toISOString(),
+    assignedBy: 'CEO-LCC MANDO (SUPABASE CLOUD)'
+  };
+}
+
+/**
+ * Direct granular persistence for Tactical Units (patrols & live GPS coordinates)
+ */
+export async function upsertTacticalUnitInSupabase(unit: TacticalUnit): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const row = mapTacticalUnitToSupabaseRow(unit);
+    const { error } = await supabase.from('tactical_units').upsert([row], { onConflict: 'id' });
+    if (error) {
+      console.warn('[Supabase] Error guardando patrulla:', error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción guardando patrulla:', err?.message || err);
+    return { ok: false, error: err?.message || 'Error de red' };
+  }
+}
+
+export async function upsertAllTacticalUnitsInSupabase(units: TacticalUnit[]): Promise<{ ok: boolean; count: number; error?: string }> {
+  if (!units || units.length === 0) return { ok: true, count: 0 };
+  try {
+    const dedupMap = new Map<string, TacticalUnit>();
+    units.forEach(u => {
+      if (u && u.id) dedupMap.set(u.id, u);
+    });
+    const rows = Array.from(dedupMap.values()).map(mapTacticalUnitToSupabaseRow);
+    const { error } = await supabase.from('tactical_units').upsert(rows, { onConflict: 'id' });
+    if (error) {
+      console.warn('[Supabase] Error guardando lote de patrullas:', error.message);
+      return { ok: false, count: 0, error: error.message };
+    }
+    return { ok: true, count: rows.length };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción guardando lote de patrullas:', err?.message || err);
+    return { ok: false, count: 0, error: err?.message || 'Error de red' };
+  }
+}
+
+export async function deleteTacticalUnitFromSupabase(unitId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!unitId) return { ok: false, error: 'ID inválido' };
+  try {
+    const { error } = await supabase.from('tactical_units').delete().eq('id', unitId);
+    if (error) {
+      console.warn('[Supabase] Error eliminando patrulla:', error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción eliminando patrulla:', err?.message || err);
+    return { ok: false, error: err?.message || 'Error de red' };
+  }
+}
+
+export async function fetchTacticalUnitsFromSupabase(): Promise<TacticalUnit[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('tactical_units')
+      .select('*')
+      .order('last_report_at', { ascending: false });
+    if (error || !Array.isArray(data)) {
+      if (error) console.warn('[Supabase] Error consultando tactical_units:', error.message);
+      return null;
+    }
+    return data.map(mapSupabaseRowToTacticalUnit);
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción consultando tactical_units:', err?.message || err);
+    return null;
+  }
+}
+
+/**
+ * Direct granular persistence for System Users (`system_users`)
+ */
+export async function upsertSystemUserInSupabase(user: User): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const row = mapUserToSupabaseRow(user);
+    const { error } = await supabase.from('system_users').upsert([row], { onConflict: 'id' });
+    if (error) {
+      // Handle unique username conflict gracefully if user was recreated with a new ID
+      if (error.code === '23505' || error.message?.includes('username')) {
+        const { error: retryErr } = await supabase.from('system_users').upsert([row], { onConflict: 'username' });
+        if (!retryErr) return { ok: true };
+        console.warn('[Supabase] Error reintentando usuario por username:', retryErr.message);
+        return { ok: false, error: retryErr.message };
+      }
+      console.warn('[Supabase] Error guardando usuario:', error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción guardando usuario:', err?.message || err);
+    return { ok: false, error: err?.message || 'Error de red' };
+  }
+}
+
+export async function upsertAllSystemUsersInSupabase(users: User[]): Promise<{ ok: boolean; count: number; error?: string }> {
+  if (!users || users.length === 0) return { ok: true, count: 0 };
+  try {
+    // Deduplicate by both id and lowercase username to prevent PostgreSQL unique constraint violations
+    const seenIds = new Set<string>();
+    const seenUsernames = new Set<string>();
+    const rows: ReturnType<typeof mapUserToSupabaseRow>[] = [];
+    for (const u of users) {
+      if (!u || !u.id) continue;
+      const row = mapUserToSupabaseRow(u);
+      if (seenIds.has(row.id) || seenUsernames.has(row.username)) continue;
+      seenIds.add(row.id);
+      seenUsernames.add(row.username);
+      rows.push(row);
+    }
+
+    const { error } = await supabase.from('system_users').upsert(rows, { onConflict: 'id' });
+    if (error) {
+      // Fallback: upsert individually so one conflicting username never blocks the rest
+      let savedCount = 0;
+      let lastErr = error.message;
+      for (const u of users) {
+        const res = await upsertSystemUserInSupabase(u);
+        if (res.ok) savedCount++;
+        else if (res.error) lastErr = res.error;
+      }
+      return { ok: savedCount > 0, count: savedCount, error: savedCount === rows.length ? undefined : lastErr };
+    }
+    return { ok: true, count: rows.length };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción guardando usuarios:', err?.message || err);
+    return { ok: false, count: 0, error: err?.message || 'Error de red' };
+  }
+}
+
+export async function deleteSystemUserFromSupabase(userId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!userId) return { ok: false, error: 'ID inválido' };
+  try {
+    const { error } = await supabase.from('system_users').delete().eq('id', userId);
+    if (error) {
+      console.warn('[Supabase] Error eliminando usuario:', error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción eliminando usuario:', err?.message || err);
+    return { ok: false, error: err?.message || 'Error de red' };
+  }
+}
+
+export async function fetchSystemUsersFromSupabase(): Promise<User[] | null> {
+  try {
+    const { data, error } = await supabase
+      .from('system_users')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error || !Array.isArray(data)) {
+      if (error) console.warn('[Supabase] Error consultando system_users:', error.message);
+      return null;
+    }
+    return data.map(mapSupabaseRowToUser);
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción consultando system_users:', err?.message || err);
+    return null;
+  }
+}
+
 export interface UnifiedPiiDataPayload {
   clans: Clan[];
   rawAlerts: RawAlert[];
@@ -178,7 +495,7 @@ export interface SupabaseSyncResult {
 /**
  * Synchronizes full operational state into Supabase:
  * 1. Inserts a consolidated snapshot into `system_backups`
- * 2. Tries upserting individual records into specific relational tables
+ * 2. Upserts individual records into every relational table with valid ISO TIMESTAMPTZ fields
  */
 export async function syncAllDataToSupabase(
   payload: UnifiedPiiDataPayload,
@@ -197,7 +514,7 @@ export async function syncAllDataToSupabase(
     payload.expedientes.length +
     (payload.users?.length || 0);
 
-  // A. Try saving snapshot into `system_backups`
+  // A. Save snapshot into `system_backups`
   const backupRecord = {
     id: `BACKUP-SUPABASE-${Date.now()}`,
     backup_name: `Respaldo Doctrinal PII-LCC - ${new Date().toLocaleString()}`,
@@ -218,18 +535,18 @@ export async function syncAllDataToSupabase(
     tablesFailed.push({ table: 'system_backups', reason: err.message });
   }
 
-  // B. Try syncing individual Clans
+  // B. Sync individual Clans
   if (payload.clans.length > 0) {
     try {
       const clanRows = payload.clans.map(c => ({
         id: c.id,
         name: c.name,
         threat_level: c.threatLevel,
-        members_count: c.membersCount,
+        members_count: Number(c.membersCount) || 0,
         routes: c.knownRoutes || [],
         hotspots: c.recentHotspots || [],
         tactics: c.tactics || '',
-        last_active: c.lastActive,
+        last_active: c.lastActive || '',
         phone_numbers: c.phoneNumbers || c.interceptedPhones || [],
         radio_frequencies: c.radioFrequencies || c.interceptedFrequencies || [],
         vehicles: c.vehicles || [],
@@ -250,18 +567,18 @@ export async function syncAllDataToSupabase(
     }
   }
 
-  // C. Try syncing Raw Alerts
+  // C. Sync Raw Alerts
   if (payload.rawAlerts.length > 0) {
     try {
       const alertRows = payload.rawAlerts.map(a => ({
         id: a.id,
-        type: a.sourceType,
-        title: a.sourceName,
+        type: a.sourceType || 'HUMINT',
+        title: a.sourceName || 'Alerta S-2',
         description: a.details || '',
-        coordinates: a.coordinates,
-        timestamp: a.timestamp,
-        status: a.status,
-        priority: `${a.reliability}${a.certainty}`,
+        coordinates: a.coordinates || '19°13\'10"S 68°35\'50"W',
+        timestamp: toSafeIsoTimestamp(a.timestamp),
+        status: a.status || 'PENDING',
+        priority: `${a.reliability || 'B'}${a.certainty || '2'}`,
         source_sensor: a.operatorName || a.originUnit || a.originSector || '',
         media_url: a.mediaUrl || null,
         audio_url: null,
@@ -278,7 +595,7 @@ export async function syncAllDataToSupabase(
     }
   }
 
-  // D. Try syncing Expedientes G-2
+  // D. Sync Expedientes G-2
   if (payload.expedientes.length > 0) {
     try {
       const expRows = payload.expedientes.map(e => ({
@@ -288,8 +605,8 @@ export async function syncAllDataToSupabase(
         clan_id: null,
         classification: e.clasificacionSeguridad || 'SECRETO',
         status: e.estadoRegistro || 'Pendiente',
-        created_at: new Date(e.createdAt || Date.now()).toISOString(),
-        updated_at: new Date(e.updatedAt || Date.now()).toISOString(),
+        created_at: toSafeIsoTimestamp(e.createdAt),
+        updated_at: toSafeIsoTimestamp(e.updatedAt),
         analyst_id: e.operadorRegistro || 'G-2',
         content: e
       }));
@@ -304,21 +621,21 @@ export async function syncAllDataToSupabase(
     }
   }
 
-  // E. Try syncing Actionable Intel
+  // E. Sync Actionable Intel
   if (payload.actionableIntel.length > 0) {
     try {
       const intelRows = payload.actionableIntel.map(i => ({
         id: i.id,
-        title: i.title,
+        title: i.title || 'Inteligencia CFI',
         description: i.recommendedAction || '',
-        clan_name: i.targetClan,
-        threat_level: String(i.threatScore),
-        coordinates: i.coordinates,
-        confidence_score: i.threatScore,
-        validated_by: i.validatedBy,
-        timestamp: i.timestamp,
+        clan_name: i.targetClan || 'Desconocido',
+        threat_level: String(i.threatScore ?? 80),
+        coordinates: i.coordinates || '19°13\'10"S 68°35\'50"W',
+        confidence_score: Number(i.threatScore) || 80,
+        validated_by: i.validatedBy || 'CFI',
+        timestamp: toSafeIsoTimestamp(i.timestamp),
         action_recommended: i.recommendedAction || '',
-        source: i.rawAlertId,
+        source: i.rawAlertId || '',
         metadata: { ...i }
       }));
       const { error } = await supabase.from('actionable_intel').upsert(intelRows, { onConflict: 'id' });
@@ -332,45 +649,30 @@ export async function syncAllDataToSupabase(
     }
   }
 
-  // F. Try syncing Tactical Units
+  // F. Sync Tactical Units (with sanitized TIMESTAMPTZ!)
   if (payload.tacticalUnits.length > 0) {
-    try {
-      const unitRows = payload.tacticalUnits.map(u => ({
-        id: u.id,
-        name: u.name,
-        status: u.status,
-        coordinates: u.coordinates,
-        battery: u.battery || 100,
-        comm_status: u.frequency || 'OPTIMO',
-        assigned_mission: u.sector || '',
-        last_report_at: u.lastReportTime,
-        metadata: { ...u }
-      }));
-      const { error } = await supabase.from('tactical_units').upsert(unitRows, { onConflict: 'id' });
-      if (!error) {
-        tablesSynced.push(`tactical_units (${unitRows.length} unidades)`);
-      } else {
-        tablesFailed.push({ table: 'tactical_units', reason: error.message });
-      }
-    } catch (err: any) {
-      tablesFailed.push({ table: 'tactical_units', reason: err.message });
+    const unitRes = await upsertAllTacticalUnitsInSupabase(payload.tacticalUnits);
+    if (unitRes.ok) {
+      tablesSynced.push(`tactical_units (${unitRes.count} unidades)`);
+    } else {
+      tablesFailed.push({ table: 'tactical_units', reason: unitRes.error || 'Fallo al guardar unidades tácticas' });
     }
   }
 
-  // G. Try syncing Automated Orders (OOA)
+  // G. Sync Automated Orders (OOA)
   if (payload.activeOrders && payload.activeOrders.length > 0) {
     try {
       const orderRows = payload.activeOrders.map(o => ({
         id: o.id,
         intel_id: o.intelId || null,
         patrol_target: o.assignedUnit || 'Patrulla',
-        objective: o.objective,
+        objective: o.objective || 'Misión Táctica',
         mission_type: o.codeName || 'TACTICA',
         urgency: 'ALTA',
-        status: o.status,
-        issued_at: o.timestamp,
+        status: o.status || 'ISSUED',
+        issued_at: toSafeIsoTimestamp(o.timestamp),
         signature: o.issuer || 'CEO-LCC',
-        coordinates: o.coordinates,
+        coordinates: o.coordinates || '19°13\'10"S 68°35\'50"W',
         metadata: { ...o }
       }));
       const { error } = await supabase.from('automated_orders').upsert(orderRows, { onConflict: 'id' });
@@ -384,35 +686,18 @@ export async function syncAllDataToSupabase(
     }
   }
 
-  // H. Try syncing System Users
+  // H. Sync System Users (deduplicated & conflict-resilient)
   if (payload.users && payload.users.length > 0) {
-    try {
-      const userRows = payload.users.map(u => ({
-        id: u.id,
-        username: u.username,
-        name: u.name,
-        role: u.role,
-        phone_number: u.phoneNumber || null,
-        rank: u.rank || null,
-        organ_name: u.organName || null,
-        station_id: u.stationId || null,
-        is_admin: Boolean(u.isAdmin),
-        status: u.status || 'ACTIVO',
-        created_at: u.createdAt || timestamp
-      }));
-      const { error } = await supabase.from('system_users').upsert(userRows, { onConflict: 'id' });
-      if (!error) {
-        tablesSynced.push(`system_users (${userRows.length} operadores)`);
-      } else {
-        tablesFailed.push({ table: 'system_users', reason: error.message });
-      }
-    } catch (err: any) {
-      tablesFailed.push({ table: 'system_users', reason: err.message });
+    const usersRes = await upsertAllSystemUsersInSupabase(payload.users);
+    if (usersRes.ok) {
+      tablesSynced.push(`system_users (${usersRes.count} operadores)`);
+    } else {
+      tablesFailed.push({ table: 'system_users', reason: usersRes.error || 'Fallo al guardar operadores' });
     }
   }
 
   return {
-    success: tablesSynced.length > 0,
+    success: tablesSynced.length > 0 && tablesFailed.length === 0,
     tablesSynced,
     tablesFailed,
     backupId: backupRecord.id,
@@ -422,7 +707,9 @@ export async function syncAllDataToSupabase(
 }
 
 /**
- * Downloads latest available backup or entity records from Supabase
+ * Downloads latest available data from Supabase, preferring live relational tables
+ * (so real-time auto-saved patrols, GPS positions, and users are always freshest)
+ * and falling back to the latest `system_backups` snapshot for any empty table.
  */
 export async function fetchLatestSupabaseData(): Promise<{
   data: Partial<UnifiedPiiDataPayload> | null;
@@ -430,154 +717,178 @@ export async function fetchLatestSupabaseData(): Promise<{
   error?: string;
 }> {
   try {
-    // 1. Try fetching latest backup snapshot
-    const { data: backups, error: backupError } = await supabase
-      .from('system_backups')
-      .select('payload, created_at')
-      .order('created_at', { ascending: false })
-      .limit(1);
+    // 1. Query relational tables and latest backup in parallel
+    const [
+      clansRes,
+      rawAlertsRes,
+      expedientesRes,
+      actionableIntelRes,
+      tacticalUnitsRes,
+      automatedOrdersRes,
+      systemUsersRes,
+      backupRes
+    ] = await Promise.all([
+      supabase.from('clans').select('*'),
+      supabase.from('raw_alerts').select('*'),
+      supabase.from('expedientes').select('*'),
+      supabase.from('actionable_intel').select('*'),
+      supabase.from('tactical_units').select('*'),
+      supabase.from('automated_orders').select('*'),
+      supabase.from('system_users').select('*'),
+      supabase.from('system_backups').select('payload, created_at').order('created_at', { ascending: false }).limit(1)
+    ]);
 
-    if (!backupError && backups && backups.length > 0 && backups[0].payload) {
+    const backupPayload = (!backupRes.error && backupRes.data && backupRes.data.length > 0 && backupRes.data[0].payload)
+      ? (backupRes.data[0].payload as Partial<UnifiedPiiDataPayload>)
+      : null;
+
+    const clans = clansRes.data || [];
+    const rawAlerts = rawAlertsRes.data || [];
+    const expedientes = expedientesRes.data || [];
+    const actionableIntel = actionableIntelRes.data || [];
+    const tacticalUnits = tacticalUnitsRes.data || [];
+    const automatedOrders = automatedOrdersRes.data || [];
+    const systemUsers = systemUsersRes.data || [];
+
+    const hasRelationalData =
+      clans.length > 0 ||
+      rawAlerts.length > 0 ||
+      expedientes.length > 0 ||
+      actionableIntel.length > 0 ||
+      tacticalUnits.length > 0 ||
+      automatedOrders.length > 0 ||
+      systemUsers.length > 0;
+
+    if (!hasRelationalData && !backupPayload) {
       return {
-        data: backups[0].payload as UnifiedPiiDataPayload,
-        source: 'BACKUP_RECORD'
+        data: null,
+        source: null,
+        error: 'No se encontraron registros almacenados en Supabase.'
       };
     }
 
-    // 2. Otherwise try reading from relational tables directly
-    const { data: clans } = await supabase.from('clans').select('*');
-    const { data: rawAlerts } = await supabase.from('raw_alerts').select('*');
-    const { data: expedientes } = await supabase.from('expedientes').select('*');
-    const { data: actionableIntel } = await supabase.from('actionable_intel').select('*');
-    const { data: tacticalUnits } = await supabase.from('tactical_units').select('*');
-    const { data: automatedOrders } = await supabase.from('automated_orders').select('*');
+    const restoredClans: Clan[] = clans.length > 0
+      ? clans.map(c => {
+          if (c.metadata && typeof c.metadata === 'object') {
+            return c.metadata as Clan;
+          }
+          return {
+            id: c.id,
+            name: c.name,
+            threatLevel: c.threat_level || 'MEDIUM',
+            membersCount: Number(c.members_count) || 0,
+            knownRoutes: c.routes || [],
+            recentHotspots: c.hotspots || [],
+            tactics: typeof c.tactics === 'string' ? c.tactics : (Array.isArray(c.tactics) ? c.tactics.join(', ') : ''),
+            lastActive: c.last_active || 'Hoy',
+            phoneNumbers: c.phone_numbers || [],
+            interceptedPhones: c.phone_numbers || [],
+            radioFrequencies: c.radio_frequencies || [],
+            interceptedFrequencies: c.radio_frequencies || [],
+            vehicles: c.vehicles || [],
+            keyLeaders: c.key_leaders || [],
+            seizures: c.seizures || [],
+            notes: c.notes || ''
+          };
+        })
+      : (backupPayload?.clans || []);
 
-    if (clans || rawAlerts || expedientes || actionableIntel || tacticalUnits || automatedOrders) {
-      const restoredClans: Clan[] = (clans || []).map(c => {
-        if (c.metadata && typeof c.metadata === 'object') {
-          return c.metadata as Clan;
-        }
-        return {
-          id: c.id,
-          name: c.name,
-          threatLevel: c.threat_level || 'MEDIUM',
-          membersCount: Number(c.members_count) || 0,
-          knownRoutes: c.routes || [],
-          recentHotspots: c.hotspots || [],
-          tactics: typeof c.tactics === 'string' ? c.tactics : (Array.isArray(c.tactics) ? c.tactics.join(', ') : ''),
-          lastActive: c.last_active || 'Hoy',
-          phoneNumbers: c.phone_numbers || [],
-          interceptedPhones: c.phone_numbers || [],
-          radioFrequencies: c.radio_frequencies || [],
-          interceptedFrequencies: c.radio_frequencies || [],
-          vehicles: c.vehicles || [],
-          keyLeaders: c.key_leaders || [],
-          seizures: c.seizures || [],
-          notes: c.notes || ''
-        };
-      });
+    const restoredAlerts: RawAlert[] = rawAlerts.length > 0
+      ? rawAlerts.map(a => {
+          if (a.metadata && typeof a.metadata === 'object') {
+            return a.metadata as RawAlert;
+          }
+          return {
+            id: a.id,
+            timestamp: a.timestamp || new Date().toISOString(),
+            sourceType: (a.type as any) || 'HUMINT',
+            sourceName: a.title || 'Alerta S-2',
+            reliability: 'B',
+            certainty: '2',
+            details: a.description || '',
+            coordinates: a.coordinates || '-18.4783, -70.3126',
+            status: a.status || 'PENDING',
+            mediaUrl: a.media_url
+          };
+        })
+      : (backupPayload?.rawAlerts || []);
 
-      const restoredAlerts: RawAlert[] = (rawAlerts || []).map(a => {
-        if (a.metadata && typeof a.metadata === 'object') {
-          return a.metadata as RawAlert;
-        }
-        return {
-          id: a.id,
-          timestamp: a.timestamp || new Date().toISOString(),
-          sourceType: (a.type as any) || 'HUMINT',
-          sourceName: a.title || 'Alerta S-2',
-          reliability: 'B',
-          certainty: '2',
-          details: a.description || '',
-          coordinates: a.coordinates || '-18.4783, -70.3126',
-          status: a.status || 'PENDING',
-          mediaUrl: a.media_url
-        };
-      });
+    const restoredExpedientes: G2RegistryRecord[] = expedientes.length > 0
+      ? expedientes.map(e => e.content || {
+          id: e.id,
+          fechaHoraIngreso: e.created_at || new Date().toISOString(),
+          tipoRegistro: 'LITERAL',
+          componenteRubro: 'MILITAR',
+          clasificacionSeguridad: e.classification || 'SECRETO',
+          contenidoDetallado: e.title || '',
+          unidadReceptora: 'CFI-LCC',
+          operadorRegistro: e.analyst_id || 'G-2',
+          estadoRegistro: e.status || 'Pendiente',
+          createdAt: new Date(e.created_at || Date.now()).getTime(),
+          updatedAt: new Date(e.updated_at || Date.now()).getTime(),
+          calificacionEvaluacion: 'B-2'
+        })
+      : (backupPayload?.expedientes || []);
 
-      const restoredExpedientes: G2RegistryRecord[] = (expedientes || []).map(e => e.content || {
-        id: e.id,
-        fechaHoraIngreso: e.created_at || new Date().toISOString(),
-        tipoRegistro: 'LITERAL',
-        componenteRubro: 'MILITAR',
-        clasificacionSeguridad: e.classification || 'SECRETO',
-        contenidoDetallado: e.title || '',
-        unidadReceptora: 'CFI-LCC',
-        operadorRegistro: e.analyst_id || 'G-2',
-        estadoRegistro: e.status || 'Pendiente',
-        createdAt: new Date(e.created_at || Date.now()).getTime(),
-        updatedAt: new Date(e.updated_at || Date.now()).getTime(),
-        calificacionEvaluacion: 'B-2'
-      });
+    const restoredIntel: ActionableIntel[] = actionableIntel.length > 0
+      ? actionableIntel.map(i => {
+          if (i.metadata && typeof i.metadata === 'object') {
+            return i.metadata as ActionableIntel;
+          }
+          return {
+            id: i.id,
+            rawAlertId: i.source || '',
+            title: i.title,
+            threatScore: Number(i.confidence_score) || 85,
+            validatedBy: i.validated_by || 'CFI',
+            targetClan: i.clan_name || 'Desconocido',
+            recommendedAction: i.action_recommended || i.description || '',
+            coordinates: i.coordinates || '-18.4783, -70.3126',
+            status: 'APPROVED',
+            timestamp: i.timestamp || new Date().toISOString()
+          };
+        })
+      : (backupPayload?.actionableIntel || []);
 
-      const restoredIntel: ActionableIntel[] = (actionableIntel || []).map(i => {
-        if (i.metadata && typeof i.metadata === 'object') {
-          return i.metadata as ActionableIntel;
-        }
-        return {
-          id: i.id,
-          rawAlertId: i.source || '',
-          title: i.title,
-          threatScore: Number(i.confidence_score) || 85,
-          validatedBy: i.validated_by || 'CFI',
-          targetClan: i.clan_name || 'Desconocido',
-          recommendedAction: i.action_recommended || i.description || '',
-          coordinates: i.coordinates || '-18.4783, -70.3126',
-          status: 'APPROVED',
-          timestamp: i.timestamp || new Date().toISOString()
-        };
-      });
+    const restoredUnits: TacticalUnit[] = tacticalUnits.length > 0
+      ? tacticalUnits.map(mapSupabaseRowToTacticalUnit)
+      : (backupPayload?.tacticalUnits || []);
 
-      const restoredUnits: TacticalUnit[] = (tacticalUnits || []).map(u => {
-        if (u.metadata && typeof u.metadata === 'object') {
-          return u.metadata as TacticalUnit;
-        }
-        return {
-          id: u.id,
-          name: u.name,
-          status: u.status || 'PATROLLING',
-          coordinates: u.coordinates || '-18.4783, -70.3126',
-          personnel: 4,
-          lastReportTime: u.last_report_at || new Date().toISOString(),
-          battery: u.battery || 100
-        };
-      });
+    const restoredOrders: AutomatedOrder[] = automatedOrders.length > 0
+      ? automatedOrders.map(o => {
+          if (o.metadata && typeof o.metadata === 'object') {
+            return o.metadata as AutomatedOrder;
+          }
+          return {
+            id: o.id,
+            intelId: o.intel_id || '',
+            codeName: o.mission_type || 'Operación Táctica',
+            issuer: o.signature || 'CEO-LCC',
+            assignedUnit: o.patrol_target || 'Patrulla Alpha',
+            objective: o.objective || 'Misión táctica',
+            coordinates: o.coordinates || '-18.4783, -70.3126',
+            status: (o.status as any) || 'ISSUED',
+            timestamp: o.issued_at || new Date().toISOString(),
+            updates: []
+          };
+        })
+      : (backupPayload?.activeOrders || []);
 
-      const restoredOrders: AutomatedOrder[] = (automatedOrders || []).map(o => {
-        if (o.metadata && typeof o.metadata === 'object') {
-          return o.metadata as AutomatedOrder;
-        }
-        return {
-          id: o.id,
-          intelId: o.intel_id || '',
-          codeName: o.mission_type || 'Operación Táctica',
-          issuer: o.signature || 'CEO-LCC',
-          assignedUnit: o.patrol_target || 'Patrulla Alpha',
-          objective: o.objective || 'Misión táctica',
-          coordinates: o.coordinates || '-18.4783, -70.3126',
-          status: (o.status as any) || 'ISSUED',
-          timestamp: o.issued_at || new Date().toISOString(),
-          updates: []
-        };
-      });
-
-      return {
-        data: {
-          clans: restoredClans,
-          rawAlerts: restoredAlerts,
-          expedientes: restoredExpedientes,
-          actionableIntel: restoredIntel,
-          tacticalUnits: restoredUnits,
-          activeOrders: restoredOrders
-        },
-        source: 'RELATIONAL_TABLES'
-      };
-    }
+    const restoredUsers: User[] = systemUsers.length > 0
+      ? systemUsers.map(mapSupabaseRowToUser)
+      : (backupPayload?.users || []);
 
     return {
-      data: null,
-      source: null,
-      error: 'No se encontraron registros almacenados en Supabase.'
+      data: {
+        clans: restoredClans,
+        rawAlerts: restoredAlerts,
+        expedientes: restoredExpedientes,
+        actionableIntel: restoredIntel,
+        tacticalUnits: restoredUnits,
+        activeOrders: restoredOrders,
+        users: restoredUsers
+      },
+      source: hasRelationalData ? 'RELATIONAL_TABLES' : 'BACKUP_RECORD'
     };
   } catch (err: any) {
     return {

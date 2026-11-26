@@ -85,8 +85,32 @@ export default function TacticalView({
     } catch {
       // ignore
     }
-    return { 'unit-delta-3': true };
+    return { 'unit-delta-3': true, 'unit-1': true };
   });
+
+  // Always keep a ref to the active patrol so async GPS callbacks never write to a stale patrol
+  const selectedPatrolRef = React.useRef<string>(selectedPatrol);
+  React.useEffect(() => {
+    selectedPatrolRef.current = selectedPatrol;
+  }, [selectedPatrol]);
+
+  // Keep selectedPatrol valid whenever tacticalUnits hydrate from Supabase or change
+  React.useEffect(() => {
+    if (tacticalUnits.length === 0) return;
+    const match = tacticalUnits.find(u => u.name === selectedPatrol);
+    if (!match) {
+      const first = tacticalUnits[0];
+      setSelectedPatrol(first.name);
+      if (first.coordinates) {
+        setCoordinates(first.coordinates);
+        const parts = first.coordinates.trim().split(/\s+/);
+        if (parts.length >= 2) {
+          setCustomLat(parts[0]);
+          setCustomLon(parts[1]);
+        }
+      }
+    }
+  }, [tacticalUnits, selectedPatrol]);
 
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
   const [authTargetPatrol, setAuthTargetPatrol] = useState<TacticalUnit | null>(null);
@@ -354,16 +378,17 @@ export default function TacticalView({
           error: null
         });
 
-        // Transmisión inmediata de coordenadas en vivo a Central de Fusión (CFI) y Mando LCC
-        onUpdateUnitCoordinates(selectedPatrol, formatted);
+        // Transmisión inmediata de coordenadas en vivo a Central de Fusión (CFI), Mando LCC y Supabase Cloud
+        const activePatrolName = selectedPatrolRef.current;
+        onUpdateUnitCoordinates(activePatrolName, formatted);
 
         playTacticalBeep(1200, 0.2);
         setTrackingLog(prev => [
-          `[${new Date().toLocaleTimeString()}] GPS EN VIVO CAPTURADO: ${formatted} (±${Math.round(accuracy)}m). Sincronizado con CFI y Mando.`,
+          `[${new Date().toLocaleTimeString()}] GPS EN VIVO CAPTURADO: ${formatted} (±${Math.round(accuracy)}m). Sincronizado con CFI, Mando y Supabase.`,
           ...prev
         ].slice(0, 15));
 
-        setSuccessBanner(`UBICACIÓN REAL TRANSMITIDA A CFI Y MANDO: ${selectedPatrol} fijada en ${formatted} (Precisión: ±${Math.round(accuracy)}m).`);
+        setSuccessBanner(`UBICACIÓN REAL GUARDADA Y TRANSMITIDA: ${activePatrolName} fijada en ${formatted} (Precisión: ±${Math.round(accuracy)}m).`);
         setTimeout(() => setSuccessBanner(null), 5000);
       },
       (err) => {
@@ -413,10 +438,11 @@ export default function TacticalView({
       const formatted = `${dmsLat} ${dmsLon}`;
       setCoordinates(formatted);
       
-      onUpdateUnitCoordinates(selectedPatrol, formatted);
+      const activePatrolName = selectedPatrolRef.current;
+      onUpdateUnitCoordinates(activePatrolName, formatted);
 
       setTrackingLog(prev => [
-        `[${new Date().toLocaleTimeString()}] ADQUISICIÓN OK (±${Math.round(accuracy)}m) -> ${dmsLat} ${dmsLon}`,
+        `[${new Date().toLocaleTimeString()}] ADQUISICIÓN OK [${activePatrolName}] (±${Math.round(accuracy)}m) -> ${dmsLat} ${dmsLon}`,
         ...prev
       ].slice(0, 15));
     };
@@ -514,10 +540,11 @@ export default function TacticalView({
       const formatted = `${dmsLat} ${dmsLon}`;
       setCoordinates(formatted);
 
-      onUpdateUnitCoordinates(selectedPatrol, formatted);
+      const activePatrolName = selectedPatrolRef.current;
+      onUpdateUnitCoordinates(activePatrolName, formatted);
 
       setTrackingLog(prev => [
-        `[${new Date().toLocaleTimeString()}] Sim: ${selectedPatrol} se desplaza -> ${dmsLat} ${dmsLon}`,
+        `[${new Date().toLocaleTimeString()}] Sim: ${activePatrolName} se desplaza -> ${dmsLat} ${dmsLon}`,
         ...prev
       ].slice(0, 15));
 
@@ -870,6 +897,7 @@ export default function TacticalView({
   const handleSelectPatrolTab = (unit: TacticalUnit) => {
     setSelectedPatrol(unit.name);
     if (unit.coordinates) {
+      setCoordinates(unit.coordinates);
       const parts = unit.coordinates.trim().split(/\s+/);
       if (parts.length >= 2) {
         setCustomLat(parts[0]);
@@ -935,12 +963,14 @@ export default function TacticalView({
   };
 
   const handleSavePatrol = (unitData: Partial<TacticalUnit>) => {
+    const nowIso = new Date().toISOString();
     if (editorMode === 'CREATE') {
+      const unitCoords = (unitData.coordinates || coordinates || '19°13\'10"S 68°35\'50"W').trim();
       const newUnit: TacticalUnit = {
-        id: `unit-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        name: unitData.name || `Patrulla Sierra-${tacticalUnits.length + 1}`,
+        id: unitData.id || `unit-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        name: (unitData.name || `Patrulla Sierra-${tacticalUnits.length + 1}`).trim(),
         status: unitData.status || 'PATROLLING',
-        coordinates: unitData.coordinates || coordinates || '19°13\'10"S 68°35\'50"W',
+        coordinates: unitCoords,
         personnel: unitData.personnel || 8,
         equipment: Array.isArray(unitData.equipment)
           ? unitData.equipment
@@ -954,7 +984,9 @@ export default function TacticalView({
         battery: unitData.battery ?? 100,
         fuel: unitData.fuel ?? 100,
         ammo: unitData.ammo ?? 100,
-        lastReportTime: new Date().toISOString()
+        notes: unitData.notes || '',
+        createdAt: unitData.createdAt || nowIso,
+        lastReportTime: nowIso
       };
 
       if (onAddTacticalUnit) {
@@ -962,20 +994,35 @@ export default function TacticalView({
       }
       setPatrolUnlockedState(newUnit.id, true);
       setSelectedPatrol(newUnit.name);
+      setCoordinates(unitCoords);
+      const parts = unitCoords.split(/\s+/);
+      if (parts.length >= 2) {
+        setCustomLat(parts[0]);
+        setCustomLon(parts[1]);
+      }
       setActivePatrolTab('DASHBOARD');
       setExclusivePatrolMode(true);
-      setSuccessBanner(`NUEVA PATRULLA INCREMENTADA: ${newUnit.name} desplegada con su propio Dashboard Operacional exclusivo.`);
+      setSuccessBanner(`PATRULLA GUARDADA Y GRABADA: ${newUnit.name} registrada en local, servidor y Supabase Cloud.`);
     } else if (editorTargetPatrol && onUpdateTacticalUnit) {
+      const updatedCoords = (unitData.coordinates || editorTargetPatrol.coordinates || coordinates).trim();
       const updatedUnit: TacticalUnit = {
         ...editorTargetPatrol,
         ...unitData,
-        name: unitData.name || editorTargetPatrol.name
+        name: (unitData.name || editorTargetPatrol.name).trim(),
+        coordinates: updatedCoords,
+        lastReportTime: nowIso
       };
       onUpdateTacticalUnit(updatedUnit);
-      if (editorTargetPatrol.name === selectedPatrol && unitData.name) {
-        setSelectedPatrol(unitData.name);
+      if (editorTargetPatrol.name === selectedPatrol) {
+        setSelectedPatrol(updatedUnit.name);
+        setCoordinates(updatedCoords);
+        const parts = updatedCoords.split(/\s+/);
+        if (parts.length >= 2) {
+          setCustomLat(parts[0]);
+          setCustomLon(parts[1]);
+        }
       }
-      setSuccessBanner(`DATOS ACTUALIZADOS: La información de ${updatedUnit.name} ha sido sincronizada.`);
+      setSuccessBanner(`DATOS GUARDADOS: ${updatedUnit.name} actualizada en local, servidor y Supabase Cloud.`);
     }
 
     setEditorModalOpen(false);
@@ -1159,8 +1206,11 @@ export default function TacticalView({
               <span className="text-white font-bold bg-black/50 px-2 py-0.5 rounded border border-emerald-500/40">
                 {selectedPatrol}
               </span>
+              <span className="text-[10px] text-emerald-400/80 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
+                {tacticalUnits.length} {tacticalUnits.length === 1 ? 'patrulla guardada' : 'patrullas guardadas'}
+              </span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] text-slate-400">Seleccionar Patrulla Operativa:</span>
               <select
                 value={selectedPatrol || ''}
@@ -1176,6 +1226,26 @@ export default function TacticalView({
                   </option>
                 ))}
               </select>
+              <button
+                type="button"
+                onClick={handleOpenCreatePatrol}
+                className="px-2.5 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/50 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                title="Incrementar y grabar una nueva patrulla en Supabase Cloud"
+              >
+                <Plus className="w-3 h-3" />
+                <span>+ Nueva</span>
+              </button>
+              {selectedUnitDetails && (
+                <button
+                  type="button"
+                  onClick={() => handleOpenEditPatrol(selectedUnitDetails)}
+                  className="px-2 py-1 rounded bg-zinc-900 hover:bg-zinc-800 text-amber-300 border border-amber-500/40 text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                  title="Editar y guardar cambios de esta patrulla"
+                >
+                  <Sliders className="w-3 h-3" />
+                  <span>Editar</span>
+                </button>
+              )}
             </div>
           </div>
         )}

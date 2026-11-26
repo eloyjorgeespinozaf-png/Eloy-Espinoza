@@ -70,6 +70,12 @@ import {
 import { Shield, Radio, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2, Smartphone, Laptop, Image as ImageIcon, Palette, Globe, Crown, Database, HardDrive, Users, Save, Cloud, X } from 'lucide-react';
 import { useAuth, PRESET_USERS } from './context/AuthContext';
 import { safeStorage } from './utils/storage';
+import {
+  fetchTacticalUnitsFromSupabase,
+  upsertTacticalUnitInSupabase,
+  upsertAllTacticalUnitsInSupabase,
+  deleteTacticalUnitFromSupabase
+} from './lib/supabase';
 import { 
   playSyntheticBeep, 
   playChime, 
@@ -91,6 +97,7 @@ export default function App() {
     isAuthenticated,
     login,
     logout,
+    replaceUsers,
     validateBackendPermission,
     securityError,
     clearSecurityError,
@@ -232,6 +239,7 @@ export default function App() {
     actionableIntel?: ActionableIntel[];
     activeOrders?: AutomatedOrder[];
     tacticalUnits?: TacticalUnit[];
+    users?: User[];
   }) => {
     if (data.clans && Array.isArray(data.clans)) {
       setClans(data.clans);
@@ -257,6 +265,9 @@ export default function App() {
       setTacticalUnits(data.tacticalUnits);
       safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(data.tacticalUnits));
     }
+    if (data.users && Array.isArray(data.users) && data.users.length > 0) {
+      replaceUsers(data.users);
+    }
 
     // Sync restored state with server and all connected terminals
     try {
@@ -278,10 +289,13 @@ export default function App() {
     } catch {
       // ignore
     }
+    if (data.tacticalUnits && data.tacticalUnits.length > 0) {
+      sendWsMessageRef.current?.('SYNC_TACTICAL_UNITS', { units: data.tacticalUnits });
+    }
     if (data.expedientes) {
       sendWsMessageRef.current?.('RESTORE_EXPEDIENTES', { expedientes: data.expedientes });
     }
-  }, []);
+  }, [replaceUsers]);
 
   const [isInstalledDevice, setIsInstalledDevice] = useState<boolean>(() => {
     const isStandalone = typeof window !== 'undefined' && Boolean(
@@ -442,7 +456,7 @@ export default function App() {
   const sentLogsRef = useRef<Set<string>>(new Set());
 
   // Shared helper to synchronize central state with React states across all versions
-  const handleStateSync = useCallback((state: any) => {
+  const handleStateSync = useCallback((state: any, isInit: boolean = false) => {
     if (!state) return;
     const normalized = normalizeCrossVersionState(state);
     const { 
@@ -473,8 +487,35 @@ export default function App() {
       safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(incomingOrders));
     }
     if (Array.isArray(incomingUnits)) {
-      setTacticalUnits(incomingUnits);
-      safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(incomingUnits));
+      if (isInit) {
+        setTacticalUnits(prev => {
+          const mergedMap = new Map<string, TacticalUnit>();
+          incomingUnits.forEach((u: TacticalUnit) => {
+            if (u && u.id) mergedMap.set(u.id, u);
+          });
+          let hasExtraLocalUnits = false;
+          prev.forEach(lu => {
+            if (!lu || !lu.id) return;
+            const existsById = mergedMap.has(lu.id);
+            const existsByName = Array.from(mergedMap.values()).some(
+              u => u.name.trim().toLowerCase() === lu.name.trim().toLowerCase()
+            );
+            if (!existsById && !existsByName) {
+              mergedMap.set(lu.id, lu);
+              hasExtraLocalUnits = true;
+            }
+          });
+          const mergedList = Array.from(mergedMap.values());
+          safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(mergedList));
+          if (hasExtraLocalUnits) {
+            sendWsMessageRef.current?.('SYNC_TACTICAL_UNITS', { units: mergedList });
+          }
+          return mergedList;
+        });
+      } else {
+        setTacticalUnits(incomingUnits);
+        safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(incomingUnits));
+      }
     }
     if (Array.isArray(incomingExpedientes)) {
       setExpedientes(incomingExpedientes);
@@ -770,7 +811,7 @@ export default function App() {
             }
 
             if (type === 'INIT' || type === 'STATE_UPDATE' || type === 'SYSTEM_UPGRADE_ALERT') {
-              handleStateSyncRef.current(payload);
+              handleStateSyncRef.current(payload, type === 'INIT');
             }
           } catch (err) {
             console.warn('[PII-LCC Network] Warning parsing incoming sync package:', err);
@@ -914,6 +955,67 @@ export default function App() {
       }
     }
   }, [auditLogs]);
+
+  // Keep latest tacticalUnits ref for async Supabase reconciliation
+  const tacticalUnitsRef = useRef<TacticalUnit[]>(tacticalUnits);
+  useEffect(() => {
+    tacticalUnitsRef.current = tacticalUnits;
+  }, [tacticalUnits]);
+
+  // Hydrate and reconcile Tactical Units (patrols + GPS positions) with Supabase Cloud on startup
+  useEffect(() => {
+    let cancelled = false;
+    const hydrateUnitsFromSupabase = async () => {
+      const remoteUnits = await fetchTacticalUnitsFromSupabase();
+      if (cancelled || !remoteUnits) return;
+
+      const currentLocal = tacticalUnitsRef.current;
+
+      if (remoteUnits.length === 0) {
+        // Seed Supabase `tactical_units` immediately if empty
+        if (currentLocal.length > 0) {
+          upsertAllTacticalUnitsInSupabase(currentLocal).catch(() => {});
+        }
+        return;
+      }
+
+      // Merge remote Supabase units with any local-only units not yet uploaded
+      const mergedMap = new Map<string, TacticalUnit>();
+      const missingInCloud: TacticalUnit[] = [];
+
+      remoteUnits.forEach(ru => {
+        if (ru && ru.id) mergedMap.set(ru.id, ru);
+      });
+
+      currentLocal.forEach(lu => {
+        if (!lu || !lu.id) return;
+        const alreadyById = mergedMap.has(lu.id);
+        const alreadyByName = Array.from(mergedMap.values()).some(
+          r => r.name.trim().toLowerCase() === lu.name.trim().toLowerCase()
+        );
+        if (!alreadyById && !alreadyByName) {
+          mergedMap.set(lu.id, lu);
+          missingInCloud.push(lu);
+        }
+      });
+
+      const mergedList = Array.from(mergedMap.values());
+      setTacticalUnits(mergedList);
+      safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(mergedList));
+
+      if (missingInCloud.length > 0) {
+        upsertAllTacticalUnitsInSupabase(missingInCloud).catch(() => {});
+      }
+
+      // Ensure local server & connected devices also receive cloud-persisted patrols
+      sendWsMessageRef.current?.('SYNC_TACTICAL_UNITS', { units: mergedList });
+    };
+
+    hydrateUnitsFromSupabase();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Hydrate per-module backgrounds from IndexedDB/localStorage, then reconcile with server
   useEffect(() => {
@@ -1287,18 +1389,32 @@ export default function App() {
       if (orderObj) {
         unitName = orderObj.assignedUnit;
         unitStatus = 'STATIONARY';
-        setTacticalUnits(prev =>
-          prev.map(unit => unit.name === orderObj.assignedUnit ? { ...unit, status: 'STATIONARY', lastReportTime: 'Hace un momento' } : unit)
-        );
+        const nowIso = new Date().toISOString();
+        setTacticalUnits(prev => {
+          const next = prev.map(unit =>
+            unit.name === orderObj.assignedUnit ? { ...unit, status: 'STATIONARY' as const, lastReportTime: nowIso } : unit
+          );
+          safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
+          const updatedTarget = next.find(u => u.name === orderObj.assignedUnit);
+          if (updatedTarget) upsertTacticalUnitInSupabase(updatedTarget).catch(() => {});
+          return next;
+        });
       }
     } else if (newStatus === 'IN_PROGRESS') {
       const orderObj = activeOrders.find(o => o.id === id);
       if (orderObj) {
         unitName = orderObj.assignedUnit;
         unitStatus = 'INTERCEPTING';
-        setTacticalUnits(prev =>
-          prev.map(unit => unit.name === orderObj.assignedUnit ? { ...unit, status: 'INTERCEPTING', lastReportTime: 'Hace un momento' } : unit)
-        );
+        const nowIso = new Date().toISOString();
+        setTacticalUnits(prev => {
+          const next = prev.map(unit =>
+            unit.name === orderObj.assignedUnit ? { ...unit, status: 'INTERCEPTING' as const, lastReportTime: nowIso } : unit
+          );
+          safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
+          const updatedTarget = next.find(u => u.name === orderObj.assignedUnit);
+          if (updatedTarget) upsertTacticalUnitInSupabase(updatedTarget).catch(() => {});
+          return next;
+        });
       }
     }
 
@@ -1367,34 +1483,108 @@ export default function App() {
     sendWsMessage('SEND_FIELD_REPORT', { report });
   };
 
-  const handleUpdateUnitCoordinates = (unitName: string, newCoords: string) => {
-    if (!validateBackendPermission('ROL_PATRULLA', `Actualizar Posición GPS de la Unidad: ${unitName}`, newCoords)) return;
+  const handleUpdateUnitCoordinates = (unitNameOrId: string, newCoords: string) => {
+    if (!validateBackendPermission('ROL_PATRULLA', `Actualizar Posición GPS de la Unidad: ${unitNameOrId}`, newCoords)) return;
+    const targetNorm = unitNameOrId.trim().toLowerCase();
+    const nowIso = new Date().toISOString();
+    let matchedUnit: TacticalUnit | null = null;
+
     setTacticalUnits(prev => {
-      const next = prev.map(unit => unit.name === unitName ? { ...unit, coordinates: newCoords, lastReportTime: 'Hace un momento' } : unit);
+      const next = prev.map(unit => {
+        const isMatch = unit.id === unitNameOrId || unit.name.trim().toLowerCase() === targetNorm;
+        if (isMatch) {
+          const updated: TacticalUnit = { ...unit, coordinates: newCoords, lastReportTime: nowIso };
+          matchedUnit = updated;
+          return updated;
+        }
+        return unit;
+      });
       safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
       return next;
     });
-    sendWsMessage('UPDATE_UNIT_COORDINATES', { unitName, newCoords });
+
+    const fallbackUnit = matchedUnit || tacticalUnitsRef.current.find(
+      u => u.id === unitNameOrId || u.name.trim().toLowerCase() === targetNorm
+    );
+    const unitToSave = matchedUnit || (fallbackUnit ? { ...fallbackUnit, coordinates: newCoords, lastReportTime: nowIso } : null);
+
+    sendWsMessage('UPDATE_UNIT_COORDINATES', {
+      unitName: unitToSave?.name || unitNameOrId,
+      unitId: unitToSave?.id,
+      newCoords
+    });
+
+    if (unitToSave) {
+      upsertTacticalUnitInSupabase(unitToSave).catch(err => {
+        console.warn('[App] Error guardando coordenadas de patrulla en Supabase:', err);
+      });
+    }
   };
 
   const handleAddTacticalUnit = (unit: TacticalUnit) => {
     if (!validateBackendPermission('ROL_BUSQUEDA', `Desplegar Nueva Patrulla Táctica: ${unit.name}`, unit.coordinates)) return;
+    const nowIso = new Date().toISOString();
+    const normalizedUnit: TacticalUnit = {
+      ...unit,
+      id: unit.id || `unit-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      name: unit.name.trim(),
+      lastReportTime: nowIso,
+      createdAt: unit.createdAt || nowIso
+    };
+
     setTacticalUnits(prev => {
-      const next = [...prev, unit];
+      const existsIdx = prev.findIndex(
+        u => u.id === normalizedUnit.id || u.name.trim().toLowerCase() === normalizedUnit.name.toLowerCase()
+      );
+      let next: TacticalUnit[];
+      if (existsIdx >= 0) {
+        next = prev.map((u, idx) => (idx === existsIdx ? { ...u, ...normalizedUnit, id: u.id } : u));
+      } else {
+        next = [...prev, normalizedUnit];
+      }
       safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
       return next;
     });
-    sendWsMessage('ADD_TACTICAL_UNIT', { unit, userId: currentRole, role: currentRole });
+
+    sendWsMessage('ADD_TACTICAL_UNIT', { unit: normalizedUnit, userId: currentRole, role: currentRole });
+
+    upsertTacticalUnitInSupabase(normalizedUnit).then(res => {
+      if (res.ok) {
+        setRealtimeSyncToast({
+          message: `Patrulla "${normalizedUnit.name}" guardada y sincronizada con Supabase Cloud.`,
+          timestamp: Date.now()
+        });
+      }
+    });
   };
 
   const handleUpdateTacticalUnit = (unit: TacticalUnit) => {
     if (!validateBackendPermission('ROL_BUSQUEDA', `Actualizar Datos de Patrulla: ${unit.name}`, unit.coordinates)) return;
+    const normalizedUnit: TacticalUnit = {
+      ...unit,
+      name: unit.name.trim(),
+      lastReportTime: new Date().toISOString()
+    };
+
     setTacticalUnits(prev => {
-      const next = prev.map(u => u.id === unit.id ? unit : u);
+      const exists = prev.some(u => u.id === normalizedUnit.id);
+      const next = exists
+        ? prev.map(u => (u.id === normalizedUnit.id ? normalizedUnit : u))
+        : [...prev, normalizedUnit];
       safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
       return next;
     });
-    sendWsMessage('UPDATE_TACTICAL_UNIT', { unitId: unit.id, updates: unit, userId: currentRole, role: currentRole });
+
+    sendWsMessage('UPDATE_TACTICAL_UNIT', { unitId: normalizedUnit.id, updates: normalizedUnit, userId: currentRole, role: currentRole });
+
+    upsertTacticalUnitInSupabase(normalizedUnit).then(res => {
+      if (res.ok) {
+        setRealtimeSyncToast({
+          message: `Cambios de "${normalizedUnit.name}" guardados en Supabase Cloud.`,
+          timestamp: Date.now()
+        });
+      }
+    });
   };
 
   const handleDeleteTacticalUnit = (unitId: string) => {
@@ -1405,6 +1595,9 @@ export default function App() {
       return next;
     });
     sendWsMessage('DELETE_TACTICAL_UNIT', { unitId, userId: currentRole, role: currentRole });
+    deleteTacticalUnitFromSupabase(unitId).catch(err => {
+      console.warn('[App] Error eliminando patrulla en Supabase:', err);
+    });
   };
 
   const handleLoginSuccess = (role: MilitaryRole) => {

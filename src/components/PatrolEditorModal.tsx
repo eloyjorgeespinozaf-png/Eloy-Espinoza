@@ -146,7 +146,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
       fuel: Number(fuel),
       ammo: Number(ammo),
       notes: notes.trim(),
-      lastReportTime: 'Hace un momento',
+      lastReportTime: new Date().toISOString(),
       createdAt: mode === 'EDIT' && patrol?.createdAt ? patrol.createdAt : new Date().toISOString()
     };
 

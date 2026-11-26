@@ -455,8 +455,11 @@ wss.on("connection", (ws: WebSocket) => {
               : order
           );
           if (unitName && unitStatus) {
+            const targetNorm = String(unitName).trim().toLowerCase();
             serverTacticalUnits = serverTacticalUnits.map(unit => 
-              unit.name === unitName ? { ...unit, status: unitStatus, lastReportTime: "Hace un momento" } : unit
+              unit.name.trim().toLowerCase() === targetNorm
+                ? { ...unit, status: unitStatus, lastReportTime: new Date().toISOString() }
+                : unit
             );
           }
           shouldBroadcast = true;
@@ -478,9 +481,11 @@ wss.on("connection", (ws: WebSocket) => {
         case "UPDATE_UNIT_COORDINATES": {
           const { unitName, unitId, newCoords } = payload || {};
           if (newCoords) {
+            const targetNorm = unitName ? String(unitName).trim().toLowerCase() : "";
+            const nowIso = new Date().toISOString();
             serverTacticalUnits = serverTacticalUnits.map(unit => 
-              (unit.name === unitName || (unitId && unit.id === unitId)) 
-                ? { ...unit, coordinates: newCoords, lastReportTime: "Hace un momento" } 
+              ((targetNorm && unit.name.trim().toLowerCase() === targetNorm) || (unitId && unit.id === unitId)) 
+                ? { ...unit, coordinates: newCoords, lastReportTime: nowIso } 
                 : unit
             );
             shouldBroadcast = true;
@@ -489,16 +494,33 @@ wss.on("connection", (ws: WebSocket) => {
         }
 
         case "ADD_TACTICAL_UNIT": {
-          const { unit, userId, role } = payload;
-          if (unit && !serverTacticalUnits.some(u => u.id === unit.id || u.name.toLowerCase() === unit.name.toLowerCase())) {
-            serverTacticalUnits = [...serverTacticalUnits, unit];
+          const { unit, userId, role } = payload || {};
+          if (unit && unit.name) {
+            const nowIso = new Date().toISOString();
+            const normalizedUnit = {
+              ...unit,
+              id: unit.id || `unit-${Date.now()}`,
+              name: String(unit.name).trim(),
+              lastReportTime: nowIso,
+              createdAt: unit.createdAt || nowIso
+            };
+            const existingIdx = serverTacticalUnits.findIndex(
+              u => u.id === normalizedUnit.id || u.name.trim().toLowerCase() === normalizedUnit.name.toLowerCase()
+            );
+            if (existingIdx >= 0) {
+              serverTacticalUnits = serverTacticalUnits.map((u, idx) =>
+                idx === existingIdx ? { ...u, ...normalizedUnit, id: u.id } : u
+              );
+            } else {
+              serverTacticalUnits = [...serverTacticalUnits, normalizedUnit];
+            }
             serverAuditLogs = [{
               id: `log-unit-add-${Date.now()}`,
               userId: userId || "S-2",
               role: role || "ROL_BUSQUEDA",
-              action: `NUEVA PATRULLA DESPLEGADA: ${unit.name} (Cmdte: ${unit.commander || 'S-2'}) en ${unit.coordinates}. Módulo activo asignado.`,
-              timestamp: new Date().toISOString(),
-              coordinates: unit.coordinates
+              action: `NUEVA PATRULLA DESPLEGADA: ${normalizedUnit.name} (Cmdte: ${normalizedUnit.commander || 'S-2'}) en ${normalizedUnit.coordinates}. Módulo activo asignado.`,
+              timestamp: nowIso,
+              coordinates: normalizedUnit.coordinates
             }, ...serverAuditLogs];
             shouldBroadcast = true;
           }
@@ -506,19 +528,41 @@ wss.on("connection", (ws: WebSocket) => {
         }
 
         case "UPDATE_TACTICAL_UNIT": {
-          const { unitId, updates, userId, role } = payload;
+          const { unitId, updates, userId, role } = payload || {};
           if (unitId && updates) {
-            serverTacticalUnits = serverTacticalUnits.map(u => 
-              u.id === unitId ? { ...u, ...updates, lastReportTime: "Hace un momento" } : u
-            );
+            const nowIso = new Date().toISOString();
+            const exists = serverTacticalUnits.some(u => u.id === unitId);
+            if (exists) {
+              serverTacticalUnits = serverTacticalUnits.map(u => 
+                u.id === unitId ? { ...u, ...updates, lastReportTime: nowIso } : u
+              );
+            } else {
+              serverTacticalUnits = [...serverTacticalUnits, { ...updates, id: unitId, lastReportTime: nowIso }];
+            }
             serverAuditLogs = [{
               id: `log-unit-upd-${Date.now()}`,
               userId: userId || "S-2",
               role: role || "ROL_BUSQUEDA",
               action: `DATOS ACTUALIZADOS DE PATRULLA: ${updates.name || unitId} (Estado: ${updates.status || 'Actualizado'}).`,
-              timestamp: new Date().toISOString(),
+              timestamp: nowIso,
               coordinates: updates.coordinates || "19°13'10\"S 68°35'50\"W"
             }, ...serverAuditLogs];
+            shouldBroadcast = true;
+          }
+          break;
+        }
+
+        case "SYNC_TACTICAL_UNITS": {
+          const { units } = payload || {};
+          if (Array.isArray(units) && units.length > 0) {
+            const merged = new Map<string, any>();
+            serverTacticalUnits.forEach(u => merged.set(u.id, u));
+            units.forEach(u => {
+              if (u && u.id) {
+                merged.set(u.id, { ...merged.get(u.id), ...u });
+              }
+            });
+            serverTacticalUnits = Array.from(merged.values());
             shouldBroadcast = true;
           }
           break;
@@ -999,24 +1043,6 @@ function broadcast(messageObj: any) {
 }
 
 async function startServer() {
-  // Ensure the Nginx auth bridge bypass is active to avoid 302 redirect white screen locks
-  try {
-    const luaPath = "/etc/nginx/user_auth_verification.lua";
-    if (fs.existsSync(luaPath)) {
-      let luaContent = fs.readFileSync(luaPath, "utf-8");
-      if (!luaContent.includes('if true or os.getenv("DISABLE_AUTH_BRIDGE")')) {
-        luaContent = luaContent.replace(
-          'if os.getenv("DISABLE_AUTH_BRIDGE") == "true" then',
-          'if true or os.getenv("DISABLE_AUTH_BRIDGE") == "true" then'
-        );
-        fs.writeFileSync(luaPath, luaContent, "utf-8");
-        exec("nginx -s reload", () => {});
-      }
-    }
-  } catch (err) {
-    console.warn("Could not check nginx lua auth script:", err);
-  }
-
   const app = express();
   const PORT = 3000;
 
@@ -1783,8 +1809,11 @@ async function startServer() {
                 : order
             );
             if (unitName && unitStatus) {
+              const targetNorm = String(unitName).trim().toLowerCase();
               serverTacticalUnits = serverTacticalUnits.map(unit => 
-                unit.name === unitName ? { ...unit, status: unitStatus, lastReportTime: "Hace un momento" } : unit
+                unit.name.trim().toLowerCase() === targetNorm
+                  ? { ...unit, status: unitStatus, lastReportTime: new Date().toISOString() }
+                  : unit
               );
             }
             shouldBroadcast = true;
@@ -1806,9 +1835,11 @@ async function startServer() {
           case "UPDATE_UNIT_COORDINATES": {
             const { unitName, unitId, newCoords } = payload || {};
             if (newCoords) {
+              const targetNorm = unitName ? String(unitName).trim().toLowerCase() : "";
+              const nowIso = new Date().toISOString();
               serverTacticalUnits = serverTacticalUnits.map(unit => 
-                (unit.name === unitName || (unitId && unit.id === unitId)) 
-                  ? { ...unit, coordinates: newCoords, lastReportTime: "Hace un momento" } 
+                ((targetNorm && unit.name.trim().toLowerCase() === targetNorm) || (unitId && unit.id === unitId)) 
+                  ? { ...unit, coordinates: newCoords, lastReportTime: nowIso } 
                   : unit
               );
               shouldBroadcast = true;
@@ -1817,16 +1848,33 @@ async function startServer() {
           }
 
           case "ADD_TACTICAL_UNIT": {
-            const { unit, userId, role } = payload;
-            if (unit && !serverTacticalUnits.some(u => u.id === unit.id || u.name.toLowerCase() === unit.name.toLowerCase())) {
-              serverTacticalUnits = [...serverTacticalUnits, unit];
+            const { unit, userId, role } = payload || {};
+            if (unit && unit.name) {
+              const nowIso = new Date().toISOString();
+              const normalizedUnit = {
+                ...unit,
+                id: unit.id || `unit-${Date.now()}`,
+                name: String(unit.name).trim(),
+                lastReportTime: nowIso,
+                createdAt: unit.createdAt || nowIso
+              };
+              const existingIdx = serverTacticalUnits.findIndex(
+                u => u.id === normalizedUnit.id || u.name.trim().toLowerCase() === normalizedUnit.name.toLowerCase()
+              );
+              if (existingIdx >= 0) {
+                serverTacticalUnits = serverTacticalUnits.map((u, idx) =>
+                  idx === existingIdx ? { ...u, ...normalizedUnit, id: u.id } : u
+                );
+              } else {
+                serverTacticalUnits = [...serverTacticalUnits, normalizedUnit];
+              }
               serverAuditLogs = [{
                 id: `log-unit-add-${Date.now()}`,
                 userId: userId || "S-2",
                 role: role || "ROL_BUSQUEDA",
-                action: `NUEVA PATRULLA DESPLEGADA: ${unit.name} (Cmdte: ${unit.commander || 'S-2'}) en ${unit.coordinates}. Módulo activo asignado.`,
-                timestamp: new Date().toISOString(),
-                coordinates: unit.coordinates
+                action: `NUEVA PATRULLA DESPLEGADA: ${normalizedUnit.name} (Cmdte: ${normalizedUnit.commander || 'S-2'}) en ${normalizedUnit.coordinates}. Módulo activo asignado.`,
+                timestamp: nowIso,
+                coordinates: normalizedUnit.coordinates
               }, ...serverAuditLogs];
               shouldBroadcast = true;
             }
@@ -1834,19 +1882,41 @@ async function startServer() {
           }
 
           case "UPDATE_TACTICAL_UNIT": {
-            const { unitId, updates, userId, role } = payload;
+            const { unitId, updates, userId, role } = payload || {};
             if (unitId && updates) {
-              serverTacticalUnits = serverTacticalUnits.map(u => 
-                u.id === unitId ? { ...u, ...updates, lastReportTime: "Hace un momento" } : u
-              );
+              const nowIso = new Date().toISOString();
+              const exists = serverTacticalUnits.some(u => u.id === unitId);
+              if (exists) {
+                serverTacticalUnits = serverTacticalUnits.map(u => 
+                  u.id === unitId ? { ...u, ...updates, lastReportTime: nowIso } : u
+                );
+              } else {
+                serverTacticalUnits = [...serverTacticalUnits, { ...updates, id: unitId, lastReportTime: nowIso }];
+              }
               serverAuditLogs = [{
                 id: `log-unit-upd-${Date.now()}`,
                 userId: userId || "S-2",
                 role: role || "ROL_BUSQUEDA",
                 action: `DATOS ACTUALIZADOS DE PATRULLA: ${updates.name || unitId} (Estado: ${updates.status || 'Actualizado'}).`,
-                timestamp: new Date().toISOString(),
+                timestamp: nowIso,
                 coordinates: updates.coordinates || "19°13'10\"S 68°35'50\"W"
               }, ...serverAuditLogs];
+              shouldBroadcast = true;
+            }
+            break;
+          }
+
+          case "SYNC_TACTICAL_UNITS": {
+            const { units } = payload || {};
+            if (Array.isArray(units) && units.length > 0) {
+              const merged = new Map<string, any>();
+              serverTacticalUnits.forEach(u => merged.set(u.id, u));
+              units.forEach(u => {
+                if (u && u.id) {
+                  merged.set(u.id, { ...merged.get(u.id), ...u });
+                }
+              });
+              serverTacticalUnits = Array.from(merged.values());
               shouldBroadcast = true;
             }
             break;
@@ -2328,15 +2398,18 @@ async function startServer() {
     app.use("/assets", express.static(path.join(distPath, "assets")));
   }
 
+  let viteServer: Awaited<ReturnType<typeof createViteServer>> | null = null;
+
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
+    viteServer = await createViteServer({
       server: {
         middlewareMode: true,
         hmr: false,
+        ws: false,
       },
       appType: "spa",
     });
-    app.use(vite.middlewares);
+    app.use(viteServer.middlewares);
   } else {
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
@@ -2344,9 +2417,39 @@ async function startServer() {
     });
   }
 
+  httpServer.on("error", (err: any) => {
+    console.error("[PII-LCC Server] HTTP server error:", err?.message || err);
+    if (err?.code === "EADDRINUSE") {
+      process.exit(1);
+    }
+  });
+
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`PII-LCC central sync node listening on port ${PORT}`);
   });
+
+  // Clean graceful shutdown so restarts release port 3000 immediately
+  const shutdown = () => {
+    try {
+      wss.clients.forEach((client) => {
+        try {
+          client.terminate();
+        } catch {}
+      });
+      wss.close();
+      httpServer.close();
+      if (viteServer) {
+        viteServer.close().catch(() => {});
+      }
+    } catch {}
+    process.exit(0);
+  };
+
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("[PII-LCC Server] Fatal startup error:", err);
+  process.exit(1);
+});

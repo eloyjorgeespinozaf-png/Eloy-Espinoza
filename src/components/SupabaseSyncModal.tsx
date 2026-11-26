@@ -37,7 +37,8 @@ import {
   ActionableIntel, 
   AutomatedOrder, 
   TacticalUnit, 
-  G2RegistryRecord 
+  G2RegistryRecord,
+  User
 } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { playCyberAccessGranted, playCyberClick, playCyberDenied } from '../utils/audio';
@@ -58,6 +59,7 @@ interface SupabaseSyncModalProps {
     activeOrders?: AutomatedOrder[];
     tacticalUnits?: TacticalUnit[];
     expedientes?: G2RegistryRecord[];
+    users?: User[];
   }) => void;
 }
 
@@ -90,13 +92,15 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handlePing = async () => {
+  const handlePing = async (preserveFeedback: boolean = false) => {
     setIsPinging(true);
-    setSyncFeedback(null);
+    if (!preserveFeedback) {
+      setSyncFeedback(null);
+    }
     try {
       const res = await testSupabaseConnection();
       setHealth(res);
-      if (res.ok) {
+      if (res.ok && !preserveFeedback) {
         playCyberAccessGranted(0.08);
       }
     } catch (e: any) {
@@ -133,14 +137,18 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
 
     try {
       const result = await syncAllDataToSupabase(payload, user?.name || 'CEO-LCC MANDO');
-      if (result.success) {
-        setSyncFeedback(`¡Sincronización exitosa! Se respaldaron ${result.tablesSynced.length} módulos y ${result.totalEntities} entidades en Supabase.`);
+      if (result.success && result.tablesFailed.length === 0) {
+        setSyncFeedback(`¡Sincronización completa exitosa! Se respaldaron ${result.tablesSynced.length} tablas (${result.totalEntities} entidades, incluyendo ${tacticalUnits.length} patrullas y ${users.length} usuarios) en Supabase Cloud.`);
         playCyberAccessGranted(0.12);
-        // Refresh ping to detect newly inserted data
-        handlePing();
+        handlePing(true);
+      } else if (result.tablesSynced.length > 0) {
+        const reasons = result.tablesFailed.map(f => `${f.table}: ${f.reason}`).join(' | ');
+        setSyncFeedback(`Sincronización parcial (${result.tablesSynced.length} OK, ${result.tablesFailed.length} con error): ${reasons}`);
+        playCyberDenied(0.1);
+        handlePing(true);
       } else {
         const reasons = result.tablesFailed.map(f => `${f.table}: ${f.reason}`).join(' | ');
-        setSyncFeedback(`Sincronización parcial/pendiente: ${reasons}`);
+        setSyncFeedback(`Error al sincronizar con Supabase: ${reasons}`);
         playCyberDenied(0.12);
       }
     } catch (err: any) {
@@ -165,9 +173,12 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
           expedientes: result.data.expedientes as G2RegistryRecord[] | undefined,
           actionableIntel: result.data.actionableIntel as ActionableIntel[] | undefined,
           activeOrders: result.data.activeOrders as AutomatedOrder[] | undefined,
-          tacticalUnits: result.data.tacticalUnits as TacticalUnit[] | undefined
+          tacticalUnits: result.data.tacticalUnits as TacticalUnit[] | undefined,
+          users: result.data.users as User[] | undefined
         });
-        setSyncFeedback(`¡Datos restaurados con éxito desde Supabase (${result.source})!`);
+        const unitCount = result.data.tacticalUnits?.length || 0;
+        const userCount = result.data.users?.length || 0;
+        setSyncFeedback(`¡Datos restaurados con éxito desde Supabase (${result.source})! ${unitCount} patrullas y ${userCount} operadores sincronizados.`);
         playCyberAccessGranted(0.12);
       } else {
         setSyncFeedback(result.error || 'No se encontraron datos previos en Supabase.');
@@ -263,12 +274,16 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
           {/* Status Feedback Banner */}
           {syncFeedback && (
             <div className={`p-3 rounded-lg border flex items-start gap-2.5 font-mono text-xs ${
-              syncFeedback.includes('Error') 
+              syncFeedback.includes('Error') || syncFeedback.includes('Fallo')
                 ? 'bg-red-950/40 border-red-500/40 text-red-300' 
-                : 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                : syncFeedback.includes('parcial') || syncFeedback.includes('No se encontraron')
+                  ? 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+                  : 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
             }`}>
-              {syncFeedback.includes('Error') ? (
+              {syncFeedback.includes('Error') || syncFeedback.includes('Fallo') ? (
                 <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              ) : syncFeedback.includes('parcial') || syncFeedback.includes('No se encontraron') ? (
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               ) : (
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               )}
@@ -310,7 +325,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
 
                 <div className="flex items-center gap-2 self-end md:self-center">
                   <button
-                    onClick={handlePing}
+                    onClick={() => handlePing(false)}
                     disabled={isPinging}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 transition-colors font-mono font-bold cursor-pointer disabled:opacity-50"
                   >
@@ -321,7 +336,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
               </div>
 
               {/* Data Summary Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 font-mono">
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 font-mono">
                 <div className="bg-[#121824] border border-zinc-800/80 rounded-lg p-3 text-center">
                   <span className="text-[10px] text-zinc-400 block uppercase">Clanes</span>
                   <span className="text-lg font-bold text-emerald-400">{clans.length}</span>
@@ -345,6 +360,10 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
                 <div className="bg-[#121824] border border-zinc-800/80 rounded-lg p-3 text-center">
                   <span className="text-[10px] text-zinc-400 block uppercase">Patrullas</span>
                   <span className="text-lg font-bold text-cyan-400">{tacticalUnits.length}</span>
+                </div>
+                <div className="bg-[#121824] border border-zinc-800/80 rounded-lg p-3 text-center">
+                  <span className="text-[10px] text-zinc-400 block uppercase">Usuarios</span>
+                  <span className="text-lg font-bold text-blue-400">{users.length}</span>
                 </div>
               </div>
 
