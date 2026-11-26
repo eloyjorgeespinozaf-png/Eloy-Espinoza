@@ -22,7 +22,7 @@ export const ModuleBackgroundLayer: React.FC<ModuleBackgroundLayerProps> = ({
   onOpenManager
 }) => {
   const moduleMeta = TACTICAL_MODULES_LIST.find(m => m.id === activeModuleId);
-  const fallbackUrl = moduleMeta?.defaultPresetImage || (activeModuleId === 'MOD_CEO' ? '/INTERFAZ.jpg' : '/dashboard-room.svg');
+  const fallbackUrl = moduleMeta?.defaultPresetImage || (activeModuleId === 'MOD_CEO' ? '/backgrounds/default_MOD_CEO.png' : '/dashboard-room.svg');
 
   const [activeSrc, setActiveSrc] = useState<string>(() => {
     return config?.dataUrl || config?.imageUrl || fallbackUrl;

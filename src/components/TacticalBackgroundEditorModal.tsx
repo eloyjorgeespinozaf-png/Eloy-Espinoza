@@ -76,7 +76,7 @@ const ALL_SYSTEM_TARGETS: TargetItemMeta[] = [
     code: 'C4ISR-GLOBAL',
     color: '#10b981',
     desc: 'Fondo de la terminal de acceso militar, pantalla de login y contenedor base.',
-    fallbackImg: '/INTERFAZ.jpg'
+    fallbackImg: '/default-interface-bg.jpg'
   },
   {
     id: 'MOD_BUSQUEDA',
@@ -85,7 +85,7 @@ const ALL_SYSTEM_TARGETS: TargetItemMeta[] = [
     code: 'FIELD-INTEL',
     color: '#eab308',
     desc: 'Recepción de alertas tempranas, sensores de campo y vigilancia de pasos fronterizos.',
-    fallbackImg: '/DASHB 3.jpg'
+    fallbackImg: '/backgrounds/default_MOD_BUSQUEDA.png'
   },
   {
     id: 'MOD_FUSION',
@@ -94,7 +94,7 @@ const ALL_SYSTEM_TARGETS: TargetItemMeta[] = [
     code: 'INTEL-FUSION',
     color: '#f97316',
     desc: 'Triaje de alertas, análisis de clanes y expedientes clasificados de inteligencia.',
-    fallbackImg: '/DASHBOARD 2.png'
+    fallbackImg: '/backgrounds/default_MOD_FUSION.png'
   },
   {
     id: 'MOD_CEO',
@@ -103,7 +103,7 @@ const ALL_SYSTEM_TARGETS: TargetItemMeta[] = [
     code: 'C4ISR-STRAT',
     color: '#3b82f6',
     desc: 'Sala de Mando y Control Estratégico para emisión de Órdenes de Operaciones.',
-    fallbackImg: '/INTERFAZ.jpg'
+    fallbackImg: '/backgrounds/default_MOD_CEO.png'
   },
   {
     id: 'MOD_PATRULLAS',
@@ -111,8 +111,8 @@ const ALL_SYSTEM_TARGETS: TargetItemMeta[] = [
     badge: 'TERRENO',
     code: 'TACTICAL-PATROL',
     color: '#10b981',
-    desc: 'Monitoreo de coordenadas GPS, reportes de combate e interdicciones en Hito 27.',
-    fallbackImg: '/DASHBOARD.jpg'
+    desc: 'Monitoreo de coordenadas GPS, reportes de combate e interdicciones en territorio nacional.',
+    fallbackImg: '/backgrounds/default_MOD_PATRULLAS.png'
   },
   {
     id: 'MOD_P2P_MESH',
@@ -130,7 +130,7 @@ const ALL_SYSTEM_TARGETS: TargetItemMeta[] = [
     code: 'SYS-ARCH',
     color: '#8b5cf6',
     desc: 'Diagrama doctrinal y flujo de información integral entre los cuatro órganos.',
-    fallbackImg: '/interfaz-room.svg'
+    fallbackImg: '/escudo-eceme-negro.svg'
   },
   {
     id: 'MOD_CODE_VIEWER',
@@ -139,7 +139,7 @@ const ALL_SYSTEM_TARGETS: TargetItemMeta[] = [
     code: 'DEV-AUDIT',
     color: '#ec4899',
     desc: 'Inspección de código fuente y criptografía militar CAD-C2.',
-    fallbackImg: '/interfaz-room.svg'
+    fallbackImg: '/escudo-eceme-negro.svg'
   }
 ];
 
@@ -200,7 +200,8 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
       const brightness = globalSettings.brightness ?? 1;
       const contrast = globalSettings.contrast ?? 1;
       const opticalFilter = globalSettings.opticalFilter || 'none';
-      const isCustom = Boolean(globalSettings.customDataUrl || (globalSettings.imageUrl && globalSettings.imageUrl !== meta.fallbackImg));
+      const cleanImgUrl = (globalSettings.imageUrl || '').split('?')[0];
+      const isCustom = Boolean(globalSettings.customDataUrl || (cleanImgUrl && cleanImgUrl !== meta.fallbackImg));
       const fileName = globalSettings.customFileName || (globalSettings.customDataUrl ? 'Imagen Importada' : undefined);
 
       return {
@@ -224,7 +225,8 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
       const brightness = cfg?.brightness ?? 1;
       const contrast = cfg?.contrast ?? 1;
       const opticalFilter = cfg?.opticalFilter || 'none';
-      const isCustom = Boolean(cfg?.dataUrl || (cfg?.imageUrl && cfg.imageUrl !== meta.fallbackImg));
+      const cleanModUrl = (cfg?.imageUrl || '').split('?')[0];
+      const isCustom = Boolean(cfg?.dataUrl || (cleanModUrl && cleanModUrl !== meta.fallbackImg));
       const fileName = cfg?.customFileName || (cfg?.dataUrl ? 'Imagen Importada' : undefined);
 
       return {
@@ -746,7 +748,7 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
                               ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-600/60'
                               : 'bg-black/80 text-zinc-300 border border-zinc-800'
                           }`}>
-                            {bgData.isCustom ? '✓ Personalizada' : 'Doctrinal'}
+                            {bgData.isCustom ? '✓ Personalizada' : '★ Predeterminado'}
                           </span>
 
                           <span className="px-1.5 py-0.5 rounded bg-black/80 text-emerald-400 font-mono border border-zinc-800">

@@ -1,19 +1,33 @@
 {
+  "id": "/",
   "short_name": "PII-LCC",
-  "name": "Plataforma Integrada de Inteligencia Militar PII-LCC",
-  "description": "Terminal Autónomo de Inteligencia Táctica para la Línea de Control Clandestino",
-  "icons": [
-    {
-      "src": "/tactical-icon.svg",
-      "sizes": "192x192 512x512 1024x1024",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
-    }
-  ],
+  "name": "Plataforma Integrada de Inteligencia para la LCC",
+  "description": "Terminal Táctico Autónomo de Inteligencia Militar para la Línea de Control Clandestino",
   "start_url": "/",
+  "scope": "/",
   "background_color": "#050505",
-  "theme_color": "#10b981",
+  "theme_color": "#050505",
   "display": "standalone",
   "orientation": "any",
-  "categories": ["utilities", "security"]
+  "categories": ["utilities", "security", "productivity"],
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
 }

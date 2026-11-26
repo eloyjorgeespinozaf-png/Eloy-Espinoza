@@ -25,7 +25,7 @@ export const TACTICAL_MODULES_LIST: TacticalModuleMeta[] = [
     badge: 'MANDO',
     color: '#3b82f6',
     description: 'Sala de Mando y Control Estratégico C4ISR para emisión de Órdenes de Operaciones y despliegue conjunto.',
-    defaultPresetImage: '/INTERFAZ.jpg'
+    defaultPresetImage: '/backgrounds/default_MOD_CEO.png'
   },
   {
     id: 'MOD_FUSION',
@@ -34,7 +34,7 @@ export const TACTICAL_MODULES_LIST: TacticalModuleMeta[] = [
     badge: 'FUSIÓN',
     color: '#f97316',
     description: 'Central de Fusión de Inteligencia para triaje de alertas de campo, análisis de clanes y expedientes clasificados.',
-    defaultPresetImage: '/DASHBOARD 2.png'
+    defaultPresetImage: '/backgrounds/default_MOD_FUSION.png'
   },
   {
     id: 'MOD_BUSQUEDA',
@@ -43,7 +43,7 @@ export const TACTICAL_MODULES_LIST: TacticalModuleMeta[] = [
     badge: 'BÚSQUEDA',
     color: '#eab308',
     description: 'Recepción de alertas tempranas, sensores de campo y vigilancia de pasos fronterizos no habilitados.',
-    defaultPresetImage: '/DASHB 3.jpg'
+    defaultPresetImage: '/backgrounds/default_MOD_BUSQUEDA.png'
   },
   {
     id: 'MOD_PATRULLAS',
@@ -51,8 +51,8 @@ export const TACTICAL_MODULES_LIST: TacticalModuleMeta[] = [
     code: 'TACTICAL-PATROL',
     badge: 'TERRENO',
     color: '#10b981',
-    description: 'Monitoreo de coordenadas GPS, reportes de combate y ejecución física de interdicciones en el Hito 27.',
-    defaultPresetImage: '/DASHBOARD.jpg'
+    description: 'Monitoreo de coordenadas GPS, reportes de combate y ejecución física de interdicciones en territorio nacional.',
+    defaultPresetImage: '/backgrounds/default_MOD_PATRULLAS.png'
   },
   {
     id: 'MOD_P2P_MESH',
@@ -70,7 +70,7 @@ export const TACTICAL_MODULES_LIST: TacticalModuleMeta[] = [
     badge: 'ARQUITECTURA',
     color: '#8b5cf6',
     description: 'Diagrama doctrinal y flujo de información integral entre los cuatro órganos de combate.',
-    defaultPresetImage: '/interfaz-room.svg'
+    defaultPresetImage: '/escudo-eceme-negro.svg'
   },
   {
     id: 'MOD_CODE_VIEWER',
@@ -79,44 +79,50 @@ export const TACTICAL_MODULES_LIST: TacticalModuleMeta[] = [
     badge: 'AUDITORÍA',
     color: '#ec4899',
     description: 'Inspección de código fuente y criptografía militar CAD-C2.',
-    defaultPresetImage: '/interfaz-room.svg'
+    defaultPresetImage: '/escudo-eceme-negro.svg'
   }
 ];
 
 export const PRESET_TACTICAL_WALLPAPERS = [
   {
-    id: 'preset-pii-lcc-oficial',
-    name: 'PII-LCC Sistema Táctico (Oficial 3D)',
-    url: '/PII-LCC-NEGRO.jpg',
-    description: 'Emblema oficial PII-LCC con arquitectura táctica en fondo oscuro de alta resolución.'
+    id: 'preset-global-interface',
+    name: 'Interfaz General PII-LCC (Predeterminado)',
+    url: '/default-interface-bg.jpg',
+    description: 'Emblema oficial metálico PII-LCC Sistema Táctico para la interfaz general y pantalla de acceso.'
   },
   {
-    id: 'preset-c4isr-warroom',
-    name: 'Sala de Guerra C4ISR (INTERFAZ)',
-    url: '/INTERFAZ.jpg',
-    description: 'Puesto de comando con monitores tácticos integrados y mapas de calor.'
+    id: 'preset-mod-ceo-oficial',
+    name: 'Módulo 3: Mando Estratégico CEO-LCC (Predeterminado)',
+    url: '/backgrounds/default_MOD_CEO.png',
+    description: 'Sala de mando estratégica CEO-LCC con proyección topográfica 3D y red logística.'
   },
   {
-    id: 'preset-multimonitor-c2',
-    name: 'Consola Multimonitor C2 (DASHBOARD 2)',
-    url: '/DASHBOARD 2.png',
-    description: 'Disposición multipantalla para análisis de inteligencia y vectores de ruta.'
+    id: 'preset-mod-fusion-oficial',
+    name: 'Módulo 2: Central de Fusión CFI / iCRM (Predeterminado)',
+    url: '/backgrounds/default_MOD_FUSION.png',
+    description: 'Motor de Inteligencia iCRM con cubo holográfico de fusión y enlace de datos.'
   },
   {
-    id: 'preset-radar-cfi',
-    name: 'Radar Táctico y Fusión (DASHB 3)',
-    url: '/DASHB 3.jpg',
-    description: 'Monitoreo de sensores de frontera y detección temprana de incursiones.'
+    id: 'preset-mod-busqueda-oficial',
+    name: 'Módulo 1: Órganos de Búsqueda S-2 (Predeterminado)',
+    url: '/backgrounds/default_MOD_BUSQUEDA.png',
+    description: 'Unidad móvil C4I HUB-ALPHA con enlace SATCOM y vigilancia de campo.'
   },
   {
-    id: 'preset-ops-command',
-    name: 'Comando de Operaciones (DASHBOARD)',
-    url: '/DASHBOARD.jpg',
-    description: 'Terminal avanzado con telemetría de unidades y enlaces satelitales.'
+    id: 'preset-mod-patrullas-oficial',
+    name: 'Módulo 4: Unidades de Terreno Patrullas (Predeterminado)',
+    url: '/backgrounds/default_MOD_PATRULLAS.png',
+    description: 'Emblema táctico PII-LCC para operaciones de patrullas desplegadas en terreno.'
+  },
+  {
+    id: 'preset-escudo-eceme',
+    name: 'Escudo ECEME Negro (Arquitectura y Auditoría)',
+    url: '/escudo-eceme-negro.svg',
+    description: 'Emblema institucional ECEME sobre fondo oscuro de alta legibilidad.'
   },
   {
     id: 'preset-telecom-mesh',
-    name: 'Red de Telecomunicaciones (dashboard-room)',
+    name: 'Red de Telecomunicaciones P2P S-6 (Predeterminado)',
     url: '/dashboard-room.svg',
     description: 'Esquema de enlace mallado de radiofrecuencia militar S-6.'
   },
@@ -128,20 +134,31 @@ export const PRESET_TACTICAL_WALLPAPERS = [
   }
 ];
 
+const DEFAULT_CUSTOM_FILE_NAMES: Record<TacticalModuleId, string> = {
+  MOD_CEO: 'MANDO_ESTRATEGICO_CEO_LCC.png',
+  MOD_FUSION: 'CFI.jpg',
+  MOD_BUSQUEDA: 'ORGANO DE BUSQUEDA.jpg',
+  MOD_PATRULLAS: 'PII-LCC.jpg',
+  MOD_P2P_MESH: 'dashboard-room.svg',
+  MOD_ARCHITECTURE: 'ESCUDO ECEME NEGRO.svg',
+  MOD_CODE_VIEWER: 'ESCUDO ECEME NEGRO.svg'
+};
+
 export function createDefaultModuleBackgrounds(): ModuleBackgroundsMap {
   const map: Partial<ModuleBackgroundsMap> = {};
   TACTICAL_MODULES_LIST.forEach(mod => {
     map[mod.id] = {
       moduleId: mod.id,
       moduleName: mod.name,
-      imageUrl: mod.defaultPresetImage || '/interfaz-room.svg',
+      imageUrl: mod.defaultPresetImage || '/escudo-eceme-negro.svg',
       opacity: 0.80,
       blur: 0,
       contrastOverlay: true,
       fitMode: 'cover',
       enabled: true,
-      updatedAt: new Date().toISOString(),
-      updatedBy: 'SISTEMA_DOCTRINAL'
+      customFileName: DEFAULT_CUSTOM_FILE_NAMES[mod.id],
+      updatedAt: '2026-11-26T23:05:00.000Z',
+      updatedBy: 'PREDETERMINADO_OFICIAL'
     };
   });
   return map as ModuleBackgroundsMap;
@@ -171,8 +188,38 @@ export function resolveActiveModuleId(
 }
 
 const STORAGE_PREFIX = 'pii_lcc_mod_bg_';
+const DEFAULTS_REVISION_KEY = 'pii_lcc_mod_bg_defaults_rev';
+const CURRENT_DEFAULTS_REVISION = '2026-11-26-v1';
 const INDEXED_DB_NAME = 'PII_LCC_BACKGROUNDS_DB_v1';
 const STORE_NAME = 'module_backgrounds';
+
+const LEGACY_OR_BROKEN_URLS = new Set([
+  '/DASHBOARD 2.png',
+  '/DASHB 3.jpg',
+  '/DASHBOARD.jpg',
+  '/interfaz-room.svg',
+  '/backgrounds/bg_MOD_ARCHITECTURE.png',
+  '/backgrounds/bg_MOD_CODE_VIEWER.png'
+]);
+
+function sanitizeLoadedConfig(
+  modId: TacticalModuleId,
+  config: ModuleBackgroundConfig,
+  fallback: ModuleBackgroundConfig
+): ModuleBackgroundConfig {
+  const cleanUrl = (config.imageUrl || '').split('?')[0];
+  if (!config.dataUrl && (!cleanUrl || LEGACY_OR_BROKEN_URLS.has(cleanUrl))) {
+    return {
+      ...fallback,
+      opacity: config.opacity ?? fallback.opacity,
+      blur: config.blur ?? fallback.blur,
+      contrastOverlay: config.contrastOverlay ?? fallback.contrastOverlay,
+      fitMode: config.fitMode || fallback.fitMode,
+      enabled: config.enabled !== false
+    };
+  }
+  return config;
+}
 
 /**
  * Open IndexedDB database with fallback handling
@@ -234,13 +281,35 @@ export async function loadModuleBackgroundsLocal(): Promise<ModuleBackgroundsMap
   const defaults = createDefaultModuleBackgrounds();
   const resultMap: ModuleBackgroundsMap = { ...defaults };
 
+  // One-time migration when official built-in defaults are updated so installed PWAs receive the locked-in defaults
+  const savedRevision = safeStorage.getItem(DEFAULTS_REVISION_KEY);
+  if (savedRevision !== CURRENT_DEFAULTS_REVISION) {
+    TACTICAL_MODULES_LIST.forEach(mod => {
+      safeStorage.removeItem(`${STORAGE_PREFIX}${mod.id}`);
+    });
+    try {
+      const db = await openDB();
+      if (db) {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).clear();
+      }
+    } catch {
+      // ignore IndexedDB clear errors
+    }
+    safeStorage.setItem(DEFAULTS_REVISION_KEY, CURRENT_DEFAULTS_REVISION);
+    for (const mod of TACTICAL_MODULES_LIST) {
+      await saveModuleBackgroundLocal(defaults[mod.id]);
+    }
+    return defaults;
+  }
+
   // 1. Read from localStorage metadata
   TACTICAL_MODULES_LIST.forEach(mod => {
     try {
       const saved = safeStorage.getItem(`${STORAGE_PREFIX}${mod.id}`);
       if (saved) {
         const parsed = JSON.parse(saved);
-        resultMap[mod.id] = { ...resultMap[mod.id], ...parsed };
+        resultMap[mod.id] = sanitizeLoadedConfig(mod.id, { ...resultMap[mod.id], ...parsed }, defaults[mod.id]);
       }
     } catch {
       // fallback to default
@@ -261,7 +330,11 @@ export async function loadModuleBackgroundsLocal(): Promise<ModuleBackgroundsMap
 
       allRecords.forEach(rec => {
         if (rec && rec.moduleId && resultMap[rec.moduleId]) {
-          resultMap[rec.moduleId] = { ...resultMap[rec.moduleId], ...rec };
+          resultMap[rec.moduleId] = sanitizeLoadedConfig(
+            rec.moduleId,
+            { ...resultMap[rec.moduleId], ...rec },
+            defaults[rec.moduleId]
+          );
         }
       });
     }

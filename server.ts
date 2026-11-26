@@ -38,16 +38,19 @@ export interface SyncedDeviceRecord {
 
 // Centralized in-memory synced database
 let serverVersionConfig = {
-  version: "v2.5.2-AISTUDIO",
-  buildId: "ais-build-2026-09-16-0815",
-  builtAt: "2026-09-16T08:15:00.000Z",
-  changelog: "Modificaciones de persistencia y sincronización multi-dispositivo aplicadas en AI Studio"
+  version: "v2.6.0-OTA",
+  buildId: "ais-build-2026-11-26-ota",
+  builtAt: "2026-11-26T22:50:00.000Z",
+  changelog: "Actualización automática OTA para dispositivos instalados (PWA), mapa en vivo de patrullas y geocodificación nacional de Bolivia."
 };
 
 try {
-  const vPath = path.join(process.cwd(), "version.json");
-  if (fs.existsSync(vPath)) {
-    const raw = fs.readFileSync(vPath, "utf-8");
+  const distVPath = path.join(process.cwd(), "dist", "version.json");
+  const rootVPath = path.join(process.cwd(), "version.json");
+  const initVPath =
+    process.env.NODE_ENV === "production" && fs.existsSync(distVPath) ? distVPath : rootVPath;
+  if (fs.existsSync(initVPath)) {
+    const raw = fs.readFileSync(initVPath, "utf-8");
     serverVersionConfig = { ...serverVersionConfig, ...JSON.parse(raw) };
   }
 } catch (e) {
@@ -96,47 +99,54 @@ const DEFAULT_SERVER_MODULE_BACKGROUNDS: Record<string, any> = {
   MOD_CEO: {
     moduleId: "MOD_CEO",
     moduleName: "3. Mando Estratégico (CEO-LCC)",
-    imageUrl: "/INTERFAZ.jpg",
+    imageUrl: "/backgrounds/default_MOD_CEO.png",
     opacity: 0.80,
     blur: 0,
     contrastOverlay: true,
     fitMode: "cover",
     enabled: true,
-    updatedAt: new Date().toISOString(),
-    updatedBy: "USER_REQUEST"
+    customFileName: "MANDO_ESTRATEGICO_CEO_LCC.png",
+    updatedAt: "2026-11-26T23:05:00.000Z",
+    updatedBy: "PREDETERMINADO_OFICIAL"
   },
   MOD_FUSION: {
     moduleId: "MOD_FUSION",
     moduleName: "2. Central de Fusión (CFI de Brigada)",
-    imageUrl: "/DASHBOARD 2.png",
+    imageUrl: "/backgrounds/default_MOD_FUSION.png",
     opacity: 0.80,
     blur: 0,
     contrastOverlay: true,
     fitMode: "cover",
-    updatedAt: new Date().toISOString(),
-    updatedBy: "SISTEMA_DOCTRINAL"
+    enabled: true,
+    customFileName: "CFI.jpg",
+    updatedAt: "2026-11-26T23:05:00.000Z",
+    updatedBy: "PREDETERMINADO_OFICIAL"
   },
   MOD_BUSQUEDA: {
     moduleId: "MOD_BUSQUEDA",
     moduleName: "1. Órganos de Búsqueda (S-2)",
-    imageUrl: "/DASHB 3.jpg",
+    imageUrl: "/backgrounds/default_MOD_BUSQUEDA.png",
     opacity: 0.80,
     blur: 0,
     contrastOverlay: true,
     fitMode: "cover",
-    updatedAt: new Date().toISOString(),
-    updatedBy: "SISTEMA_DOCTRINAL"
+    enabled: true,
+    customFileName: "ORGANO DE BUSQUEDA.jpg",
+    updatedAt: "2026-11-26T23:05:00.000Z",
+    updatedBy: "PREDETERMINADO_OFICIAL"
   },
   MOD_PATRULLAS: {
     moduleId: "MOD_PATRULLAS",
     moduleName: "4. Unidades de Terreno (Patrullas)",
-    imageUrl: "/DASHBOARD.jpg",
+    imageUrl: "/backgrounds/default_MOD_PATRULLAS.png",
     opacity: 0.80,
     blur: 0,
     contrastOverlay: true,
     fitMode: "cover",
-    updatedAt: new Date().toISOString(),
-    updatedBy: "SISTEMA_DOCTRINAL"
+    enabled: true,
+    customFileName: "PII-LCC.jpg",
+    updatedAt: "2026-11-26T23:05:00.000Z",
+    updatedBy: "PREDETERMINADO_OFICIAL"
   },
   MOD_P2P_MESH: {
     moduleId: "MOD_P2P_MESH",
@@ -146,39 +156,68 @@ const DEFAULT_SERVER_MODULE_BACKGROUNDS: Record<string, any> = {
     blur: 0,
     contrastOverlay: true,
     fitMode: "cover",
-    updatedAt: new Date().toISOString(),
-    updatedBy: "SISTEMA_DOCTRINAL"
+    enabled: true,
+    customFileName: "dashboard-room.svg",
+    updatedAt: "2026-11-26T23:05:00.000Z",
+    updatedBy: "PREDETERMINADO_OFICIAL"
   },
   MOD_ARCHITECTURE: {
     moduleId: "MOD_ARCHITECTURE",
     moduleName: "6. Arquitectura de Sistemas (PII-LCC)",
-    imageUrl: "/interfaz-room.svg",
+    imageUrl: "/escudo-eceme-negro.svg",
     opacity: 0.80,
     blur: 0,
     contrastOverlay: true,
     fitMode: "cover",
-    updatedAt: new Date().toISOString(),
-    updatedBy: "SISTEMA_DOCTRINAL"
+    enabled: true,
+    customFileName: "ESCUDO ECEME NEGRO.svg",
+    updatedAt: "2026-11-26T23:05:00.000Z",
+    updatedBy: "PREDETERMINADO_OFICIAL"
   },
   MOD_CODE_VIEWER: {
     moduleId: "MOD_CODE_VIEWER",
     moduleName: "7. Terminal de Código y Auditoría",
-    imageUrl: "/INTERFAZ.jpg",
+    imageUrl: "/escudo-eceme-negro.svg",
     opacity: 0.80,
     blur: 0,
     contrastOverlay: true,
     fitMode: "cover",
-    updatedAt: new Date().toISOString(),
-    updatedBy: "SISTEMA_DOCTRINAL"
+    enabled: true,
+    customFileName: "ESCUDO ECEME NEGRO.svg",
+    updatedAt: "2026-11-26T23:05:00.000Z",
+    updatedBy: "PREDETERMINADO_OFICIAL"
   }
 };
+
+function sanitizeModuleBackgroundRecord(modId: string, record: any) {
+  const def = DEFAULT_SERVER_MODULE_BACKGROUNDS[modId];
+  if (!def) return record;
+  const merged = { ...def, ...(record || {}) };
+  const rawUrl = String(merged.imageUrl || "");
+  const cleanPath = rawUrl.split("?")[0];
+  if (cleanPath.startsWith("/backgrounds/")) {
+    const fileOnDisk = path.join(process.cwd(), "public", cleanPath.replace(/^\//, ""));
+    if (!fs.existsSync(fileOnDisk)) {
+      merged.imageUrl = def.imageUrl;
+      merged.customFileName = def.customFileName;
+    }
+  } else if (!cleanPath) {
+    merged.imageUrl = def.imageUrl;
+    merged.customFileName = def.customFileName;
+  }
+  return merged;
+}
 
 let serverModuleBackgrounds: Record<string, any> = { ...DEFAULT_SERVER_MODULE_BACKGROUNDS };
 
 if (fs.existsSync(MODULE_BG_FILE)) {
   try {
     const loaded = JSON.parse(fs.readFileSync(MODULE_BG_FILE, "utf-8"));
-    serverModuleBackgrounds = { ...DEFAULT_SERVER_MODULE_BACKGROUNDS, ...loaded };
+    const merged: Record<string, any> = {};
+    for (const modId of Object.keys(DEFAULT_SERVER_MODULE_BACKGROUNDS)) {
+      merged[modId] = sanitizeModuleBackgroundRecord(modId, loaded[modId]);
+    }
+    serverModuleBackgrounds = merged;
   } catch (err) {
     console.error("Error reading module-backgrounds.json:", err);
   }
@@ -1315,18 +1354,19 @@ async function startServer() {
     try {
       const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
       const buffer = Buffer.from(base64Data, "base64");
-      
-      const fileNames = ["INTERFAZ.jpg", "interfaz.jpg", "INTERFAZ.png", "DASHB 3.jpg", "DASHBOARD 2.png", "DASHBOARD.jpg"];
-      for (const name of fileNames) {
-        const publicPath = path.join(process.cwd(), "public", name);
-        fs.writeFileSync(publicPath, buffer);
-        const distDir = path.join(process.cwd(), "dist");
-        if (fs.existsSync(distDir)) {
-          fs.writeFileSync(path.join(distDir, name), buffer);
+      const fileName = "custom_GLOBAL.png";
+      const publicPath = path.join(process.cwd(), "public", "backgrounds", fileName);
+      fs.writeFileSync(publicPath, buffer);
+      const distBgDir = path.join(process.cwd(), "dist", "backgrounds");
+      if (fs.existsSync(path.join(process.cwd(), "dist"))) {
+        if (!fs.existsSync(distBgDir)) {
+          fs.mkdirSync(distBgDir, { recursive: true });
         }
+        fs.writeFileSync(path.join(distBgDir, fileName), buffer);
       }
-      console.log(`[Dashboard Background] Saved INTERFAZ.jpg (${buffer.length} bytes) to public and dist.`);
-      res.json({ success: true, url: "/INTERFAZ.jpg" });
+      const url = `/backgrounds/${fileName}?v=${Date.now()}`;
+      console.log(`[Dashboard Background] Saved ${fileName} (${buffer.length} bytes) preserving default interface background.`);
+      res.json({ success: true, url });
     } catch (err: any) {
       console.error("[Dashboard Background Upload Error]", err);
       res.status(500).json({ error: err.message });
@@ -1505,16 +1545,41 @@ async function startServer() {
     res.json({ success: true, settings: serverFullDashboardBg });
   });
 
-  // App version and update detection endpoint
+  // Reset full dashboard background to locked-in official default
+  app.delete("/api/full-dashboard-bg", (req, res) => {
+    serverFullDashboardBg = {
+      ...DEFAULT_FULL_DASHBOARD_BG,
+      updatedAt: new Date().toISOString(),
+      updatedBy: "RESET_PREDETERMINADO"
+    };
+    saveFullDashboardBgToDisk();
+
+    broadcast({
+      type: "FULL_DASHBOARD_BG_UPDATE",
+      payload: { settings: serverFullDashboardBg }
+    });
+
+    res.json({ success: true, settings: serverFullDashboardBg });
+  });
+
+  // App version and update detection endpoint (used by all installed PWAs & web clients)
   app.get(["/api/version", "/api/app-version"], (req, res) => {
-    // Check if version.json has been updated in AI Studio
+    // Prefer dist/version.json in production so every build automatically publishes a new buildId.
+    // In dev mode, read root version.json unless a manual broadcast override is active.
     try {
-      const vPath = path.join(process.cwd(), "version.json");
-      if (fs.existsSync(vPath)) {
-        const raw = fs.readFileSync(vPath, "utf-8");
+      const distVersionPath = path.join(process.cwd(), "dist", "version.json");
+      const rootVersionPath = path.join(process.cwd(), "version.json");
+      const candidatePath =
+        process.env.NODE_ENV === "production" && fs.existsSync(distVersionPath)
+          ? distVersionPath
+          : rootVersionPath;
+
+      if (fs.existsSync(candidatePath)) {
+        const raw = fs.readFileSync(candidatePath, "utf-8");
         const parsed = JSON.parse(raw);
-        if (parsed.buildId && parsed.buildId !== serverBuildId) {
-          serverBuildId = parsed.buildId;
+        const isManualPush = serverBuildId.startsWith("manual-push-");
+        if (parsed.buildId && !isManualPush && parsed.buildId !== serverBuildId) {
+          serverBuildId = String(parsed.buildId);
           serverVersion = parsed.version || serverVersion;
           serverBuildTimestamp = new Date(parsed.builtAt).getTime() || Date.now();
           serverVersionConfig = { ...serverVersionConfig, ...parsed };
@@ -1523,37 +1588,57 @@ async function startServer() {
     } catch {}
 
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     res.json({
       success: true,
       version: serverVersion,
       buildId: serverBuildId,
       buildTimestamp: serverBuildTimestamp,
       publishedAt: serverVersionConfig.builtAt || new Date(serverBuildTimestamp).toISOString(),
-      changelog: serverVersionConfig.changelog || "Actualización de sistema aplicada en AI Studio",
+      changelog: serverVersionConfig.changelog || "Actualización de sistema aplicada en la plataforma",
       name: "PII-LCC Plataforma Integrada de Inteligencia",
       doctrine: "MIL-STD-188-220 / ECEME",
       status: "NOMINAL",
       activeModulesCount: 7,
+      connectedDevices: wss.clients.size,
       serverTime: new Date().toISOString()
     });
   });
 
-  // Publish a new doctrinal version / trigger reload on all installed clients
+  // Publish a new doctrinal version / trigger instant OTA update on ALL installed devices
   app.post("/api/app-version/publish", (req, res) => {
+    const rawVersion = typeof req.body?.version === "string" ? req.body.version.trim().slice(0, 48) : "";
+    const rawChangelog = typeof req.body?.changelog === "string" ? req.body.changelog.trim().slice(0, 240) : "";
+
     serverBuildTimestamp = Date.now();
-    serverVersion = req.body.version || `v2.5.0-${Date.now().toString().slice(-4)}`;
-    
-    // Broadcast upgrade alert to all devices
+    serverBuildId = `manual-push-${serverBuildTimestamp}`;
+    serverVersion = rawVersion || serverVersion || `v2.6.0-OTA`;
+    if (rawChangelog) {
+      serverVersionConfig.changelog = rawChangelog;
+    }
+    serverVersionConfig.builtAt = new Date(serverBuildTimestamp).toISOString();
+
+    // Broadcast upgrade alert with valid buildId to all connected devices (PWAs, mobile, desktop)
     broadcast({
       type: "SYSTEM_UPGRADE_ALERT",
       payload: {
+        buildId: serverBuildId,
         version: serverVersion,
+        changelog: serverVersionConfig.changelog || "Actualización remota propagada a todos los dispositivos instalados.",
+        forceImmediate: true,
         timestamp: serverBuildTimestamp,
         message: "Nueva versión del terminal táctico publicada. Sincronizando modificaciones..."
       }
     });
 
-    res.json({ success: true, version: serverVersion, buildTimestamp: serverBuildTimestamp });
+    res.json({
+      success: true,
+      version: serverVersion,
+      buildId: serverBuildId,
+      buildTimestamp: serverBuildTimestamp,
+      notifiedDevices: wss.clients.size
+    });
   });
 
   // Supabase Integration Health Endpoint
@@ -2554,19 +2639,55 @@ async function startServer() {
     }
   });
 
-  // PWA Service Worker handler (serves real SW if available in dist)
+  // PWA Service Worker & Manifest handlers (always no-cache so installed devices fetch updates immediately)
+  const setNoCacheHeaders = (res: any) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  };
+
   app.get("/sw.js", (req, res, next) => {
     const distSw = path.join(process.cwd(), "dist", "sw.js");
     if (fs.existsSync(distSw)) {
+      setNoCacheHeaders(res);
       res.setHeader("Content-Type", "application/javascript");
+      res.setHeader("Service-Worker-Allowed", "/");
       return res.sendFile(distSw);
+    }
+    next();
+  });
+
+  app.get("/registerSW.js", (req, res, next) => {
+    const distReg = path.join(process.cwd(), "dist", "registerSW.js");
+    if (fs.existsSync(distReg)) {
+      setNoCacheHeaders(res);
+      res.setHeader("Content-Type", "application/javascript");
+      return res.sendFile(distReg);
+    }
+    next();
+  });
+
+  app.get(["/manifest.webmanifest", "/manifest.json"], (req, res, next) => {
+    const distManifest = path.join(process.cwd(), "dist", "manifest.webmanifest");
+    const publicManifest = path.join(process.cwd(), "public", "manifest.json");
+    const target = fs.existsSync(distManifest) ? distManifest : fs.existsSync(publicManifest) ? publicManifest : null;
+    if (target) {
+      setNoCacheHeaders(res);
+      res.setHeader("Content-Type", "application/manifest+json");
+      return res.sendFile(target);
     }
     next();
   });
 
   const distPath = path.join(process.cwd(), "dist");
   if (fs.existsSync(distPath)) {
-    app.use("/assets", express.static(path.join(distPath, "assets")));
+    app.use(
+      "/assets",
+      express.static(path.join(distPath, "assets"), {
+        maxAge: "1y",
+        immutable: true
+      })
+    );
   }
 
   let viteServer: Awaited<ReturnType<typeof createViteServer>> | null = null;
@@ -2582,8 +2703,24 @@ async function startServer() {
     });
     app.use(viteServer.middlewares);
   } else {
-    app.use(express.static(distPath));
+    app.use(
+      express.static(distPath, {
+        setHeaders: (res, filePath) => {
+          if (
+            filePath.endsWith(".html") ||
+            filePath.endsWith("sw.js") ||
+            filePath.endsWith("registerSW.js") ||
+            filePath.endsWith("manifest.webmanifest") ||
+            filePath.endsWith("manifest.json") ||
+            filePath.endsWith("version.json")
+          ) {
+            setNoCacheHeaders(res);
+          }
+        }
+      })
+    );
     app.get("*", (req, res) => {
+      setNoCacheHeaders(res);
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

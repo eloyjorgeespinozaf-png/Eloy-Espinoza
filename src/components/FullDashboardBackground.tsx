@@ -42,7 +42,7 @@ export const DEFAULT_FULL_BG_SETTINGS: FullBackgroundSettings = {
   customFileName: 'PII-LCC.jpg'
 };
 
-const STORAGE_KEY = 'ceo_lcc_dashboard_full_bg_config_v6';
+const STORAGE_KEY = 'ceo_lcc_dashboard_full_bg_config_v7';
 
 export function useFullDashboardBackground() {
   const [settings, setSettings] = useState<FullBackgroundSettings>(() => {
@@ -178,26 +178,38 @@ export function useFullDashboardBackground() {
         }
 
         // 1. Save directly into React state & storage
-        updateSettings({ 
-          customDataUrl: base64, 
-          customFileName: file.name,
-          opacity: 0.80, 
-          enabled: true 
-        });
         setActiveImageSrc(base64);
 
-        // 2. Persist to server backend
+        // 2. Persist to server backend (writes custom_GLOBAL.png without overwriting /default-interface-bg.jpg)
+        let uploadedUrl: string | undefined;
         try {
-          await fetch('/api/upload-dashboard-bg', {
+          const uploadRes = await fetch('/api/upload-dashboard-bg', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ imageBase64: base64 })
           });
+          if (uploadRes.ok) {
+            const uploadData = await uploadRes.json();
+            if (uploadData?.url) {
+              uploadedUrl = uploadData.url;
+            }
+          }
         } catch (e) {
           console.warn('Server upload non-blocking warning:', e);
         }
 
-        resolve(base64);
+        updateSettings({
+          imageUrl: uploadedUrl || DEFAULT_FULL_BG_SETTINGS.imageUrl,
+          customDataUrl: uploadedUrl ? '' : base64,
+          customFileName: file.name,
+          opacity: 0.80,
+          enabled: true
+        });
+        if (uploadedUrl) {
+          setActiveImageSrc(uploadedUrl);
+        }
+
+        resolve(uploadedUrl || base64);
       };
       reader.onerror = reject;
       reader.readAsDataURL(file);
@@ -205,9 +217,18 @@ export function useFullDashboardBackground() {
   };
 
   const resetToDefault = () => {
-    safeStorage.removeItem(STORAGE_KEY);
-    setSettings(DEFAULT_FULL_BG_SETTINGS);
-    setActiveImageSrc('');
+    const restored = { ...DEFAULT_FULL_BG_SETTINGS };
+    try {
+      safeStorage.setItem(STORAGE_KEY, JSON.stringify(restored));
+    } catch {
+      // ignore
+    }
+    setSettings(restored);
+    setActiveImageSrc(restored.imageUrl || '/default-interface-bg.jpg');
+
+    fetch('/api/full-dashboard-bg', {
+      method: 'DELETE'
+    }).catch(err => console.warn('[FullDashboardBackground] Non-blocking reset sync warning:', err));
   };
 
   return {
@@ -235,8 +256,8 @@ export const FullDashboardBackground: React.FC<FullDashboardBackgroundProps> = (
     setCurrentSrc(imageSrc || '');
   }, [imageSrc]);
 
-  // If disabled, or no image provided, or cleared, render nothing (pure clean dark military interface)
-  if (!settings.enabled || !currentSrc || currentSrc === '' || currentSrc === '/PII-LCC-NEGRO.jpg' || currentSrc === '/INTERFAZ.jpg' || (!settings.imageUrl && !settings.customDataUrl && !imageSrc)) {
+  // If disabled or no image provided, render nothing (clean dark military interface)
+  if (!settings.enabled || !currentSrc || currentSrc.trim() === '' || (!settings.imageUrl && !settings.customDataUrl && !imageSrc)) {
     return null;
   }
 

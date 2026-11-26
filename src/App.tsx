@@ -373,9 +373,7 @@ export default function App() {
 
   // Automatic OTA update tracking
   const APP_VERSION = AI_STUDIO_BUILD.version;
-  const [appVersion, setAppVersion] = useState<string>(() => {
-    return safeLocalStorage.getItem('PII_LCC_UPDATED_VERSION') || AI_STUDIO_BUILD.version;
-  });
+  const [appVersion, setAppVersion] = useState<string>(AI_STUDIO_BUILD.version);
   const [updateInProgress, setUpdateInProgress] = useState<boolean>(false);
   const [updateProgress, setUpdateProgress] = useState<number>(0);
   const [updatePhase, setUpdatePhase] = useState<string>('');
