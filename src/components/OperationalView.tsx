@@ -689,10 +689,10 @@ ${recommendedAction}
                 ? 'bg-emerald-600 text-black border-emerald-400'
                 : 'bg-[#0d1626] hover:bg-[#15233c] text-emerald-300 border-emerald-500/40'
             }`}
-            title="Abre el Radar Táctico de telemetría y seguimiento de patrullas en tiempo real"
+            title="Abre el Mapa en Vivo de telemetría y seguimiento de movimiento de patrullas"
           >
-            <Compass className={`w-4 h-4 ${isPatrolRadarOpen ? 'animate-spin' : ''}`} />
-            <span>Radar Patrullas</span>
+            <MapPin className="w-4 h-4" />
+            <span>Mapa Patrullas</span>
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
           </button>
 
@@ -730,7 +730,7 @@ ${recommendedAction}
               setSelectedPatrolForEarth(unit);
               setIsGoogleEarthModalOpen(true);
             }}
-            title="CENTRO DE FUSIÓN (CFI) // RADAR DE SEGUIMIENTO DE PATRULLAS EN VIVO"
+            title="CENTRO DE FUSIÓN (CFI) // MAPA DE SEGUIMIENTO DE PATRULLAS EN VIVO"
           />
         </div>
       )}

@@ -1080,6 +1080,177 @@ async function startServer() {
     });
   });
 
+  // =========================================================================
+  // TERRITORIAL GEOCODING PROXY (BOLIVIA & BORDER CORRIDORS - OSM NOMINATIM)
+  // =========================================================================
+  const geoCache = new Map<string, { expiresAt: number; payload: any }>();
+  const GEO_CACHE_TTL_MS = 30 * 60 * 1000;
+  const GEO_CACHE_MAX_ENTRIES = 250;
+
+  const setGeoCache = (key: string, payload: any) => {
+    if (geoCache.size >= GEO_CACHE_MAX_ENTRIES) {
+      const oldestKey = geoCache.keys().next().value;
+      if (oldestKey) geoCache.delete(oldestKey);
+    }
+    geoCache.set(key, { expiresAt: Date.now() + GEO_CACHE_TTL_MS, payload });
+  };
+
+  app.get("/api/geo/search", async (req, res) => {
+    const rawQ = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (!rawQ || rawQ.length > 120) {
+      return res.status(400).json({ error: "Parámetro de búsqueda inválido", results: [] });
+    }
+
+    const cacheKey = `search:${rawQ.toLowerCase()}`;
+    const cached = geoCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return res.json(cached.payload);
+    }
+
+    const queryNominatim = async (countryRestrict: boolean) => {
+      const params = new URLSearchParams({
+        format: "json",
+        addressdetails: "1",
+        limit: "6",
+        q: rawQ
+      });
+      if (countryRestrict) {
+        params.set("countrycodes", "bo");
+      } else {
+        // South America / Bolivia border viewbox bias
+        params.set("viewbox", "-70.5,-9.5,-57.0,-23.5");
+        params.set("bounded", "0");
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      try {
+        const resp = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+          headers: {
+            "User-Agent": "PII-LCC-C4ISR-Bolivia/2.5",
+            "Accept-Language": "es"
+          },
+          signal: controller.signal
+        });
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        return Array.isArray(data) ? data : [];
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    };
+
+    try {
+      let items = await queryNominatim(true);
+      if (items.length === 0) {
+        items = await queryNominatim(false);
+      }
+
+      const results = items
+        .map((item: any) => {
+          const lat = Number(item?.lat);
+          const lon = Number(item?.lon);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+          const addr = item?.address || {};
+          const department = addr.state || addr.region || addr.county || "";
+          const shortName =
+            item?.name ||
+            addr.city ||
+            addr.town ||
+            addr.village ||
+            addr.hamlet ||
+            addr.municipality ||
+            (typeof item?.display_name === "string" ? item.display_name.split(",")[0] : rawQ);
+
+          return {
+            name: String(shortName).slice(0, 100),
+            displayName: String(item?.display_name || shortName).slice(0, 220),
+            department: String(department).slice(0, 80),
+            lat,
+            lon
+          };
+        })
+        .filter(Boolean);
+
+      const payload = { results };
+      setGeoCache(cacheKey, payload);
+      return res.json(payload);
+    } catch {
+      return res.json({ results: [] });
+    }
+  });
+
+  app.get("/api/geo/reverse", async (req, res) => {
+    const lat = Number(req.query.lat);
+    const lon = Number(req.query.lon);
+    if (
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lon) ||
+      lat < -90 ||
+      lat > 90 ||
+      lon < -180 ||
+      lon > 180
+    ) {
+      return res.status(400).json({ error: "Coordenadas inválidas" });
+    }
+
+    const cacheKey = `rev:${lat.toFixed(4)},${lon.toFixed(4)}`;
+    const cached = geoCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return res.json(cached.payload);
+    }
+
+    const params = new URLSearchParams({
+      format: "json",
+      addressdetails: "1",
+      zoom: "13",
+      lat: lat.toFixed(6),
+      lon: lon.toFixed(6)
+    });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
+    try {
+      const resp = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
+        headers: {
+          "User-Agent": "PII-LCC-C4ISR-Bolivia/2.5",
+          "Accept-Language": "es"
+        },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      if (!resp.ok) {
+        return res.json({ name: null, displayName: null, department: null });
+      }
+      const data: any = await resp.json();
+      const addr = data?.address || {};
+      const locality =
+        addr.city ||
+        addr.town ||
+        addr.village ||
+        addr.hamlet ||
+        addr.municipality ||
+        addr.county ||
+        data?.name ||
+        "";
+      const department = addr.state || addr.region || "";
+      const combinedName = locality && department
+        ? `${locality}, ${department}`
+        : locality || department || (typeof data?.display_name === "string" ? data.display_name.split(",").slice(0, 2).join(", ") : null);
+
+      const payload = {
+        name: combinedName ? String(combinedName).slice(0, 120) : null,
+        displayName: data?.display_name ? String(data.display_name).slice(0, 220) : null,
+        department: department ? String(department).slice(0, 80) : null
+      };
+      setGeoCache(cacheKey, payload);
+      return res.json(payload);
+    } catch {
+      clearTimeout(timeoutId);
+      return res.json({ name: null, displayName: null, department: null });
+    }
+  });
+
   // Official Military Dashboard Background Endpoints
   const serveDashboardBg = (req: any, res: any) => {
     const rawName = path.basename(decodeURIComponent(req.path || ""));

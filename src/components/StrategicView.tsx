@@ -423,10 +423,10 @@ export default function StrategicView({
                         ? 'bg-emerald-600 text-black shadow-[0_0_10px_rgba(16,185,129,0.4)]'
                         : 'text-zinc-400 hover:text-white'
                     }`}
-                    title="Radar GNSS continuo de telemetría de patrullas"
+                    title="Mapa GNSS continuo de movimiento y telemetría de patrullas en vivo"
                   >
                     <Compass className="w-3 h-3" />
-                    <span>Radar GNSS</span>
+                    <span>Mapa Vivo GNSS</span>
                   </button>
                 </div>
               </div>
@@ -465,7 +465,7 @@ export default function StrategicView({
                   tacticalUnits={tacticalUnits}
                   rawAlerts={rawAlerts}
                   actionableIntel={actionableIntel}
-                  title="CEO-LCC // SEGUIMIENTO CONTINUO DE TELEMETRÍA Y POSICIONES GNSS"
+                  title="CEO-LCC // MAPA EN VIVO DE MOVIMIENTO Y POSICIONES GNSS"
                   onOpenGoogleEarth={(unit) => {
                     setSelectedPatrolForEarth(unit);
                     setIsGoogleEarthModalOpen(true);

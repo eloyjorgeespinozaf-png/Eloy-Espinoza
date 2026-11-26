@@ -10,11 +10,12 @@ import {
   Eye, Info, Camera, Upload, RefreshCw, Trash2, Video, VideoOff, Crosshair,
   Lock, Unlock, Key, Plus, Sliders, Battery, Fuel, AlertTriangle, X,
   MapPin, Clock, CheckCircle2, ChevronRight, FileText, Layers, Activity,
-  Globe, Download
+  Globe, Download, Search, Loader2
 } from 'lucide-react';
 import { playSyntheticBeep } from '../utils/audio';
 import { safeStorage } from '../utils/storage';
-import { convertToDMS, generateDeviceRealLocationKml, downloadKmlFile, parseCoordinates } from '../utils/geo';
+import { convertToDMS, formatToMilitaryDMS, generateDeviceRealLocationKml, downloadKmlFile, parseCoordinates } from '../utils/geo';
+import { resolveBoliviaLocation, searchLocalBoliviaLocations, ResolvedLocationResult } from '../utils/boliviaLocations';
 import { detectDevicePlatform, saveCachedDeviceLocation } from '../utils/deviceLocation';
 import { PatrolAuthModal } from './PatrolAuthModal';
 import { PatrolEditorModal } from './PatrolEditorModal';
@@ -74,6 +75,10 @@ export default function TacticalView({
   
   const [customLat, setCustomLat] = useState<string>('19°13\'10"S');
   const [customLon, setCustomLon] = useState<string>('68°35\'50"W');
+  const [gpsPlaceQuery, setGpsPlaceQuery] = useState<string>('');
+  const [gpsPlaceSuggestions, setGpsPlaceSuggestions] = useState<ResolvedLocationResult[]>([]);
+  const [gpsPlaceLoading, setGpsPlaceLoading] = useState<boolean>(false);
+  const [gpsPlaceNotice, setGpsPlaceNotice] = useState<string | null>(null);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
@@ -870,8 +875,50 @@ export default function TacticalView({
     }, 4000);
   };
 
+  const handleApplyGpsPlace = (loc: ResolvedLocationResult) => {
+    const dmsParts = loc.dms.split(/\s+/);
+    if (dmsParts.length >= 2) {
+      setCustomLat(dmsParts[0]);
+      setCustomLon(dmsParts[1]);
+    }
+    setGpsPlaceQuery(loc.name);
+    setGpsPlaceSuggestions([]);
+    setGpsPlaceNotice(`Lugar cargado: ${loc.displayName} (${loc.dms}). Puedes modificar la Latitud/Longitud abajo antes de sincronizar.`);
+    playTacticalBeep(820, 0.08);
+  };
+
+  const handleSearchGpsPlace = async () => {
+    const q = gpsPlaceQuery.trim();
+    if (!q) return;
+    setGpsPlaceLoading(true);
+    setGpsPlaceNotice(null);
+    try {
+      const results = await resolveBoliviaLocation(q);
+      if (results.length > 0) {
+        handleApplyGpsPlace(results[0]);
+        if (results.length > 1) {
+          setGpsPlaceSuggestions(results.slice(0, 6));
+        }
+      } else {
+        setGpsPlaceNotice(`No se halló "${q}" automáticamente. Puedes ingresar Latitud y Longitud (DMS o decimal) manualmente.`);
+      }
+    } finally {
+      setGpsPlaceLoading(false);
+    }
+  };
+
   const handleUpdateGPS = () => {
-    const formattedCoords = `${customLat} ${customLon}`;
+    const rawCombined = `${customLat.trim()} ${customLon.trim()}`.trim();
+    const parsed = parseCoordinates(rawCombined);
+    let formattedCoords = rawCombined;
+    if (parsed) {
+      formattedCoords = formatToMilitaryDMS(parsed.lat, parsed.lon);
+      const parts = formattedCoords.split(/\s+/);
+      if (parts.length >= 2) {
+        setCustomLat(parts[0]);
+        setCustomLon(parts[1]);
+      }
+    }
     onUpdateUnitCoordinates(selectedPatrol, formattedCoords);
     setCoordinates(formattedCoords); // Sincroniza automáticamente con el formulario de captura
     playTacticalBeep(650, 0.1);
@@ -2010,29 +2057,88 @@ export default function TacticalView({
                 )}
               </div>
 
+              {/* Territorial Place Search (Any location in Bolivia -> editable coordinates below) */}
+              <div className="bg-[#0e1118] border border-cyan-500/30 rounded-lg p-3 space-y-2">
+                <label className="text-[10px] font-mono font-bold text-cyan-300 uppercase flex items-center gap-1.5">
+                  <Search className="w-3.5 h-3.5 text-cyan-400" />
+                  Ubicar patrulla en cualquier lugar del territorio (Ej. San Matías, Cobija, Yacuiba, Desaguadero...)
+                </label>
+                <div className="relative flex gap-2">
+                  <input
+                    type="text"
+                    value={gpsPlaceQuery}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setGpsPlaceQuery(val);
+                      setGpsPlaceSuggestions(val.trim().length >= 2 ? searchLocalBoliviaLocations(val, 6) : []);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSearchGpsPlace();
+                      }
+                    }}
+                    placeholder="Escriba ciudad, localidad o hito fronterizo de Bolivia..."
+                    className="flex-1 bg-[#111520] border border-[#243044] focus:border-cyan-400 rounded-lg px-3 py-1.5 text-white text-xs font-mono focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSearchGpsPlace}
+                    disabled={gpsPlaceLoading}
+                    className="px-3 py-1.5 rounded-lg bg-cyan-600/25 hover:bg-cyan-600/40 border border-cyan-500/50 text-cyan-200 text-xs font-mono font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {gpsPlaceLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
+                    <span>Ubicar Lugar</span>
+                  </button>
+                </div>
+
+                {gpsPlaceSuggestions.length > 0 && (
+                  <div className="bg-[#0a0d14] border border-cyan-500/40 rounded-lg divide-y divide-[#1a2230] max-h-40 overflow-y-auto">
+                    {gpsPlaceSuggestions.map((loc, idx) => (
+                      <button
+                        key={`${loc.name}-${loc.lat}-${idx}`}
+                        type="button"
+                        onClick={() => handleApplyGpsPlace(loc)}
+                        className="w-full text-left px-3 py-1.5 hover:bg-cyan-500/15 transition-colors flex items-center justify-between gap-2 cursor-pointer"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-mono font-bold text-white truncate">{loc.name}</div>
+                          <div className="text-[9px] font-mono text-neutral-400 truncate">{loc.displayName}</div>
+                        </div>
+                        <span className="text-[10px] font-mono text-cyan-300 shrink-0">{loc.dms}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {gpsPlaceNotice && (
+                  <p className="text-[10px] font-mono text-emerald-300">{gpsPlaceNotice}</p>
+                )}
+              </div>
+
               {/* Coordinates Edit & Sync Form */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[10px] font-mono text-[#888] uppercase block mb-1">
-                    Latitud Geodésica (DMS):
+                    Latitud Geodésica (DMS o Decimal — Editable):
                   </label>
                   <input
                     type="text"
                     value={customLat || ''}
                     onChange={(e) => setCustomLat(e.target.value)}
-                    placeholder='19°13&apos;10"S'
+                    placeholder='16°21&apos;36"S o -16.3600'
                     className="w-full bg-[#111] border border-[#222] focus:border-blue-500 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none"
                   />
                 </div>
                 <div>
                   <label className="text-[10px] font-mono text-[#888] uppercase block mb-1">
-                    Longitud Geodésica (DMS):
+                    Longitud Geodésica (DMS o Decimal — Editable):
                   </label>
                   <input
                     type="text"
                     value={customLon || ''}
                     onChange={(e) => setCustomLon(e.target.value)}
-                    placeholder='68°35&apos;50"W'
+                    placeholder='58°24&apos;16"W o -58.4044'
                     className="w-full bg-[#111] border border-[#222] focus:border-blue-500 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none"
                   />
                 </div>
