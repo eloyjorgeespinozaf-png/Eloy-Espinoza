@@ -82,6 +82,9 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
   const [editPhone, setEditPhone] = useState('');
   const [editRank, setEditRank] = useState('');
   const [editStation, setEditStation] = useState('');
+  const [listFeedback, setListFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState<boolean>(false);
 
   if (!isOpen) return null;
 
@@ -180,7 +183,8 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
 
   const saveEditUser = (id: string) => {
     if (!editPhone.trim()) {
-      alert('El número de celular no puede quedar vacío (es la clave criptográfica).');
+      setListFeedback({ type: 'error', message: 'El número de celular no puede quedar vacío (es la clave criptográfica).' });
+      playCyberDenied(0.12);
       return;
     }
     updateUser(id, {
@@ -190,17 +194,26 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
       stationId: editStation.trim()
     });
     setEditingUserId(null);
+    setListFeedback({ type: 'success', message: 'Credenciales del operador actualizadas correctamente.' });
+    setTimeout(() => setListFeedback(null), 3500);
     playCyberAccessGranted(0.1);
   };
 
   const handleDelete = (id: string, userName: string) => {
-    if (confirm(`¿Confirma revocar y eliminar permanentemente las credenciales del operador militar: "${userName}"?`)) {
-      const ok = deleteUser(id);
-      if (ok) {
-        playCyberClick('laser', 0.1);
-      } else {
-        alert('No se puede eliminar la cuenta del Administrador General Principal.');
-      }
+    if (pendingDeleteId !== id) {
+      setPendingDeleteId(id);
+      playCyberClick('toggle', 0.08);
+      return;
+    }
+    const ok = deleteUser(id);
+    setPendingDeleteId(null);
+    if (ok) {
+      setListFeedback({ type: 'success', message: `Acceso revocado para operador: ${userName}.` });
+      setTimeout(() => setListFeedback(null), 3500);
+      playCyberClick('laser', 0.1);
+    } else {
+      setListFeedback({ type: 'error', message: 'No se puede eliminar la cuenta del Administrador General Principal.' });
+      playCyberDenied(0.12);
     }
   };
 
@@ -293,22 +306,49 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
             <button
               type="button"
               onClick={() => {
-                if (confirm('¿Restaurar usuarios predeterminados de fábrica?')) {
-                  resetUsersToDefault();
-                  playCyberAccessGranted(0.1);
+                if (!confirmReset) {
+                  setConfirmReset(true);
+                  playCyberClick('toggle', 0.08);
+                  return;
                 }
+                resetUsersToDefault();
+                setConfirmReset(false);
+                setListFeedback({ type: 'success', message: 'Plantilla doctrinal de usuarios restaurada.' });
+                setTimeout(() => setListFeedback(null), 3500);
+                playCyberAccessGranted(0.1);
               }}
-              className="text-[10px] font-mono px-2 py-1 rounded bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-800/40 flex items-center gap-1 cursor-pointer transition-colors"
+              onBlur={() => setConfirmReset(false)}
+              className={`text-[10px] font-mono px-2 py-1 rounded border flex items-center gap-1 cursor-pointer transition-colors ${
+                confirmReset
+                  ? 'bg-red-600 text-white border-red-400 font-bold'
+                  : 'bg-red-950/40 hover:bg-red-900/50 text-red-300 border-red-800/40'
+              }`}
               title="Restaurar plantilla inicial de usuarios"
             >
               <RotateCcw className="w-3 h-3" />
-              Resetear
+              {confirmReset ? '¿Confirmar?' : 'Resetear'}
             </button>
           </div>
         </div>
 
         {/* Modal Body */}
         <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-4">
+          {listFeedback && (
+            <div className={`p-2.5 rounded-lg border text-xs font-mono flex items-center justify-between gap-2 ${
+              listFeedback.type === 'error'
+                ? 'bg-red-950/50 border-red-500/50 text-red-300'
+                : 'bg-emerald-950/50 border-emerald-500/50 text-emerald-300'
+            }`}>
+              <span>{listFeedback.message}</span>
+              <button
+                type="button"
+                onClick={() => setListFeedback(null)}
+                className="text-current opacity-70 hover:opacity-100 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
           
           {/* TAB 1: USER LIST */}
           {activeTab === 'LIST' && (
@@ -502,10 +542,16 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
                                 <button
                                   type="button"
                                   onClick={() => handleDelete(u.id, u.name)}
-                                  className="p-1 rounded bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-800/40 cursor-pointer transition-colors"
+                                  onBlur={() => setPendingDeleteId(prev => (prev === u.id ? null : prev))}
+                                  className={`px-1.5 py-1 rounded border cursor-pointer transition-colors flex items-center gap-1 text-[10px] font-mono ${
+                                    pendingDeleteId === u.id
+                                      ? 'bg-red-600 text-white border-red-400 font-bold'
+                                      : 'bg-red-950/40 hover:bg-red-900/60 text-red-400 border-red-800/40'
+                                  }`}
                                   title="Revocar acceso militar"
                                 >
                                   <Trash2 className="w-3 h-3" />
+                                  {pendingDeleteId === u.id && <span>¿Revocar?</span>}
                                 </button>
                               )}
                             </>

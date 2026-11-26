@@ -83,6 +83,7 @@ export const ClanManagementModal: React.FC<ClanManagementModalProps> = ({
   const [newSeizure, setNewSeizure] = useState('');
 
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [pendingDeleteClanId, setPendingDeleteClanId] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -455,15 +456,25 @@ export const ClanManagementModal: React.FC<ClanManagementModalProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            if (confirm(`¿Eliminar clan "${clan.name}" de la base de datos?`)) {
-                              onDeleteClan(clan.id);
-                              playCyberClick('laser', 0.1);
+                            if (pendingDeleteClanId !== clan.id) {
+                              setPendingDeleteClanId(clan.id);
+                              playCyberClick('toggle', 0.08);
+                              return;
                             }
+                            setPendingDeleteClanId(null);
+                            onDeleteClan(clan.id);
+                            playCyberClick('laser', 0.1);
                           }}
-                          className="text-red-400 hover:text-red-300 p-1 cursor-pointer"
+                          onBlur={() => setPendingDeleteClanId(prev => (prev === clan.id ? null : prev))}
+                          className={`px-1.5 py-1 rounded flex items-center gap-1 cursor-pointer transition-colors ${
+                            pendingDeleteClanId === clan.id
+                              ? 'bg-red-600 text-white font-bold'
+                              : 'text-red-400 hover:text-red-300'
+                          }`}
                           title="Eliminar de la base de datos"
                         >
                           <Trash2 className="w-3 h-3" />
+                          {pendingDeleteClanId === clan.id && <span>¿Eliminar?</span>}
                         </button>
                       )}
                     </div>

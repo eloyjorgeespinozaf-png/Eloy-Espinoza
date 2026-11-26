@@ -61,6 +61,7 @@ export const ModuleBackgroundModal: React.FC<ModuleBackgroundModalProps> = ({
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [confirmCloneAll, setConfirmCloneAll] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonImportInputRef = useRef<HTMLInputElement>(null);
@@ -471,15 +472,26 @@ export const ModuleBackgroundModal: React.FC<ModuleBackgroundModalProps> = ({
                 {onApplyToAll && (
                   <div className="pt-2 border-t border-zinc-800/80">
                     <button
+                      type="button"
                       onClick={async () => {
-                        if (confirm(`¿Deseas aplicar el fondo de ${currentModule.name} a todos los demás módulos?`)) {
-                          await onApplyToAll(selectedModuleId);
-                          showFeedback('Fondo propagado a todos los módulos');
+                        if (!confirmCloneAll) {
+                          setConfirmCloneAll(true);
+                          return;
                         }
+                        setConfirmCloneAll(false);
+                        await onApplyToAll(selectedModuleId);
+                        showFeedback('Fondo propagado a todos los módulos');
                       }}
-                      className="w-full py-1.5 bg-zinc-950 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 rounded-lg text-[10px] font-bold transition-colors cursor-pointer text-center"
+                      onBlur={() => setConfirmCloneAll(false)}
+                      className={`w-full py-1.5 border rounded-lg text-[10px] font-bold transition-colors cursor-pointer text-center ${
+                        confirmCloneAll
+                          ? 'bg-emerald-600 text-white border-emerald-400'
+                          : 'bg-zinc-950 hover:bg-zinc-800 text-zinc-400 hover:text-white border-zinc-800'
+                      }`}
                     >
-                      Clonar este fondo a todos los módulos
+                      {confirmCloneAll
+                        ? `¿Confirmar clonar ${currentModule.name} a todos los módulos?`
+                        : 'Clonar este fondo a todos los módulos'}
                     </button>
                   </div>
                 )}

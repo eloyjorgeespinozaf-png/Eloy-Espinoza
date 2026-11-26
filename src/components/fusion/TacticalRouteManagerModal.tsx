@@ -5,7 +5,7 @@
  * en tiempo real las rutas y coordenadas reportadas por las patrullas en terreno.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Navigation, 
   MapPin, 
@@ -114,6 +114,12 @@ export const TacticalRouteManagerModal: React.FC<TacticalRouteManagerModalProps>
   const [isCreatingNew, setIsCreatingNew] = useState<boolean>(false);
   const [selectedPatrolToAdopt, setSelectedPatrolToAdopt] = useState<string>(tacticalUnits[0]?.name || '');
 
+  useEffect(() => {
+    if (tacticalUnits.length > 0 && (!selectedPatrolToAdopt || !tacticalUnits.some(u => u.name === selectedPatrolToAdopt))) {
+      setSelectedPatrolToAdopt(tacticalUnits[0].name);
+    }
+  }, [tacticalUnits, selectedPatrolToAdopt]);
+
   // Form State
   const [formName, setFormName] = useState('');
   const [formSector, setFormSector] = useState('');
@@ -182,7 +188,7 @@ export const TacticalRouteManagerModal: React.FC<TacticalRouteManagerModalProps>
 
     const newRouteName = `Vector ${patrol.name} (${patrol.sector || patrol.coordinates.slice(0, 15)})`;
     const patrolRoute: TacticalRoute = {
-      id: `route-patrol-${patrol.id}-${Date.now()}`,
+      id: `route-patrol-${patrol.id}`,
       name: newRouteName,
       sector: patrol.sector || `Sector Operativo ${patrol.name}`,
       coordinates: patrol.coordinates,

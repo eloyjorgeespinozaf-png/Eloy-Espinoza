@@ -661,11 +661,16 @@ export default function App() {
   // Real-time synchronization connection hook
   useEffect(() => {
     let socket: WebSocket | null = null;
-    let reconnectTimeout: any = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
     let isCleanedUp = false;
 
     const connect = () => {
       if (isCleanedUp) return;
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
       try {
         const wsUrl = getSyncWebSocketUrl();
         console.log(`[PII-LCC Network] Connecting to sync node: ${wsUrl}`);
@@ -773,7 +778,7 @@ export default function App() {
         };
 
         // Periodic heartbeat & RTT latency ping
-        const heartbeatInterval = setInterval(() => {
+        heartbeatInterval = setInterval(() => {
           if (socket && socket.readyState === WebSocket.OPEN) {
             try {
               socket.send(JSON.stringify({
@@ -801,7 +806,10 @@ export default function App() {
         }, 8000);
 
         socket.onclose = () => {
-          clearInterval(heartbeatInterval);
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+            heartbeatInterval = null;
+          }
           if (isCleanedUp) return;
           if (reconnectTimeout) clearTimeout(reconnectTimeout);
           console.warn('[PII-LCC Network] Connection interrupted. Re-establishing secure link in 3s...');
@@ -835,6 +843,10 @@ export default function App() {
     return () => {
       isCleanedUp = true;
       window.removeEventListener('online', handleOnline);
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (socket) {
         socket.onclose = null;
@@ -1395,6 +1407,14 @@ export default function App() {
     sendWsMessage('DELETE_TACTICAL_UNIT', { unitId, userId: currentRole, role: currentRole });
   };
 
+  const handleLoginSuccess = (role: MilitaryRole) => {
+    setSelectedLoginRole(role);
+    setAdminSupervisedOrgan(null);
+    setActiveWorkspaceTab('OPERATIONS');
+    setShowMultiDeviceSyncModal(false);
+    playCyberModuleTransition(role);
+  };
+
   const handleSetRoleAttempt = (role: MilitaryRole) => {
     if (currentRole === 'ROL_CEO') {
       setAdminSupervisedOrgan(role === 'ROL_CEO' ? null : role);
@@ -1692,21 +1712,35 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
     }
   };
 
-  // If operator has not authenticated into an organ terminal, display military login interface
+  // Always display TERMINAL DE ACCESO Y AUTENTICACIÓN until operator authenticates
   if (!isAuthenticated) {
     return (
-      <MilitaryLoginView 
-        onLoginSuccess={(role) => {
-          handleSetRoleAttempt(role);
-        }} 
-        moduleBackgrounds={moduleBackgrounds}
-        onUpdateModuleBackground={handleUpdateModuleBackground}
-        onResetModuleBackground={handleResetModuleBackground}
-        onApplyToAllModules={handleApplyToAllModules}
-        onBatchImportModules={handleBatchImportBackgrounds}
-        syncedDevicesCount={syncedDevicesCount}
-        onOpenSyncModal={() => setShowMultiDeviceSyncModal(true)}
-      />
+      <>
+        <MilitaryLoginView 
+          onLoginSuccess={handleLoginSuccess}
+          moduleBackgrounds={moduleBackgrounds}
+          onUpdateModuleBackground={handleUpdateModuleBackground}
+          onResetModuleBackground={handleResetModuleBackground}
+          onApplyToAllModules={handleApplyToAllModules}
+          onBatchImportModules={handleBatchImportBackgrounds}
+          syncedDevicesCount={syncedDevicesCount}
+          onOpenSyncModal={() => setShowMultiDeviceSyncModal(true)}
+        />
+        <MultiDeviceSyncModal
+          isOpen={showMultiDeviceSyncModal}
+          onClose={() => setShowMultiDeviceSyncModal(false)}
+          appVersion={appVersion}
+          isOnline={typeof navigator !== 'undefined' ? navigator.onLine : true}
+          onTriggerSyncNow={async () => {
+            await sendWsMessage('TRIGGER_FORCE_BROADCAST', {});
+          }}
+          clansCount={clans.length}
+          alertsCount={rawAlerts.length}
+          ordersCount={activeOrders.length}
+          unitsCount={tacticalUnits.length}
+          expedientesCount={expedientes.length}
+        />
+      </>
     );
   }
 
@@ -3449,17 +3483,21 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                 <div className="flex items-center justify-between text-zinc-400">
                   <span>Operador:</span>
                   <strong className="text-white">
-                    {currentRole === 'ROL_CEO' ? 'GRAL. E. MARTÍNEZ' : 
-                     currentRole === 'ROL_FUSION' ? 'TTE. CNEL. S. ROJAS' : 
-                     currentRole === 'ROL_BUSQUEDA' ? 'MY. R. VARGAS' : 'CB1. F. VALENZUELA'}
+                    {user?.name || (
+                      currentRole === 'ROL_CEO' ? 'GRAL. E. MARTÍNEZ' : 
+                      currentRole === 'ROL_FUSION' ? 'TTE. CNEL. S. ROJAS' : 
+                      currentRole === 'ROL_BUSQUEDA' ? 'MY. R. VARGAS' : 'CB1. F. VALENZUELA'
+                    )}
                   </strong>
                 </div>
                 <div className="flex items-center justify-between text-zinc-400">
                   <span>Órgano Militar:</span>
                   <span className="text-emerald-400 font-bold">
-                    {currentRole === 'ROL_CEO' ? 'CEO-LCC MANDO' : 
-                     currentRole === 'ROL_FUSION' ? 'CFI CENTRAL FUSIÓN' : 
-                     currentRole === 'ROL_BUSQUEDA' ? 'S-2 BÚSQUEDA' : 'BÚSQUEDA EN TERRENO'}
+                    {user?.organName || (
+                      currentRole === 'ROL_CEO' ? 'CEO-LCC MANDO' : 
+                      currentRole === 'ROL_FUSION' ? 'CFI CENTRAL FUSIÓN' : 
+                      currentRole === 'ROL_BUSQUEDA' ? 'S-2 BÚSQUEDA' : 'BÚSQUEDA EN TERRENO'
+                    )}
                   </span>
                 </div>
               </div>
@@ -3480,6 +3518,8 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                 type="button"
                 onClick={() => {
                   setShowLogoutConfirmModal(false);
+                  setAdminSupervisedOrgan(null);
+                  setActiveWorkspaceTab('OPERATIONS');
                   logout();
                 }}
                 className="w-full sm:flex-1 py-2.5 px-4 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shadow-[0_0_20px_rgba(239,68,68,0.4)] transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-1.5 text-center"

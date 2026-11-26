@@ -16,6 +16,7 @@ import { SearchOrganAlertViewer } from './fusion/SearchOrganAlertViewer';
 import { NewG2RecordModal } from './fusion/NewG2RecordModal';
 import { TacticalPhotoViewerModal } from './fusion/TacticalPhotoViewerModal';
 import { TacticalRouteManagerModal, DEFAULT_TACTICAL_ROUTES } from './fusion/TacticalRouteManagerModal';
+import { safeStorage } from '../utils/storage';
 import {
   TrendingUp,
   Database,
@@ -147,7 +148,7 @@ export default function OperationalView({
   // Tactical Routes State & Persistence (CFI Module)
   const [tacticalRoutes, setTacticalRoutes] = useState<TacticalRoute[]>(() => {
     try {
-      const stored = localStorage.getItem('PII_LCC_TACTICAL_ROUTES');
+      const stored = safeStorage.getItem('PII_LCC_TACTICAL_ROUTES');
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -164,7 +165,7 @@ export default function OperationalView({
       const exists = prev.some(r => r.id === route.id);
       const updated = exists ? prev.map(r => r.id === route.id ? route : r) : [route, ...prev];
       try {
-        localStorage.setItem('PII_LCC_TACTICAL_ROUTES', JSON.stringify(updated));
+        safeStorage.setItem('PII_LCC_TACTICAL_ROUTES', JSON.stringify(updated));
       } catch (e) {
         console.error(e);
       }
@@ -177,7 +178,7 @@ export default function OperationalView({
     setTacticalRoutes(prev => {
       const updated = prev.filter(r => r.id !== id);
       try {
-        localStorage.setItem('PII_LCC_TACTICAL_ROUTES', JSON.stringify(updated));
+        safeStorage.setItem('PII_LCC_TACTICAL_ROUTES', JSON.stringify(updated));
       } catch (e) {
         console.error(e);
       }
@@ -188,7 +189,7 @@ export default function OperationalView({
   const handleAdoptPatrolVector = (unit: TacticalUnit) => {
     const routeName = `Vector ${unit.name} (${unit.sector || unit.coordinates.slice(0, 16)})`;
     const newRoute: TacticalRoute = {
-      id: `route-patrol-${unit.id}-${Date.now()}`,
+      id: `route-patrol-${unit.id}`,
       name: routeName,
       sector: unit.sector || `Sector Operativo ${unit.name}`,
       coordinates: unit.coordinates,

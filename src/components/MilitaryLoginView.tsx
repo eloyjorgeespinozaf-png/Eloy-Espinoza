@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Shield, 
   Radio, 
@@ -91,8 +91,14 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
   const fullBgState = useFullDashboardBackground();
 
   const [selectedRole, setSelectedRole] = useState<MilitaryRole>('ROL_CEO');
-  const [username, setUsername] = useState<string>('admin.ceo');
-  const [password, setPassword] = useState<string>('71200004');
+  const [username, setUsername] = useState<string>(() => {
+    const ceoUser = users.find(u => u.role === 'ROL_CEO');
+    return ceoUser?.username || 'admin.ceo';
+  });
+  const [password, setPassword] = useState<string>(() => {
+    const ceoUser = users.find(u => u.role === 'ROL_CEO');
+    return ceoUser?.phoneNumber || ceoUser?.cellphone || ceoUser?.password || '71200001';
+  });
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
   const [authStep, setAuthStep] = useState<string>('');
@@ -103,6 +109,18 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
   const [showBackgroundModal, setShowBackgroundModal] = useState<boolean>(false);
   const [showLoginSyncModal, setShowLoginSyncModal] = useState<boolean>(false);
   const [showCodeModal, setShowCodeModal] = useState<boolean>(false);
+  const authTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const clearAuthTimers = () => {
+    authTimersRef.current.forEach(t => clearTimeout(t));
+    authTimersRef.current = [];
+  };
+
+  useEffect(() => {
+    return () => {
+      clearAuthTimers();
+    };
+  }, []);
 
   // Rotate simulated crypto hash every few seconds for high-tech military immersion
   useEffect(() => {
@@ -125,13 +143,21 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
     });
 
     if (registeredUser) {
-      setUsername(registeredUser.username || '');
-      setPassword(registeredUser.cellphone || registeredUser.password || '');
+      const cred = PRESET_CREDENTIALS.find(c => c.role === role);
+      setUsername(registeredUser.username || cred?.username || '');
+      setPassword(
+        registeredUser.phoneNumber ||
+        registeredUser.cellphone ||
+        registeredUser.password ||
+        cred?.defaultPhone ||
+        cred?.defaultPassword ||
+        ''
+      );
     } else {
       const cred = PRESET_CREDENTIALS.find(c => c.role === role);
       if (cred) {
         setUsername(cred.username || '');
-        setPassword(cred.defaultPassword || '');
+        setPassword(cred.defaultPhone || cred.defaultPassword || '');
       } else {
         setUsername('');
         setPassword('');
@@ -167,6 +193,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
       return;
     }
 
+    clearAuthTimers();
     setIsAuthenticating(true);
     setAuthStep('VERIFICANDO FIRMA CRIPTOGRÁFICA...');
 
@@ -174,31 +201,29 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
       playCyberClick('toggle', 0.09);
     }
 
-    setTimeout(() => {
+    const t1 = setTimeout(() => {
       setAuthStep('VALIDANDO PROTOCOLO C4ISR // NIVEL DOCTRINAL...');
       if (soundEnabled) playCyberClick('laser', 0.09);
 
-      setTimeout(() => {
+      const t2 = setTimeout(() => {
         const res = loginWithCredentials(username, password, selectedRole);
         if (res.success) {
           setAuthStep('AUTORIZACIÓN CONFIRMADA. DESPLEGANDO TERMINAL...');
-          if (soundEnabled) {
-            playCyberAccessGranted(0.11);
-          }
-          setTimeout(() => {
-            setIsAuthenticating(false);
-            if (onLoginSuccess) onLoginSuccess(selectedRole);
-          }, 450);
+          setIsAuthenticating(false);
+          if (onLoginSuccess) onLoginSuccess(res.user?.role || selectedRole);
         } else {
           setIsAuthenticating(false);
           setErrorMessage(res.error || 'ERROR DE AUTENTICACIÓN. ACCESO DENEGADO.');
           if (soundEnabled) playCyberDenied(0.14);
         }
-      }, 400);
-    }, 350);
+      }, 350);
+      authTimersRef.current.push(t2);
+    }, 300);
+    authTimersRef.current.push(t1);
   };
 
   const handleDirectPresetLogin = (role: MilitaryRole) => {
+    clearAuthTimers();
     setSelectedRole(role);
     setErrorMessage(null);
     setIsAuthenticating(true);
@@ -208,15 +233,16 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
       playCyberModuleTransition(role, 0.11);
     }
 
-    setTimeout(() => {
-      login(role);
+    const t = setTimeout(() => {
+      const ok = login(role);
       setIsAuthenticating(false);
-      if (onLoginSuccess) onLoginSuccess(role);
-    }, 350);
+      if (ok && onLoginSuccess) onLoginSuccess(role);
+    }, 300);
+    authTimersRef.current.push(t);
   };
 
-  const currentCredential = PRESET_CREDENTIALS.find(c => c.role === selectedRole) || PRESET_CREDENTIALS[2];
-  const activeUser = PRESET_USERS[selectedRole];
+  const currentCredential = PRESET_CREDENTIALS.find(c => c.role === selectedRole) || PRESET_CREDENTIALS[0];
+  const activeUser = activeOrganUsers[0] || PRESET_USERS[selectedRole] || PRESET_USERS.ROL_CEO;
 
   // Tactical accent styling based on selected role
   const getRoleAccentClasses = (role: MilitaryRole) => {
@@ -508,7 +534,7 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-[#73887a] font-mono">
-                  ESTACIÓN: {activeUser.stationId || 'PUESTO-TÁCTICO'} // FIRMA: {activeUser.signature.substring(0, 18)}...
+                  ESTACIÓN: {activeUser?.stationId || 'PUESTO-TÁCTICO'} // FIRMA: {(activeUser?.signature || 'SIG-AES256-C4ISR-SEC').substring(0, 18)}...
                 </p>
               </div>
             </div>
@@ -604,7 +630,8 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
                       type="button"
                       onClick={() => {
                         setUsername(u.username || '');
-                        setPassword(u.cellphone || u.password || '');
+                        setPassword(u.phoneNumber || u.cellphone || u.password || currentCredential.defaultPhone || '');
+                        setErrorMessage(null);
                         if (soundEnabled) playCyberClick('crisp', 0.08);
                       }}
                       className={`p-2 rounded border text-left font-mono transition-all cursor-pointer ${
@@ -619,11 +646,11 @@ export const MilitaryLoginView: React.FC<MilitaryLoginViewProps> = ({
                           <span className="text-[8px] bg-blue-900/60 text-blue-300 px-1 rounded">ADMIN</span>
                         )}
                       </div>
-                      <div className="text-[10px] text-[#71887a] mt-0.5 flex items-center justify-between">
-                        <span>{u.rank} [{u.username}]</span>
-                        <span className="text-emerald-400 font-bold flex items-center gap-0.5">
+                      <div className="text-[10px] text-[#71887a] mt-0.5 flex items-center justify-between gap-1">
+                        <span className="truncate">{u.rank} [{u.username}]</span>
+                        <span className="text-emerald-400 font-bold flex items-center gap-0.5 shrink-0">
                           <Smartphone className="w-2.5 h-2.5" />
-                          {u.cellphone || u.password}
+                          {u.phoneNumber || u.cellphone || u.password || currentCredential.defaultPhone}
                         </span>
                       </div>
                     </button>

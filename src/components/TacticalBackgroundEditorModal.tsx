@@ -365,10 +365,6 @@ export const TacticalBackgroundEditorModal: React.FC<TacticalBackgroundEditorMod
   const handleApplyToEntirePlatform = async (sourceTargetId: 'GLOBAL' | TacticalModuleId) => {
     const sourceData = getTargetBackground(sourceTargetId);
     const sourceMeta = ALL_SYSTEM_TARGETS.find(t => t.id === sourceTargetId);
-    
-    if (!confirm(`¿Deseas aplicar la imagen y ajustes de "${sourceMeta?.name}" a TODA la interfaz y a TODOS los módulos?`)) {
-      return;
-    }
 
     setIsProcessing(true);
     try {

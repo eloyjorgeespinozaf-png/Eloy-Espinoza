@@ -188,25 +188,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return INITIAL_SYSTEM_USERS;
   });
 
+  // Always start at TERMINAL DE ACCESO Y AUTENTICACIÓN on every app launch/reload
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    const saved = safeStorage.getItem('pii_lcc_authenticated');
-    return saved === 'true';
+    safeStorage.removeItem('pii_lcc_authenticated');
+    return false;
   });
 
-  const [user, setUser] = useState<User | null>(() => {
-    const savedUserId = safeStorage.getItem('pii_lcc_current_user_id');
-    const savedRole = safeStorage.getItem('pii_lcc_current_role') as MilitaryRole | null;
-    
-    // Attempt to restore by user ID first
-    if (savedUserId) {
-      const found = INITIAL_SYSTEM_USERS.find(u => u.id === savedUserId);
-      if (found) return found;
-    }
-    if (savedRole && PRESET_USERS[savedRole]) {
-      return PRESET_USERS[savedRole];
-    }
-    return INITIAL_SYSTEM_USERS[0];
-  });
+  const [user, setUser] = useState<User | null>(null);
 
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() => {
     try {
@@ -327,6 +315,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       name: newUser.name.trim(),
       username: cleanUsername,
       phoneNumber: cleanPhone,
+      cellphone: cleanPhone,
       password: cleanPhone, // Cell phone is the primary cryptographic password
       rank: newUser.rank?.trim() || 'Oficial Operador',
       organName: newUser.organName || roleInfo.name,
@@ -352,14 +341,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Update existing user
   const updateUser = (id: string, updates: Partial<User>): boolean => {
+    const normalizedUpdates: Partial<User> = { ...updates };
+    if (updates.phoneNumber) {
+      const cleanPhone = updates.phoneNumber.trim().replace(/[\s\-]/g, '');
+      normalizedUpdates.phoneNumber = cleanPhone;
+      normalizedUpdates.cellphone = cleanPhone;
+      if (!updates.password) {
+        normalizedUpdates.password = cleanPhone;
+      }
+    }
+
     setUsers(prev => {
       const index = prev.findIndex(u => u.id === id);
       if (index === -1) return prev;
-      const updated = { ...prev[index], ...updates };
+      const updated = { ...prev[index], ...normalizedUpdates };
       const next = [...prev];
       next[index] = updated;
       return next;
     });
+
+    setUser(prev => (prev && prev.id === id ? { ...prev, ...normalizedUpdates } : prev));
 
     logAction(`Administrador CEO-LCC actualizó credenciales del operador militar ID: ${id}.`);
     return true;
@@ -394,7 +395,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsAuthenticated(true);
       safeStorage.setItem('pii_lcc_current_role', role);
       safeStorage.setItem('pii_lcc_current_user_id', matchingUser.id);
-      safeStorage.setItem('pii_lcc_authenticated', 'true');
       setSecurityError(null);
 
       const logMsg = `Autenticación rápida en ${matchingUser.organName || role}. Operador: ${matchingUser.name}. Firma: ${matchingUser.signature}.`;
@@ -465,8 +465,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 3. Password Validation:
     // A) Matches user's cell phone number (exact or last 7-8 digits)
-    const userPhoneClean = (matchedUser.phoneNumber || '').replace(/[\s\-\+\(\)]/g, '');
-    const isPhoneMatch = userPhoneClean.length >= 4 && (
+    const userPhoneClean = (matchedUser.phoneNumber || matchedUser.cellphone || '').replace(/[\s\-\+\(\)]/g, '');
+    const isPhoneMatch = userPhoneClean.length >= 4 && cleanPassPhone.length >= 4 && (
       cleanPassPhone === userPhoneClean ||
       userPhoneClean.endsWith(cleanPassPhone) ||
       cleanPassPhone.endsWith(userPhoneClean)
@@ -498,7 +498,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsAuthenticated(true);
     safeStorage.setItem('pii_lcc_current_role', matchedUser.role);
     safeStorage.setItem('pii_lcc_current_user_id', matchedUser.id);
-    safeStorage.setItem('pii_lcc_authenticated', 'true');
     setSecurityError(null);
 
     const logMsg = `Inicio de sesión validado mediante clave criptográfica celular. Operador: ${matchedUser.name} (${matchedUser.rank}). Órgano: ${matchedUser.organName}. ID: ${matchedUser.id}. Enlace encriptado AES-256.`;
@@ -510,6 +509,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = () => {
     setIsAuthenticated(false);
+    setUser(null);
     safeStorage.removeItem('pii_lcc_authenticated');
     safeStorage.removeItem('pii_lcc_current_user_id');
     setSecurityError(null);
