@@ -18,6 +18,7 @@ import {
   upsertAllSystemUsersInSupabase,
   deleteSystemUserFromSupabase
 } from '../lib/supabase';
+import { cloudRealtimeMesh, CloudMeshActionPacket } from '../services/CloudRealtimeMesh';
 
 interface AuthContextType {
   user: User | null;
@@ -30,7 +31,7 @@ interface AuthContextType {
   addUser: (newUser: Omit<User, 'id' | 'signature'> & { id?: string; signature?: string }) => { success: boolean; user?: User; error?: string };
   updateUser: (id: string, updates: Partial<User>) => boolean;
   deleteUser: (id: string) => boolean;
-  replaceUsers: (restoredUsers: User[]) => void;
+  replaceUsers: (restoredUsers: User[], skipBroadcast?: boolean) => void;
   resetUsersToDefault: () => void;
   auditLogs: AuditLogEntry[];
   setAuditLogs: React.Dispatch<React.SetStateAction<AuditLogEntry[]>>;
@@ -303,6 +304,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  // Real-time multi-terminal synchronization for military operator directory
+  useEffect(() => {
+    const unsubscribe = cloudRealtimeMesh.onAction((packet: CloudMeshActionPacket) => {
+      const { type, payload } = packet;
+      if (type === 'USER_UPSERTED' && payload?.user?.id) {
+        const incoming: User = payload.user;
+        setUsers(prev => {
+          const idx = prev.findIndex(u => u.id === incoming.id);
+          const next = idx >= 0
+            ? prev.map((u, i) => (i === idx ? { ...u, ...incoming } : u))
+            : [incoming, ...prev];
+          safeStorage.setItem('PII_LCC_SYSTEM_USERS', JSON.stringify(next));
+          return next;
+        });
+        setUser(prev => (prev && prev.id === incoming.id ? { ...prev, ...incoming } : prev));
+      } else if (type === 'USER_DELETED' && payload?.userId) {
+        const targetId: string = payload.userId;
+        if (targetId === 'CEO-ADMIN-01') return;
+        setUsers(prev => {
+          const next = prev.filter(u => u.id !== targetId);
+          safeStorage.setItem('PII_LCC_SYSTEM_USERS', JSON.stringify(next));
+          return next;
+        });
+      } else if ((type === 'USERS_SYNC_ALL' || type === 'SYNC_USERS') && Array.isArray(payload?.users) && payload.users.length > 0) {
+        const adminPreset = INITIAL_SYSTEM_USERS[0];
+        const incomingList: User[] = payload.users;
+        setUsers(prev => {
+          const merged = new Map<string, User>();
+          merged.set(adminPreset.id, adminPreset);
+          for (const u of prev) {
+            if (u?.id) merged.set(u.id, u);
+          }
+          for (const u of incomingList) {
+            if (u?.id) merged.set(u.id, u.id === adminPreset.id ? { ...adminPreset, ...u, isAdmin: true } : u);
+          }
+          const finalList = Array.from(merged.values());
+          safeStorage.setItem('PII_LCC_SYSTEM_USERS', JSON.stringify(finalList));
+          return finalList;
+        });
+      }
+    });
+    return unsubscribe;
+  }, []);
+
   // Sync audit logs to storage
   useEffect(() => {
     try {
@@ -405,10 +450,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setUsers(prev => [createdUser, ...prev]);
 
-    // Auto-persist new operator to Supabase Cloud
+    // Auto-persist new operator to Supabase Cloud and broadcast in real time
     upsertSystemUserInSupabase(createdUser).catch(err => {
       console.warn('[AuthContext] Error sincronizando nuevo usuario a Supabase:', err);
     });
+    cloudRealtimeMesh.broadcastAction('USER_UPSERTED', { user: createdUser }).catch(() => {});
 
     // Record audit log
     logAction(
@@ -447,6 +493,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       upsertSystemUserInSupabase(toSync).catch(err => {
         console.warn('[AuthContext] Error actualizando usuario en Supabase:', err);
       });
+      cloudRealtimeMesh.broadcastAction('USER_UPSERTED', { user: toSync }).catch(() => {});
     }
 
     setUser(prev => (prev && prev.id === id ? { ...prev, ...normalizedUpdates } : prev));
@@ -467,12 +514,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     deleteSystemUserFromSupabase(id).catch(err => {
       console.warn('[AuthContext] Error eliminando usuario de Supabase:', err);
     });
+    cloudRealtimeMesh.broadcastAction('USER_DELETED', { userId: id }).catch(() => {});
     logAction(`Administrador CEO-LCC revocó acceso al operador: ${target.name} (${target.id}) de ${target.organName}.`);
     return true;
   };
 
   // Replace/merge users from cloud restore (always keeping primary administrator)
-  const replaceUsers = (restoredUsers: User[]) => {
+  const replaceUsers = (restoredUsers: User[], skipBroadcast: boolean = false) => {
     if (!Array.isArray(restoredUsers) || restoredUsers.length === 0) return;
     const adminPreset = INITIAL_SYSTEM_USERS[0];
     const hasAdmin = restoredUsers.some(
@@ -481,6 +529,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const finalUsers = hasAdmin ? restoredUsers : [adminPreset, ...restoredUsers];
     setUsers(finalUsers);
     safeStorage.setItem('PII_LCC_SYSTEM_USERS', JSON.stringify(finalUsers));
+    if (!skipBroadcast) {
+      cloudRealtimeMesh.broadcastAction('USERS_SYNC_ALL', { users: finalUsers }).catch(() => {});
+    }
     logAction(`Directorio de operadores sincronizado desde Supabase Cloud (${finalUsers.length} operadores).`);
   };
 
@@ -489,6 +540,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUsers(INITIAL_SYSTEM_USERS);
     safeStorage.setItem('PII_LCC_SYSTEM_USERS', JSON.stringify(INITIAL_SYSTEM_USERS));
     upsertAllSystemUsersInSupabase(INITIAL_SYSTEM_USERS).catch(() => {});
+    cloudRealtimeMesh.broadcastAction('USERS_SYNC_ALL', { users: INITIAL_SYSTEM_USERS }).catch(() => {});
     logAction('Administrador CEO-LCC restauró la plantilla doctrinal de usuarios a valores de fábrica.');
   };
 

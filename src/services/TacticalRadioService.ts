@@ -243,6 +243,10 @@ class TacticalRadioManager {
   private channel: RealtimeChannel | null = null;
   private connected = false;
   private connecting = false;
+  private manuallyDisconnected = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
+  private lifecycleBound = false;
   private identity: RadioIdentity | null = null;
   private activeChannel: RadioChannelId = 'CH1_CONJUNTA';
   private monitorEmergency = true;
@@ -255,6 +259,7 @@ class TacticalRadioManager {
   private audioBlocked = false;
   private activeSpeaker: ActiveSpeakerState | null = null;
   private operators: RadioOperatorPresence[] = [];
+  private broadcastOperators: Map<string, { op: RadioOperatorPresence; expiresAt: number }> = new Map();
   private messages: RadioTransmissionItem[] = [];
   private seenIds: Set<string> = new Set();
   private unreadByChannel: Record<RadioChannelId, number> = {
@@ -320,7 +325,44 @@ class TacticalRadioManager {
     };
   }
 
+  private bindLifecycle(): void {
+    if (this.lifecycleBound || typeof window === 'undefined') return;
+    this.lifecycleBound = true;
+
+    window.addEventListener('online', () => {
+      if (!this.manuallyDisconnected && this.identity && !this.connected && !this.connecting) {
+        this.reconnectAttempts = 0;
+        this.openRadioChannel();
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && !this.manuallyDisconnected && this.identity) {
+        if (!this.connected && !this.connecting) {
+          this.reconnectAttempts = 0;
+          this.openRadioChannel();
+        } else if (this.connected) {
+          void this.trackPresence();
+        }
+      }
+    });
+  }
+
+  private scheduleReconnect(): void {
+    if (this.manuallyDisconnected || !this.identity || this.reconnectTimer) return;
+    const delayMs = Math.min(15000, 2000 * Math.pow(1.7, this.reconnectAttempts));
+    this.reconnectAttempts = Math.min(this.reconnectAttempts + 1, 6);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.manuallyDisconnected && !this.connected && !this.connecting && this.identity) {
+        this.openRadioChannel();
+      }
+    }, delayMs);
+  }
+
   public connect(params: { operatorName: string; role: MilitaryRole | string; organName?: string }): void {
+    this.manuallyDisconnected = false;
+    this.bindLifecycle();
     const devId = getOrCreateDeviceId();
     this.identity = {
       deviceId: devId,
@@ -339,7 +381,37 @@ class TacticalRadioManager {
       return;
     }
 
+    this.openRadioChannel();
+  }
+
+  public forceReconnect(): void {
+    if (!this.identity) return;
+    this.manuallyDisconnected = false;
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.channel) {
+      const oldCh = this.channel;
+      this.channel = null;
+      this.connected = false;
+      this.connecting = false;
+      supabase.removeChannel(oldCh).catch(() => {});
+    }
+    this.openRadioChannel();
+  }
+
+  private openRadioChannel(): void {
+    if (!this.identity) return;
+    if (this.channel) {
+      const prev = this.channel;
+      this.channel = null;
+      supabase.removeChannel(prev).catch(() => {});
+    }
+
     this.connecting = true;
+    const devId = this.identity.deviceId || getOrCreateDeviceId();
     const ch = supabase.channel(RADIO_CHANNEL_NAME, {
       config: {
         broadcast: { self: false, ack: false },
@@ -355,6 +427,50 @@ class TacticalRadioManager {
       this.refreshPresence();
     });
     ch.on('presence', { event: 'leave' }, () => {
+      this.refreshPresence();
+    });
+
+    // Dual-layer symmetric radio presence announcement
+    ch.on('broadcast', { event: 'radio-announce' }, ({ payload }) => {
+      if (!payload?.deviceId || payload.deviceId === this.identity?.deviceId) return;
+      this.broadcastOperators.set(payload.deviceId, {
+        op: {
+          deviceId: payload.deviceId,
+          deviceName: payload.deviceName || `Terminal ${String(payload.deviceId).slice(-4)}`,
+          operatorName: payload.operatorName || 'Operador',
+          role: payload.role || 'ROL_PATRULLA',
+          organBadge: payload.organBadge || getOrganBadgeForRole(String(payload.role)),
+          channelId: (payload.channelId as RadioChannelId) || 'CH1_CONJUNTA',
+          isTransmitting: Boolean(payload.isTransmitting),
+          platform: payload.platform || 'Web',
+          joinedAt: payload.joinedAt || new Date().toISOString()
+        },
+        expiresAt: Date.now() + 50000
+      });
+      this.refreshPresence();
+      if (payload.requestReply && this.identity && this.connected) {
+        void ch.send({
+          type: 'broadcast',
+          event: 'radio-announce',
+          payload: {
+            deviceId: this.identity.deviceId,
+            deviceName: this.identity.deviceName,
+            operatorName: this.identity.operatorName,
+            role: this.identity.role,
+            organBadge: this.identity.organBadge,
+            channelId: this.activeChannel,
+            isTransmitting: this.isTransmitting,
+            platform: this.identity.platform,
+            joinedAt: this.joinedAtIso,
+            requestReply: false
+          }
+        }).catch(() => {});
+      }
+    });
+
+    ch.on('broadcast', { event: 'radio-leave' }, ({ payload }) => {
+      if (!payload?.deviceId) return;
+      this.broadcastOperators.delete(payload.deviceId);
       this.refreshPresence();
     });
 
@@ -379,15 +495,36 @@ class TacticalRadioManager {
     });
 
     ch.subscribe(async (status) => {
+      if (this.channel !== ch) return;
       if (status === 'SUBSCRIBED') {
         this.connected = true;
         this.connecting = false;
+        this.reconnectAttempts = 0;
         await this.trackPresence();
-        this.emit();
+        if (this.identity) {
+          void ch.send({
+            type: 'broadcast',
+            event: 'radio-announce',
+            payload: {
+              deviceId: this.identity.deviceId,
+              deviceName: this.identity.deviceName,
+              operatorName: this.identity.operatorName,
+              role: this.identity.role,
+              organBadge: this.identity.organBadge,
+              channelId: this.activeChannel,
+              isTransmitting: this.isTransmitting,
+              platform: this.identity.platform,
+              joinedAt: this.joinedAtIso,
+              requestReply: true
+            }
+          }).catch(() => {});
+        }
+        this.refreshPresence();
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         this.connected = false;
         this.connecting = false;
         this.emit();
+        this.scheduleReconnect();
       }
     });
   }
@@ -427,32 +564,39 @@ class TacticalRadioManager {
   }
 
   private refreshPresence(): void {
-    if (!this.channel) return;
-    const state = this.channel.presenceState<any>();
-    const list: RadioOperatorPresence[] = [];
-    const seen = new Set<string>();
+    const merged = new Map<string, RadioOperatorPresence>();
+    const now = Date.now();
 
-    Object.entries(state).forEach(([key, metas]) => {
-      if (!Array.isArray(metas) || metas.length === 0) return;
-      const latest = metas[metas.length - 1] || {};
-      const devId = latest.deviceId || key;
-      if (seen.has(devId)) return;
-      seen.add(devId);
-      list.push({
-        deviceId: devId,
-        deviceName: latest.deviceName || `Terminal ${String(devId).slice(-4)}`,
-        operatorName: latest.operatorName || 'Operador',
-        role: latest.role || 'ROL_PATRULLA',
-        organBadge: latest.organBadge || getOrganBadgeForRole(String(latest.role)),
-        channelId: (latest.channelId as RadioChannelId) || 'CH1_CONJUNTA',
-        isTransmitting: Boolean(latest.isTransmitting),
-        platform: latest.platform || 'Web',
-        joinedAt: latest.joinedAt || new Date().toISOString()
+    if (this.channel) {
+      const state = this.channel.presenceState<any>();
+      Object.entries(state).forEach(([key, metas]) => {
+        if (!Array.isArray(metas) || metas.length === 0) return;
+        const latest = metas[metas.length - 1] || {};
+        const devId = latest.deviceId || key;
+        merged.set(devId, {
+          deviceId: devId,
+          deviceName: latest.deviceName || `Terminal ${String(devId).slice(-4)}`,
+          operatorName: latest.operatorName || 'Operador',
+          role: latest.role || 'ROL_PATRULLA',
+          organBadge: latest.organBadge || getOrganBadgeForRole(String(latest.role)),
+          channelId: (latest.channelId as RadioChannelId) || 'CH1_CONJUNTA',
+          isTransmitting: Boolean(latest.isTransmitting),
+          platform: latest.platform || 'Web',
+          joinedAt: latest.joinedAt || new Date().toISOString()
+        });
       });
-    });
+    }
 
-    if (this.identity && !seen.has(this.identity.deviceId)) {
-      list.unshift({
+    for (const [id, entry] of this.broadcastOperators.entries()) {
+      if (entry.expiresAt > now) {
+        merged.set(id, entry.op);
+      } else {
+        this.broadcastOperators.delete(id);
+      }
+    }
+
+    if (this.identity) {
+      merged.set(this.identity.deviceId, {
         deviceId: this.identity.deviceId,
         deviceName: this.identity.deviceName,
         operatorName: this.identity.operatorName,
@@ -465,7 +609,7 @@ class TacticalRadioManager {
       });
     }
 
-    this.operators = list;
+    this.operators = Array.from(merged.values());
     this.emit();
   }
 
@@ -476,7 +620,25 @@ class TacticalRadioManager {
     this.activeChannel = channelId;
     this.unreadByChannel[channelId] = 0;
     void this.trackPresence();
-    this.emit();
+    if (this.channel && this.connected && this.identity) {
+      void this.channel.send({
+        type: 'broadcast',
+        event: 'radio-announce',
+        payload: {
+          deviceId: this.identity.deviceId,
+          deviceName: this.identity.deviceName,
+          operatorName: this.identity.operatorName,
+          role: this.identity.role,
+          organBadge: this.identity.organBadge,
+          channelId: this.activeChannel,
+          isTransmitting: this.isTransmitting,
+          platform: this.identity.platform,
+          joinedAt: this.joinedAtIso,
+          requestReply: false
+        }
+      }).catch(() => {});
+    }
+    this.refreshPresence();
   }
 
   public clearUnread(channelId?: RadioChannelId): void {

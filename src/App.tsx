@@ -68,16 +68,24 @@ import {
   normalizeCrossVersionState 
 } from './services/MultiDeviceSyncService';
 import { cloudRealtimeMesh, CloudMeshActionPacket } from './services/CloudRealtimeMesh';
+import { tacticalRadioService } from './services/TacticalRadioService';
 
 import { Shield, Radio, Mic, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2, Smartphone, Laptop, Image as ImageIcon, Palette, Globe, Crown, Database, HardDrive, Users, Save, Cloud, X } from 'lucide-react';
 import { useAuth, PRESET_USERS } from './context/AuthContext';
 import { safeStorage } from './utils/storage';
 import {
+  fetchLatestSupabaseData,
   fetchTacticalUnitsFromSupabase,
   upsertTacticalUnitInSupabase,
   upsertAllTacticalUnitsInSupabase,
   deleteTacticalUnitFromSupabase,
-  upsertRawAlertInSupabase
+  upsertRawAlertInSupabase,
+  upsertActionableIntelInSupabase,
+  upsertAutomatedOrderInSupabase,
+  upsertExpedienteInSupabase,
+  deleteExpedienteFromSupabase,
+  upsertClanInSupabase,
+  deleteClanFromSupabase
 } from './lib/supabase';
 import { 
   playSyntheticBeep, 
@@ -92,11 +100,42 @@ import {
 // Safe localStorage helper to prevent DOMException/SecurityError in private browsing or iframe environments
 const safeLocalStorage = safeStorage;
 
+// Safe ID-based smart merge: preserves existing local records while absorbing newer incoming peer/cloud records
+function mergeRecordsById<T extends { id: string }>(incoming: T[], existing: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const item of existing) {
+    if (item && item.id) map.set(item.id, item);
+  }
+  for (const item of incoming) {
+    if (item && item.id) {
+      const prev = map.get(item.id);
+      map.set(item.id, prev ? { ...prev, ...item } : item);
+    }
+  }
+  // Place newly arrived items at the front while keeping stable ordering
+  const incomingIds = new Set(incoming.map(i => i?.id).filter(Boolean));
+  const merged: T[] = [];
+  for (const item of incoming) {
+    if (item?.id && map.has(item.id)) {
+      merged.push(map.get(item.id)!);
+      map.delete(item.id);
+    }
+  }
+  for (const item of existing) {
+    if (item?.id && !incomingIds.has(item.id) && map.has(item.id)) {
+      merged.push(map.get(item.id)!);
+      map.delete(item.id);
+    }
+  }
+  return merged;
+}
+
 export default function App() {
   const { fontPreset } = useGamingFont();
   const fullBgState = useFullDashboardBackground();
   const {
     user,
+    users,
     isAuthenticated,
     login,
     logout,
@@ -234,6 +273,7 @@ export default function App() {
       return updated;
     });
     sendWsMessageRef.current?.('SAVE_CLAN', { clan: clanToSave });
+    void upsertClanInSupabase(clanToSave);
   }, []);
 
   const handleDeleteClan = useCallback((clanId: string) => {
@@ -243,12 +283,16 @@ export default function App() {
       return updated;
     });
     sendWsMessageRef.current?.('DELETE_CLAN', { clanId });
+    void deleteClanFromSupabase(clanId);
   }, []);
 
   const handleBatchImportClans = useCallback((importedClans: Clan[]) => {
     setClans(importedClans);
     safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(importedClans));
     sendWsMessageRef.current?.('BATCH_IMPORT_CLANS', { clans: importedClans });
+    importedClans.forEach(c => {
+      void upsertClanInSupabase(c);
+    });
   }, []);
 
   const handleRestoreAllData = useCallback((data: {
@@ -308,12 +352,14 @@ export default function App() {
     } catch {
       // ignore
     }
-    if (data.tacticalUnits && data.tacticalUnits.length > 0) {
-      sendWsMessageRef.current?.('SYNC_TACTICAL_UNITS', { units: data.tacticalUnits });
-    }
-    if (data.expedientes) {
-      sendWsMessageRef.current?.('RESTORE_EXPEDIENTES', { expedientes: data.expedientes });
-    }
+    sendWsMessageRef.current?.('RESTORE_ALL_DATA', {
+      clans: data.clans,
+      rawAlerts: data.rawAlerts,
+      expedientes: data.expedientes,
+      actionableIntel: data.actionableIntel,
+      activeOrders: data.activeOrders,
+      tacticalUnits: data.tacticalUnits
+    });
   }, [replaceUsers]);
 
   const [isInstalledDevice, setIsInstalledDevice] = useState<boolean>(() => {
@@ -473,7 +519,7 @@ export default function App() {
   const sentLogsRef = useRef<Set<string>>(new Set());
 
   // Shared helper to synchronize central state with React states across all versions
-  const handleStateSync = useCallback((state: any, isInit: boolean = false) => {
+  const handleStateSync = useCallback((state: any, isInit: boolean = false, mergeMode: boolean = false) => {
     if (!state) return;
     const normalized = normalizeCrossVersionState(state);
     const { 
@@ -487,24 +533,36 @@ export default function App() {
       expedientes: incomingExpedientes
     } = normalized;
     
-    if (Array.isArray(incomingAlerts)) {
-      setRawAlerts(incomingAlerts);
-      safeLocalStorage.setItem('PII_LCC_RAW_ALERTS', JSON.stringify(incomingAlerts));
+    if (Array.isArray(incomingAlerts) && incomingAlerts.length > 0) {
+      setRawAlerts(prev => {
+        const next = mergeMode ? mergeRecordsById(incomingAlerts, prev) : incomingAlerts;
+        safeLocalStorage.setItem('PII_LCC_RAW_ALERTS', JSON.stringify(next));
+        return next;
+      });
     }
-    if (Array.isArray(incomingClans)) {
-      setClans(incomingClans);
-      safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(incomingClans));
+    if (Array.isArray(incomingClans) && incomingClans.length > 0) {
+      setClans(prev => {
+        const next = mergeMode ? mergeRecordsById(incomingClans, prev) : incomingClans;
+        safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(next));
+        return next;
+      });
     }
-    if (Array.isArray(incomingIntel)) {
-      setActionableIntel(incomingIntel);
-      safeLocalStorage.setItem('PII_LCC_ACTIONABLE_INTEL', JSON.stringify(incomingIntel));
+    if (Array.isArray(incomingIntel) && incomingIntel.length > 0) {
+      setActionableIntel(prev => {
+        const next = mergeMode ? mergeRecordsById(incomingIntel, prev) : incomingIntel;
+        safeLocalStorage.setItem('PII_LCC_ACTIONABLE_INTEL', JSON.stringify(next));
+        return next;
+      });
     }
-    if (Array.isArray(incomingOrders)) {
-      setActiveOrders(incomingOrders);
-      safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(incomingOrders));
+    if (Array.isArray(incomingOrders) && incomingOrders.length > 0) {
+      setActiveOrders(prev => {
+        const next = mergeMode ? mergeRecordsById(incomingOrders, prev) : incomingOrders;
+        safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(next));
+        return next;
+      });
     }
-    if (Array.isArray(incomingUnits)) {
-      if (isInit) {
+    if (Array.isArray(incomingUnits) && incomingUnits.length > 0) {
+      if (isInit || mergeMode) {
         setTacticalUnits(prev => {
           const mergedMap = new Map<string, TacticalUnit>();
           incomingUnits.forEach((u: TacticalUnit) => {
@@ -524,7 +582,7 @@ export default function App() {
           });
           const mergedList = Array.from(mergedMap.values());
           safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(mergedList));
-          if (hasExtraLocalUnits) {
+          if (isInit && hasExtraLocalUnits) {
             sendWsMessageRef.current?.('SYNC_TACTICAL_UNITS', { units: mergedList });
           }
           return mergedList;
@@ -534,9 +592,12 @@ export default function App() {
         safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(incomingUnits));
       }
     }
-    if (Array.isArray(incomingExpedientes)) {
-      setExpedientes(incomingExpedientes);
-      safeStorage.setItem('pii_lcc_expedientes', JSON.stringify(incomingExpedientes));
+    if (Array.isArray(incomingExpedientes) && incomingExpedientes.length > 0) {
+      setExpedientes(prev => {
+        const next = mergeMode ? mergeRecordsById(incomingExpedientes, prev) : incomingExpedientes;
+        safeStorage.setItem('pii_lcc_expedientes', JSON.stringify(next));
+        return next;
+      });
     }
 
     if (state.moduleBackgrounds) {
@@ -575,7 +636,9 @@ export default function App() {
     }
 
     // Broadcast update to other local tabs/installed PWA windows on this device
-    broadcastLocalTabSync('LOCAL_TAB_SYNC', normalized);
+    if (!mergeMode) {
+      broadcastLocalTabSync('LOCAL_TAB_SYNC', normalized);
+    }
   }, [appVersion]);
 
   const handleStateSyncRef = useRef(handleStateSync);
@@ -615,7 +678,8 @@ export default function App() {
     activeOrders,
     tacticalUnits,
     expedientes,
-    auditLogs
+    auditLogs,
+    moduleBackgrounds
   });
   useEffect(() => {
     latestTacticalSnapshotRef.current = {
@@ -625,9 +689,10 @@ export default function App() {
       activeOrders,
       tacticalUnits,
       expedientes,
-      auditLogs
+      auditLogs,
+      moduleBackgrounds
     };
-  }, [rawAlerts, clans, actionableIntel, activeOrders, tacticalUnits, expedientes, auditLogs]);
+  }, [rawAlerts, clans, actionableIntel, activeOrders, tacticalUnits, expedientes, auditLogs, moduleBackgrounds]);
 
   // Flag whether Express /api/sync exists on this host (false on static Vercel deploys after first 404)
   const expressSyncAvailableRef = useRef<boolean>(true);
@@ -956,6 +1021,7 @@ export default function App() {
   }, [drainActionQueue, appVersion, user]);
 
   // Global Supabase Realtime Cloud Mesh (Presence + Live Bidirectional Interaction across Vercel, PWAs & AI Studio)
+  // Mounted once for the lifetime of the app; role/user updates are applied via updateIdentity() below without tearing down listeners.
   useEffect(() => {
     cloudRealtimeMesh.connect({
       deviceId: getOrCreateDeviceId(),
@@ -1009,28 +1075,40 @@ export default function App() {
         }
         case 'UPDATE_ALERT_STATUS': {
           if (payload?.id && payload?.status) {
-            setRawAlerts(prev => prev.map(a => (a.id === payload.id ? { ...a, status: payload.status } : a)));
+            setRawAlerts(prev => {
+              const next = prev.map(a => (a.id === payload.id ? { ...a, status: payload.status } : a));
+              safeLocalStorage.setItem('PII_LCC_RAW_ALERTS', JSON.stringify(next));
+              return next;
+            });
           }
           break;
         }
         case 'PROMOTE_TO_INTEL': {
           const intel = payload?.intel;
           if (intel?.id) {
-            setActionableIntel(prev => (prev.some(i => i.id === intel.id) ? prev : [intel, ...prev]));
+            setActionableIntel(prev => {
+              const next = prev.some(i => i.id === intel.id)
+                ? prev.map(i => (i.id === intel.id ? { ...i, ...intel } : i))
+                : [intel, ...prev];
+              safeLocalStorage.setItem('PII_LCC_ACTIONABLE_INTEL', JSON.stringify(next));
+              return next;
+            });
             if (intel.rawAlertId) {
-              setRawAlerts(prev =>
-                prev.map(a =>
+              setRawAlerts(prev => {
+                const next = prev.map(a =>
                   a.id === intel.rawAlertId
                     ? {
                         ...a,
-                        status: 'PROCESSED',
+                        status: 'PROCESSED' as const,
                         reliability: payload?.updatedReliability || a.reliability,
                         certainty: payload?.updatedCertainty || a.certainty,
                         clandestineRouteId: payload?.routeId || a.clandestineRouteId
                       }
                     : a
-                )
-              );
+                );
+                safeLocalStorage.setItem('PII_LCC_RAW_ALERTS', JSON.stringify(next));
+                return next;
+              });
             }
             playSyntheticBeep(1050, 0.06);
             setRealtimeSyncToast({
@@ -1042,16 +1120,31 @@ export default function App() {
         }
         case 'ARCHIVE_INTEL': {
           if (payload?.id) {
-            setActionableIntel(prev =>
-              prev.map(i => (i.id === payload.id ? { ...i, status: 'ARCHIVED' as any } : i))
-            );
+            setActionableIntel(prev => {
+              const next = prev.map(i => (i.id === payload.id ? { ...i, status: 'ARCHIVED' as any } : i));
+              safeLocalStorage.setItem('PII_LCC_ACTIONABLE_INTEL', JSON.stringify(next));
+              return next;
+            });
           }
           break;
         }
         case 'CREATE_ORDER': {
           const order = payload?.order;
           if (order?.id) {
-            setActiveOrders(prev => (prev.some(o => o.id === order.id) ? prev : [order, ...prev]));
+            setActiveOrders(prev => {
+              const next = prev.some(o => o.id === order.id)
+                ? prev.map(o => (o.id === order.id ? { ...o, ...order } : o))
+                : [order, ...prev];
+              safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(next));
+              return next;
+            });
+            if (order.intelId && order.intelId !== 'manual') {
+              setActionableIntel(prev => {
+                const next = prev.map(i => (i.id === order.intelId ? { ...i, status: 'ORDER_ISSUED' as const } : i));
+                safeLocalStorage.setItem('PII_LCC_ACTIONABLE_INTEL', JSON.stringify(next));
+                return next;
+              });
+            }
             playSyntheticBeep(1200, 0.08);
             setRealtimeSyncToast({
               message: `Nueva Orden OOA emitida desde ${senderDeviceName}: ${order.codeName}`,
@@ -1062,24 +1155,26 @@ export default function App() {
         }
         case 'CANCEL_ORDER': {
           if (payload?.id) {
-            setActiveOrders(prev =>
-              prev.map(o =>
+            setActiveOrders(prev => {
+              const next = prev.map(o =>
                 o.id === payload.id
                   ? {
                       ...o,
-                      status: 'CANCELLED',
+                      status: 'CANCELLED' as const,
                       updates: payload.updateMsg ? [...(o.updates || []), payload.updateMsg] : o.updates
                     }
                   : o
-              )
-            );
+              );
+              safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(next));
+              return next;
+            });
           }
           break;
         }
         case 'CONFIRM_ORDER': {
           if (payload?.id && payload?.newStatus) {
-            setActiveOrders(prev =>
-              prev.map(o =>
+            setActiveOrders(prev => {
+              const next = prev.map(o =>
                 o.id === payload.id
                   ? {
                       ...o,
@@ -1089,25 +1184,40 @@ export default function App() {
                         : o.updates
                     }
                   : o
-              )
-            );
-            if (payload.unitName && payload.unitStatus) {
-              setTacticalUnits(prev =>
-                prev.map(u => (u.name === payload.unitName ? { ...u, status: payload.unitStatus } : u))
               );
+              safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(next));
+              return next;
+            });
+            if (payload.unitName && payload.unitStatus) {
+              setTacticalUnits(prev => {
+                const next = prev.map(u =>
+                  u.name === payload.unitName
+                    ? { ...u, status: payload.unitStatus, lastReportTime: new Date().toISOString() }
+                    : u
+                );
+                safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
+                return next;
+              });
             }
+            playSyntheticBeep(1020, 0.06);
+            setRealtimeSyncToast({
+              message: `Estado OOA actualizado por ${senderDeviceName}: ${payload.newStatus}`,
+              timestamp: Date.now()
+            });
           }
           break;
         }
         case 'ORDER_UPDATE': {
           if (payload?.orderId && payload?.updateMsg) {
-            setActiveOrders(prev =>
-              prev.map(o =>
+            setActiveOrders(prev => {
+              const next = prev.map(o =>
                 o.id === payload.orderId
                   ? { ...o, updates: [...(o.updates || []), payload.updateMsg] }
                   : o
-              )
-            );
+              );
+              safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(next));
+              return next;
+            });
           }
           break;
         }
@@ -1120,6 +1230,11 @@ export default function App() {
               safeStorage.setItem('pii_lcc_expedientes', JSON.stringify(next));
               return next;
             });
+            playSyntheticBeep(960, 0.05);
+            setRealtimeSyncToast({
+              message: `Expediente G-2 sincronizado desde ${senderDeviceName}: ${exp.id}`,
+              timestamp: Date.now()
+            });
           }
           break;
         }
@@ -1128,6 +1243,52 @@ export default function App() {
             setExpedientes(prev => {
               const next = prev.filter(e => e.id !== payload.expedienteId);
               safeStorage.setItem('pii_lcc_expedientes', JSON.stringify(next));
+              return next;
+            });
+          }
+          break;
+        }
+        case 'RESTORE_EXPEDIENTES': {
+          if (Array.isArray(payload?.expedientes)) {
+            setExpedientes(prev => {
+              const next = mergeRecordsById(payload.expedientes, prev);
+              safeStorage.setItem('pii_lcc_expedientes', JSON.stringify(next));
+              return next;
+            });
+          }
+          break;
+        }
+        case 'SAVE_CLAN': {
+          const clan = payload?.clan;
+          if (clan?.id) {
+            setClans(prev => {
+              const exists = prev.some(c => c.id === clan.id);
+              const next = exists ? prev.map(c => (c.id === clan.id ? clan : c)) : [clan, ...prev];
+              safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(next));
+              return next;
+            });
+            setRealtimeSyncToast({
+              message: `Registro de Clan sincronizado desde ${senderDeviceName}: ${clan.name}`,
+              timestamp: Date.now()
+            });
+          }
+          break;
+        }
+        case 'DELETE_CLAN': {
+          if (payload?.clanId) {
+            setClans(prev => {
+              const next = prev.filter(c => c.id !== payload.clanId);
+              safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(next));
+              return next;
+            });
+          }
+          break;
+        }
+        case 'BATCH_IMPORT_CLANS': {
+          if (Array.isArray(payload?.clans) && payload.clans.length > 0) {
+            setClans(prev => {
+              const next = mergeRecordsById(payload.clans, prev);
+              safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(next));
               return next;
             });
           }
@@ -1191,8 +1352,25 @@ export default function App() {
         }
         case 'SYNC_TACTICAL_UNITS': {
           if (Array.isArray(payload?.units) && payload.units.length > 0) {
-            setTacticalUnits(payload.units);
-            safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(payload.units));
+            setTacticalUnits(prev => {
+              const next = mergeRecordsById(payload.units, prev);
+              safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
+              return next;
+            });
+          }
+          break;
+        }
+        case 'MODULE_BG_UPDATE': {
+          if (payload?.allConfigs) {
+            setModuleBackgrounds(prev => ({ ...prev, ...payload.allConfigs }));
+          } else if (payload?.moduleId && payload?.config) {
+            setModuleBackgrounds(prev => ({ ...prev, [payload.moduleId]: payload.config }));
+          }
+          break;
+        }
+        case 'FULL_DASHBOARD_BG_UPDATE': {
+          if (payload?.settings) {
+            window.dispatchEvent(new CustomEvent('full-dashboard-bg-update', { detail: { settings: payload.settings } }));
           }
           break;
         }
@@ -1207,6 +1385,16 @@ export default function App() {
           }
           break;
         }
+        case 'TACTICAL_ALARM_ALERT': {
+          if (payload?.emergency) {
+            playCyberAlert();
+            setRealtimeSyncToast({
+              message: `¡ALERTA SOS desde ${senderDeviceName}!: ${payload.emergency.title || 'Prioridad 1'}`,
+              timestamp: Date.now()
+            });
+          }
+          break;
+        }
         case 'LOG_AUDIT_ACTION': {
           const entry = payload?.logEntry;
           if (entry?.id && !sentLogsRef.current.has(entry.id)) {
@@ -1215,14 +1403,25 @@ export default function App() {
           }
           break;
         }
+        case 'RESTORE_ALL_DATA': {
+          if (payload && typeof payload === 'object') {
+            handleStateSyncRef.current(payload, false, true);
+            setRealtimeSyncToast({
+              message: `Respaldo operativo sincronizado desde ${senderDeviceName}.`,
+              timestamp: Date.now()
+            });
+          }
+          break;
+        }
+        case 'REQUEST_SYNC_SNAPSHOT':
         case 'TRIGGER_FORCE_BROADCAST': {
-          // Respond with our current tactical snapshot so requesting terminal receives live peer state on Vercel too
+          // Respond with our current tactical snapshot so newly joined or reconnected terminals converge immediately
           cloudRealtimeMesh.broadcastAction('FULL_STATE_SNAPSHOT', latestTacticalSnapshotRef.current);
           break;
         }
         case 'FULL_STATE_SNAPSHOT': {
           if (payload && typeof payload === 'object') {
-            handleStateSyncRef.current(payload, false);
+            handleStateSyncRef.current(payload, false, true);
           }
           break;
         }
@@ -1237,7 +1436,7 @@ export default function App() {
       window.removeEventListener('synced-devices-update', handleSyncedDevicesEvent);
       window.removeEventListener('cloud-mesh-terminal-joined', handleTerminalJoined);
     };
-  }, [appVersion, user, selectedLoginRole]);
+  }, []);
 
   // Keep Cloud Realtime Mesh identity synchronized when operator logs in/changes role
   useEffect(() => {
@@ -1318,60 +1517,125 @@ export default function App() {
     tacticalUnitsRef.current = tacticalUnits;
   }, [tacticalUnits]);
 
-  // Hydrate and reconcile Tactical Units (patrols + GPS positions) with Supabase Cloud on startup
+  // Full Supabase Cloud Hydration across ALL 7 operational datasets (startup + manual resync)
+  const hydrateAllFromSupabase = useCallback(async () => {
+    try {
+      const [{ data: cloudData }, remoteUnitsDirect] = await Promise.all([
+        fetchLatestSupabaseData(),
+        fetchTacticalUnitsFromSupabase()
+      ]);
+
+      // 1. Tactical Units (Patrols + Live GPS)
+      const incomingUnits =
+        remoteUnitsDirect && remoteUnitsDirect.length > 0
+          ? remoteUnitsDirect
+          : cloudData?.tacticalUnits || [];
+      const currentLocalUnits = tacticalUnitsRef.current;
+
+      if (incomingUnits.length === 0) {
+        if (currentLocalUnits.length > 0) {
+          upsertAllTacticalUnitsInSupabase(currentLocalUnits).catch(() => {});
+        }
+      } else {
+        const mergedMap = new Map<string, TacticalUnit>();
+        const missingInCloud: TacticalUnit[] = [];
+        incomingUnits.forEach(ru => {
+          if (ru && ru.id) mergedMap.set(ru.id, ru);
+        });
+        currentLocalUnits.forEach(lu => {
+          if (!lu || !lu.id) return;
+          const alreadyById = mergedMap.has(lu.id);
+          const alreadyByName = Array.from(mergedMap.values()).some(
+            r => r.name.trim().toLowerCase() === lu.name.trim().toLowerCase()
+          );
+          if (!alreadyById && !alreadyByName) {
+            mergedMap.set(lu.id, lu);
+            missingInCloud.push(lu);
+          }
+        });
+        const mergedUnits = Array.from(mergedMap.values());
+        setTacticalUnits(mergedUnits);
+        safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(mergedUnits));
+        if (missingInCloud.length > 0) {
+          upsertAllTacticalUnitsInSupabase(missingInCloud).catch(() => {});
+        }
+      }
+
+      if (!cloudData) return;
+
+      // 2. Raw Field Alerts (S-2)
+      if (Array.isArray(cloudData.rawAlerts) && cloudData.rawAlerts.length > 0) {
+        setRawAlerts(prev => {
+          const next = mergeRecordsById(cloudData.rawAlerts, prev);
+          safeLocalStorage.setItem('PII_LCC_RAW_ALERTS', JSON.stringify(next));
+          return next;
+        });
+      }
+
+      // 3. Actionable Intelligence (CFI)
+      if (Array.isArray(cloudData.actionableIntel) && cloudData.actionableIntel.length > 0) {
+        setActionableIntel(prev => {
+          const next = mergeRecordsById(cloudData.actionableIntel, prev);
+          safeLocalStorage.setItem('PII_LCC_ACTIONABLE_INTEL', JSON.stringify(next));
+          return next;
+        });
+      }
+
+      // 4. Automated Orders (OOA)
+      if (Array.isArray(cloudData.activeOrders) && cloudData.activeOrders.length > 0) {
+        setActiveOrders(prev => {
+          const next = mergeRecordsById(cloudData.activeOrders, prev);
+          safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(next));
+          return next;
+        });
+      }
+
+      // 5. G-2 Expedientes
+      if (Array.isArray(cloudData.expedientes) && cloudData.expedientes.length > 0) {
+        setExpedientes(prev => {
+          const next = mergeRecordsById(cloudData.expedientes, prev);
+          safeStorage.setItem('pii_lcc_expedientes', JSON.stringify(next));
+          return next;
+        });
+      }
+
+      // 6. Clans
+      if (Array.isArray(cloudData.clans) && cloudData.clans.length > 0) {
+        setClans(prev => {
+          const next = mergeRecordsById(cloudData.clans, prev);
+          safeLocalStorage.setItem('PII_LCC_CLANS', JSON.stringify(next));
+          return next;
+        });
+      }
+
+      // 7. System Users / Military Operators
+      if (Array.isArray(cloudData.users) && cloudData.users.length > 0) {
+        replaceUsers(cloudData.users, true);
+      }
+    } catch (err) {
+      console.warn('[App] Advertencia hidratando estado operativo desde Supabase Cloud:', err);
+    }
+  }, [replaceUsers]);
+
+  // Run full cloud hydration on startup
   useEffect(() => {
-    let cancelled = false;
-    const hydrateUnitsFromSupabase = async () => {
-      const remoteUnits = await fetchTacticalUnitsFromSupabase();
-      if (cancelled || !remoteUnits) return;
+    void hydrateAllFromSupabase();
+  }, [hydrateAllFromSupabase]);
 
-      const currentLocal = tacticalUnitsRef.current;
-
-      if (remoteUnits.length === 0) {
-        // Seed Supabase `tactical_units` immediately if empty
-        if (currentLocal.length > 0) {
-          upsertAllTacticalUnitsInSupabase(currentLocal).catch(() => {});
-        }
-        return;
-      }
-
-      // Merge remote Supabase units with any local-only units not yet uploaded
-      const mergedMap = new Map<string, TacticalUnit>();
-      const missingInCloud: TacticalUnit[] = [];
-
-      remoteUnits.forEach(ru => {
-        if (ru && ru.id) mergedMap.set(ru.id, ru);
-      });
-
-      currentLocal.forEach(lu => {
-        if (!lu || !lu.id) return;
-        const alreadyById = mergedMap.has(lu.id);
-        const alreadyByName = Array.from(mergedMap.values()).some(
-          r => r.name.trim().toLowerCase() === lu.name.trim().toLowerCase()
-        );
-        if (!alreadyById && !alreadyByName) {
-          mergedMap.set(lu.id, lu);
-          missingInCloud.push(lu);
-        }
-      });
-
-      const mergedList = Array.from(mergedMap.values());
-      setTacticalUnits(mergedList);
-      safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(mergedList));
-
-      if (missingInCloud.length > 0) {
-        upsertAllTacticalUnitsInSupabase(missingInCloud).catch(() => {});
-      }
-
-      // Ensure local server & connected devices also receive cloud-persisted patrols
-      sendWsMessageRef.current?.('SYNC_TACTICAL_UNITS', { units: mergedList });
-    };
-
-    hydrateUnitsFromSupabase();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Unified full real-time synchronization restore across all terminals, radio, and cloud database
+  const handleRestoreFullRealtimeSync = useCallback(async () => {
+    cloudRealtimeMesh.forceReconnect();
+    tacticalRadioService.forceReconnect();
+    await hydrateAllFromSupabase();
+    await sendWsMessageRef.current?.('FULL_STATE_SNAPSHOT', latestTacticalSnapshotRef.current);
+    await sendWsMessageRef.current?.('REQUEST_SYNC_SNAPSHOT', {});
+    await sendWsMessageRef.current?.('TRIGGER_FORCE_BROADCAST', {});
+    playCyberAccessGranted(0.08);
+    setRealtimeSyncToast({
+      message: 'Sincronización en tiempo real restablecida con todas las terminales, radio VHF y módulos operativos.',
+      timestamp: Date.now()
+    });
+  }, [hydrateAllFromSupabase]);
 
   // Hydrate per-module backgrounds from IndexedDB/localStorage, then reconcile with server
   useEffect(() => {
@@ -1426,12 +1690,18 @@ export default function App() {
 
     try {
       const serverConfig = await uploadModuleBackgroundToServer(updated, imageBase64);
+      const finalConfig = serverConfig || updated;
       if (serverConfig) {
         setModuleBackgrounds(prev => ({
           ...prev,
           [moduleId]: serverConfig
         }));
       }
+      // Broadcast lightweight background config (avoid giant inline dataUrls exceeding realtime packet limits)
+      const broadcastCfg = finalConfig.dataUrl && finalConfig.dataUrl.length > 180000
+        ? { ...finalConfig, dataUrl: undefined }
+        : finalConfig;
+      sendWsMessageRef.current?.('MODULE_BG_UPDATE', { moduleId, config: broadcastCfg });
     } catch (err) {
       console.warn('Server background sync warning (offline mode):', err);
     }
@@ -1443,6 +1713,7 @@ export default function App() {
       ...prev,
       [moduleId]: resetConfig
     }));
+    sendWsMessageRef.current?.('MODULE_BG_UPDATE', { moduleId, config: resetConfig });
   };
 
   const handleApplyToAllModules = async (sourceModuleId: TacticalModuleId) => {
@@ -1462,6 +1733,7 @@ export default function App() {
     }
 
     setModuleBackgrounds(newMap as ModuleBackgroundsMap);
+    sendWsMessageRef.current?.('MODULE_BG_UPDATE', { allConfigs: newMap });
 
     try {
       await fetch('/api/module-backgrounds/import', {
@@ -1633,14 +1905,27 @@ export default function App() {
   // Global State modification handlers to preserve horizontal loop integrity with RBAC backend validation
   const handleCreateOrder = (order: AutomatedOrder) => {
     if (!validateBackendPermission('ROL_CEO', 'Crear Orden de Interdicción (OOA)', order.coordinates)) return;
-    setActiveOrders(prev => [order, ...prev]);
+    setActiveOrders(prev => {
+      const next = [order, ...prev.filter(o => o.id !== order.id)];
+      safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(next));
+      return next;
+    });
     // Mark the source actionable intelligence as "order issued"
     if (order.intelId !== 'manual') {
-      setActionableIntel(prev => 
-        prev.map(intel => intel.id === order.intelId ? { ...intel, status: 'ORDER_ISSUED' } : intel)
-      );
+      const sourceIntel = actionableIntel.find(intel => intel.id === order.intelId);
+      setActionableIntel(prev => {
+        const next = prev.map(intel =>
+          intel.id === order.intelId ? { ...intel, status: 'ORDER_ISSUED' as const } : intel
+        );
+        safeLocalStorage.setItem('PII_LCC_ACTIONABLE_INTEL', JSON.stringify(next));
+        return next;
+      });
+      if (sourceIntel) {
+        void upsertActionableIntelInSupabase({ ...sourceIntel, status: 'ORDER_ISSUED' });
+      }
     }
     sendWsMessage('CREATE_ORDER', { order });
+    void upsertAutomatedOrderInSupabase(order);
   };
 
   const handleCancelOrder = (id: string) => {
@@ -1648,20 +1933,46 @@ export default function App() {
     const coords = orderObj ? orderObj.coordinates : '19°13\'10"S 68°35\'50"W';
     if (!validateBackendPermission('ROL_CEO', 'Abortar / Cancelar Operación Militar', coords)) return;
     const updateMsg = 'Operación abortada por orden superior de Mando Estratégico.';
-    setActiveOrders(prev => 
-      prev.map(order => order.id === id ? { ...order, status: 'CANCELLED', updates: [...order.updates, updateMsg] } : order)
-    );
+    let updatedOrder: AutomatedOrder | null = orderObj
+      ? { ...orderObj, status: 'CANCELLED', updates: [...orderObj.updates, updateMsg] }
+      : null;
+    setActiveOrders(prev => {
+      const next = prev.map(order => {
+        if (order.id === id) {
+          updatedOrder = { ...order, status: 'CANCELLED', updates: [...order.updates, updateMsg] };
+          return updatedOrder;
+        }
+        return order;
+      });
+      safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(next));
+      return next;
+    });
     sendWsMessage('CANCEL_ORDER', { id, updateMsg });
+    if (updatedOrder) {
+      void upsertAutomatedOrderInSupabase(updatedOrder);
+    }
   };
 
   const handleArchiveIntel = (id: string) => {
     const intelObj = actionableIntel.find(i => i.id === id);
     const coords = intelObj ? intelObj.coordinates : '19°13\'10"S 68°35\'50"W';
     if (!validateBackendPermission('ROL_CEO', 'Archivar Reporte de Inteligencia', coords)) return;
-    setActionableIntel(prev =>
-      prev.map(intel => intel.id === id ? { ...intel, status: 'ARCHIVED' as any } : intel)
-    );
+    let archivedIntel: ActionableIntel | null = intelObj ? { ...intelObj, status: 'ARCHIVED' as any } : null;
+    setActionableIntel(prev => {
+      const next = prev.map(intel => {
+        if (intel.id === id) {
+          archivedIntel = { ...intel, status: 'ARCHIVED' as any };
+          return archivedIntel;
+        }
+        return intel;
+      });
+      safeLocalStorage.setItem('PII_LCC_ACTIONABLE_INTEL', JSON.stringify(next));
+      return next;
+    });
     sendWsMessage('ARCHIVE_INTEL', { id });
+    if (archivedIntel) {
+      void upsertActionableIntelInSupabase(archivedIntel);
+    }
   };
 
   const handlePromoteToIntel = (
@@ -1671,21 +1982,37 @@ export default function App() {
     routeId?: string
   ) => {
     if (!validateBackendPermission('ROL_FUSION', 'Validar e Integrar Reporte (Promoción a Inteligencia)', intel.coordinates)) return;
-    setActionableIntel(prev => [intel, ...prev]);
+    setActionableIntel(prev => {
+      const next = [intel, ...prev.filter(i => i.id !== intel.id)];
+      safeLocalStorage.setItem('PII_LCC_ACTIONABLE_INTEL', JSON.stringify(next));
+      return next;
+    });
     // Set corresponding raw alert status to PROCESSED and apply assigned analytical attributes
-    setRawAlerts(prev =>
-      prev.map(alert =>
+    const sourceAlert = rawAlerts.find(alert => alert.id === intel.rawAlertId);
+    const processedAlert: RawAlert | null = sourceAlert
+      ? {
+          ...sourceAlert,
+          status: 'PROCESSED',
+          reliability: updatedReliability || sourceAlert.reliability,
+          certainty: updatedCertainty || sourceAlert.certainty,
+          clandestineRouteId: routeId || sourceAlert.clandestineRouteId
+        }
+      : null;
+    setRawAlerts(prev => {
+      const next = prev.map(alert =>
         alert.id === intel.rawAlertId
           ? {
               ...alert,
-              status: 'PROCESSED',
+              status: 'PROCESSED' as const,
               reliability: updatedReliability || alert.reliability,
               certainty: updatedCertainty || alert.certainty,
               clandestineRouteId: routeId || alert.clandestineRouteId
             }
           : alert
-      )
-    );
+      );
+      safeLocalStorage.setItem('PII_LCC_RAW_ALERTS', JSON.stringify(next));
+      return next;
+    });
     
     // Set state to trigger the tactical validation pop-up alert window
     setValidatedReportAlert({
@@ -1699,16 +2026,32 @@ export default function App() {
     playValidationSound();
 
     sendWsMessage('PROMOTE_TO_INTEL', { intel, updatedReliability, updatedCertainty, routeId });
+    void upsertActionableIntelInSupabase(intel);
+    if (processedAlert) {
+      void upsertRawAlertInSupabase(processedAlert);
+    }
   };
 
   const handleUpdateAlertStatus = (id: string, status: 'PROCESSED' | 'DISMISSED') => {
     const alertObj = rawAlerts.find(a => a.id === id);
     const coords = alertObj ? alertObj.coordinates : '19°13\'10"S 68°35\'50"W';
     if (!validateBackendPermission('ROL_FUSION', `Modificar Estado de Alerta a: ${status}`, coords)) return;
-    setRawAlerts(prev =>
-      prev.map(alert => alert.id === id ? { ...alert, status } : alert)
-    );
+    let updatedAlert: RawAlert | null = alertObj ? { ...alertObj, status } : null;
+    setRawAlerts(prev => {
+      const next = prev.map(alert => {
+        if (alert.id === id) {
+          updatedAlert = { ...alert, status };
+          return updatedAlert;
+        }
+        return alert;
+      });
+      safeLocalStorage.setItem('PII_LCC_RAW_ALERTS', JSON.stringify(next));
+      return next;
+    });
     sendWsMessage('UPDATE_ALERT_STATUS', { id, status });
+    if (updatedAlert) {
+      void upsertRawAlertInSupabase(updatedAlert);
+    }
   };
 
   const handleConfirmOrder = (id: string, newStatus: 'RECEIVED' | 'IN_PROGRESS' | 'COMPLETED') => {
@@ -1723,25 +2066,31 @@ export default function App() {
     if (newStatus === 'IN_PROGRESS') statusText = 'Despliegue operativo iniciado en el sector designado.';
     if (newStatus === 'COMPLETED') statusText = 'Misión completada. Contrabando interceptado con éxito.';
 
-    setActiveOrders(prev =>
-      prev.map(order => {
+    let updatedOrder: AutomatedOrder | null = orderObj
+      ? { ...orderObj, status: newStatus, updates: [...orderObj.updates, statusText] }
+      : null;
+
+    setActiveOrders(prev => {
+      const next = prev.map(order => {
         if (order.id === id) {
-          return {
+          updatedOrder = {
             ...order,
             status: newStatus,
             updates: [...order.updates, statusText]
           };
+          return updatedOrder;
         }
         return order;
-      })
-    );
+      });
+      safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(next));
+      return next;
+    });
 
     let unitName = '';
     let unitStatus: any = null;
 
     // If the order was completed, transition the assigned unit to stationary
     if (newStatus === 'COMPLETED') {
-      const orderObj = activeOrders.find(o => o.id === id);
       if (orderObj) {
         unitName = orderObj.assignedUnit;
         unitStatus = 'STATIONARY';
@@ -1757,7 +2106,6 @@ export default function App() {
         });
       }
     } else if (newStatus === 'IN_PROGRESS') {
-      const orderObj = activeOrders.find(o => o.id === id);
       if (orderObj) {
         unitName = orderObj.assignedUnit;
         unitStatus = 'INTERCEPTING';
@@ -1775,13 +2123,31 @@ export default function App() {
     }
 
     sendWsMessage('CONFIRM_ORDER', { id, newStatus, statusText, unitName, unitStatus });
+    if (updatedOrder) {
+      void upsertAutomatedOrderInSupabase(updatedOrder);
+    }
   };
 
   const handleAppendOrderUpdate = (orderId: string, updateMsg: string) => {
-    setActiveOrders(prev =>
-      prev.map(order => order.id === orderId ? { ...order, updates: [...order.updates, updateMsg] } : order)
-    );
+    const existingOrder = activeOrders.find(o => o.id === orderId);
+    let updatedOrder: AutomatedOrder | null = existingOrder
+      ? { ...existingOrder, updates: [...existingOrder.updates, updateMsg] }
+      : null;
+    setActiveOrders(prev => {
+      const next = prev.map(order => {
+        if (order.id === orderId) {
+          updatedOrder = { ...order, updates: [...order.updates, updateMsg] };
+          return updatedOrder;
+        }
+        return order;
+      });
+      safeLocalStorage.setItem('PII_LCC_ACTIVE_ORDERS', JSON.stringify(next));
+      return next;
+    });
     sendWsMessage('ORDER_UPDATE', { orderId, updateMsg });
+    if (updatedOrder) {
+      void upsertAutomatedOrderInSupabase(updatedOrder);
+    }
   };
 
   const handleAddExpediente = (newExp: G2RegistryRecord) => {
@@ -1807,6 +2173,7 @@ export default function App() {
     setAuditLogs(prev => [logEntry, ...prev]);
     sendWsMessage('SAVE_EXPEDIENTE', { expediente: newExp });
     sendWsMessage('LOG_AUDIT_ACTION', { logEntry });
+    void upsertExpedienteInSupabase(newExp);
   };
 
   const handleDeleteExpediente = (expedienteId: string) => {
@@ -1831,6 +2198,7 @@ export default function App() {
     setAuditLogs(prev => [logEntry, ...prev]);
     sendWsMessage('DELETE_EXPEDIENTE', { expedienteId });
     sendWsMessage('LOG_AUDIT_ACTION', { logEntry });
+    void deleteExpedienteFromSupabase(expedienteId);
   };
 
   const handleSendFieldReport = (report: RawAlert) => {
@@ -2285,9 +2653,7 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
           onClose={() => setShowMultiDeviceSyncModal(false)}
           appVersion={appVersion}
           isOnline={typeof navigator !== 'undefined' ? navigator.onLine : true}
-          onTriggerSyncNow={async () => {
-            await sendWsMessage('TRIGGER_FORCE_BROADCAST', {});
-          }}
+          onTriggerSyncNow={handleRestoreFullRealtimeSync}
           clansCount={clans.length}
           alertsCount={rawAlerts.length}
           ordersCount={activeOrders.length}
@@ -3917,9 +4283,7 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
         onClose={() => setShowMultiDeviceSyncModal(false)}
         appVersion={appVersion}
         isOnline={typeof navigator !== 'undefined' ? navigator.onLine : true}
-        onTriggerSyncNow={async () => {
-          await sendWsMessage('TRIGGER_FORCE_BROADCAST', {});
-        }}
+        onTriggerSyncNow={handleRestoreFullRealtimeSync}
         clansCount={clans.length}
         alertsCount={rawAlerts.length}
         ordersCount={activeOrders.length}
@@ -3936,9 +4300,7 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
         isOnline={typeof navigator !== 'undefined' ? navigator.onLine : true}
         currentLatencyMs={networkLatencyMs}
         tacticalUnits={tacticalUnits}
-        onTriggerSyncAll={async () => {
-          await sendWsMessage('TRIGGER_FORCE_BROADCAST', {});
-        }}
+        onTriggerSyncAll={handleRestoreFullRealtimeSync}
         onBroadcastCustomMessage={(msg) => {
           sendWsMessage('TACTICAL_RADIO_MESSAGE', {
             commsMessage: {

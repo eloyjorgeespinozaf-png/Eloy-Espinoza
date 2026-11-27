@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { User, RawAlert } from '../types';
 import { playSyntheticBeep } from '../utils/audio';
+import { getOrCreateDeviceId } from '../services/MultiDeviceSyncService';
+import { cloudRealtimeMesh } from '../services/CloudRealtimeMesh';
 
 interface TacticalP2PMeshProps {
   user: User | null;
@@ -478,24 +480,53 @@ export default function TacticalP2PMesh({ user, sendWsMessage, rawAlerts, onAddP
     handleIncomingPeerMessage(senderId, message, true); // true = isRelayed
   };
 
-  // Wire up incoming socket signals from the central routing server
+  // Wire up incoming socket & CloudRealtimeMesh signals for P2P mesh discovery and WebRTC/Relay
   useEffect(() => {
+    let expressConfirmed = false;
+    const localDeviceId = getOrCreateDeviceId();
+
+    const syncPeersFromCloudMesh = () => {
+      if (expressConfirmed) return;
+      const cloudDevices = cloudRealtimeMesh.getConnectedDevices().filter(d => d.isOnline);
+      if (cloudDevices.length === 0) return;
+      const mappedPeers: PeerInfo[] = cloudDevices.map(d => ({
+        id: d.deviceId,
+        userId: d.deviceId,
+        name: d.userName || d.deviceName || d.deviceId,
+        role: d.role || 'ROL_PATRULLA',
+        level: d.role === 'ROL_PATRULLA' || d.role === 'ROL_TERRENO' ? 1 : d.role === 'ROL_FUSION' ? 2 : 3,
+        connectedAt: d.connectedAt || new Date().toISOString()
+      }));
+      setPeers(mappedPeers);
+    };
+
     const handleP2PSignal = (e: Event) => {
       const { type, payload } = (e as CustomEvent).detail;
       
       if (type === 'P2P_REGISTER_CONFIRM') {
+        expressConfirmed = true;
         setMyNodeId(payload.nodeId);
         addSystemLog(`Nodo registrado doctrinalmente. ID asignado: [${payload.nodeId}]`);
       } else if (type === 'P2P_PEERS_LIST') {
+        expressConfirmed = true;
         setPeers(payload.peers);
       } else if (type === 'P2P_SIGNALING') {
-        handleSignaling(payload.senderNodeId, payload.signal);
+        if (!payload?.targetNodeId || payload.targetNodeId === myNodeId || payload.targetNodeId === localDeviceId) {
+          handleSignaling(payload.senderNodeId, payload.signal);
+        }
       } else if (type === 'P2P_RELAY_MESSAGE') {
-        handleRelayedMessage(payload.senderNodeId, payload.message);
+        if (!payload?.targetNodeId || payload.targetNodeId === myNodeId || payload.targetNodeId === localDeviceId) {
+          handleRelayedMessage(payload.senderNodeId, payload.message);
+        }
       }
     };
 
+    const handleCloudDevicesUpdate = () => {
+      syncPeersFromCloudMesh();
+    };
+
     window.addEventListener('p2p-message', handleP2PSignal);
+    window.addEventListener('synced-devices-update', handleCloudDevicesUpdate);
 
     // Initial Registration
     if (user) {
@@ -504,13 +535,24 @@ export default function TacticalP2PMesh({ user, sendWsMessage, rawAlerts, onAddP
         userId: user.id,
         name: user.name,
         role: user.role,
-        level: user.role === 'ROL_PATRULLA' ? 1 : user.role === 'ROL_FUSION' ? 2 : 3
+        level: user.role === 'ROL_PATRULLA' || user.role === 'ROL_TERRENO' ? 1 : user.role === 'ROL_FUSION' ? 2 : 3
       });
     }
 
+    // Fallback to Cloud Realtime Mesh node ID on Vercel / static deployments where Express WS is not active
+    const cloudFallbackTimer = setTimeout(() => {
+      if (!expressConfirmed) {
+        setMyNodeId(prev => prev || localDeviceId);
+        syncPeersFromCloudMesh();
+        addSystemLog(`Malla Global Cloud P2P-C2 activa. Nodo asignado: [${localDeviceId}]`);
+      }
+    }, 800);
+
     // Cleanup peer connections on unmount
     return () => {
+      clearTimeout(cloudFallbackTimer);
       window.removeEventListener('p2p-message', handleP2PSignal);
+      window.removeEventListener('synced-devices-update', handleCloudDevicesUpdate);
       
       // Close all peer connections
       Object.values(pcsRef.current).forEach(pc => pc.close());

@@ -1,6 +1,6 @@
 {
-  "version": "v2.6.7-OTA",
-  "buildId": "ais-build-2026-11-26-tactical-radio-ptt",
-  "builtAt": "2026-11-27T02:20:00.000Z",
-  "changelog": "Nuevo Canal de Radio Táctico VHF en Tiempo Real con voz PTT en vivo, reproducción de transmisiones, 4 frecuencias (Conjunta, Mando-Fusión, Búsqueda-Terreno y Emergencia CH-4), presencia en vivo de terminales en sintonía y códigos breves tácticos."
+  "version": "v2.6.8-OTA",
+  "buildId": "ais-build-2026-11-26-full-realtime-sync-restore",
+  "builtAt": "2026-11-27T03:05:00.000Z",
+  "changelog": "Restablecimiento integral de sincronización en tiempo real entre todas las terminales (Web, Vercel, PWA móvil/escritorio) con reconexión automática, buffer de acciones, convergencia por snapshot e hidratación completa en nube Supabase de reportes S-2, inteligencia CFI, órdenes OOA, patrullas GPS, expedientes G-2, clanes, operadores, fondos y radio VHF PTT."
 }

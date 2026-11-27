@@ -17,6 +17,7 @@ import { NewG2RecordModal } from './fusion/NewG2RecordModal';
 import { TacticalPhotoViewerModal } from './fusion/TacticalPhotoViewerModal';
 import { TacticalRouteManagerModal, DEFAULT_TACTICAL_ROUTES } from './fusion/TacticalRouteManagerModal';
 import { safeStorage } from '../utils/storage';
+import { cloudRealtimeMesh } from '../services/CloudRealtimeMesh';
 import {
   TrendingUp,
   Database,
@@ -160,6 +161,18 @@ export default function OperationalView({
   });
   const [isRouteModalOpen, setIsRouteModalOpen] = useState<boolean>(false);
 
+  // Sync CFI Tactical Routes in real time from remote terminals
+  useEffect(() => {
+    const handleRemoteRoutes = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (Array.isArray(detail?.routes) && detail.routes.length > 0) {
+        setTacticalRoutes(detail.routes);
+      }
+    };
+    window.addEventListener('pii-lcc-remote-routes-sync', handleRemoteRoutes);
+    return () => window.removeEventListener('pii-lcc-remote-routes-sync', handleRemoteRoutes);
+  }, []);
+
   const handleSaveTacticalRoute = (route: TacticalRoute) => {
     setTacticalRoutes(prev => {
       const exists = prev.some(r => r.id === route.id);
@@ -169,6 +182,7 @@ export default function OperationalView({
       } catch (e) {
         console.error(e);
       }
+      cloudRealtimeMesh.broadcastAction('SYNC_TACTICAL_ROUTES', { routes: updated }).catch(() => {});
       return updated;
     });
     setRouteId(route.name);
@@ -182,6 +196,7 @@ export default function OperationalView({
       } catch (e) {
         console.error(e);
       }
+      cloudRealtimeMesh.broadcastAction('SYNC_TACTICAL_ROUTES', { routes: updated }).catch(() => {});
       return updated;
     });
   };

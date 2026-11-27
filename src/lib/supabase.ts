@@ -413,6 +413,165 @@ export async function upsertRawAlertInSupabase(alert: RawAlert): Promise<{ ok: b
 }
 
 /**
+ * Direct granular persistence for Actionable Intelligence (CFI validated reports)
+ */
+export async function upsertActionableIntelInSupabase(intel: ActionableIntel): Promise<{ ok: boolean; error?: string }> {
+  if (!intel || !intel.id) return { ok: false, error: 'Inteligencia inválida' };
+  try {
+    const row = {
+      id: intel.id,
+      title: intel.title || 'Inteligencia CFI',
+      description: intel.recommendedAction || '',
+      clan_name: intel.targetClan || 'Desconocido',
+      threat_level: String(intel.threatScore ?? 80),
+      coordinates: intel.coordinates || '19°13\'10"S 68°35\'50"W',
+      confidence_score: Number(intel.threatScore) || 80,
+      validated_by: intel.validatedBy || 'CFI',
+      timestamp: toSafeIsoTimestamp(intel.timestamp),
+      action_recommended: intel.recommendedAction || '',
+      source: intel.rawAlertId || '',
+      metadata: { ...intel }
+    };
+    const { error } = await supabase.from('actionable_intel').upsert([row], { onConflict: 'id' });
+    if (error) {
+      console.warn('[Supabase] Error guardando inteligencia CFI:', error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción guardando inteligencia CFI:', err?.message || err);
+    return { ok: false, error: err?.message || 'Error de red' };
+  }
+}
+
+/**
+ * Direct granular persistence for Automated Orders (OOA issued by CEO-LCC)
+ */
+export async function upsertAutomatedOrderInSupabase(order: AutomatedOrder): Promise<{ ok: boolean; error?: string }> {
+  if (!order || !order.id) return { ok: false, error: 'Orden inválida' };
+  try {
+    const row = {
+      id: order.id,
+      intel_id: order.intelId || null,
+      patrol_target: order.assignedUnit || 'Patrulla',
+      objective: order.objective || 'Misión Táctica',
+      mission_type: order.codeName || 'TACTICA',
+      urgency: 'ALTA',
+      status: order.status || 'ISSUED',
+      issued_at: toSafeIsoTimestamp(order.timestamp),
+      signature: order.issuer || 'CEO-LCC',
+      coordinates: order.coordinates || '19°13\'10"S 68°35\'50"W',
+      metadata: { ...order }
+    };
+    const { error } = await supabase.from('automated_orders').upsert([row], { onConflict: 'id' });
+    if (error) {
+      console.warn('[Supabase] Error guardando orden OOA:', error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción guardando orden OOA:', err?.message || err);
+    return { ok: false, error: err?.message || 'Error de red' };
+  }
+}
+
+/**
+ * Direct granular persistence for G-2 Expedientes
+ */
+export async function upsertExpedienteInSupabase(exp: G2RegistryRecord): Promise<{ ok: boolean; error?: string }> {
+  if (!exp || !exp.id) return { ok: false, error: 'Expediente inválido' };
+  try {
+    const row = {
+      id: exp.id,
+      code: exp.id,
+      title: exp.contenidoDetallado ? exp.contenidoDetallado.slice(0, 80) : exp.id,
+      clan_id: null,
+      classification: exp.clasificacionSeguridad || 'SECRETO',
+      status: exp.estadoRegistro || 'Pendiente',
+      created_at: toSafeIsoTimestamp(exp.createdAt),
+      updated_at: toSafeIsoTimestamp(exp.updatedAt),
+      analyst_id: exp.operadorRegistro || 'G-2',
+      content: exp
+    };
+    const { error } = await supabase.from('expedientes').upsert([row], { onConflict: 'id' });
+    if (error) {
+      console.warn('[Supabase] Error guardando expediente G-2:', error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción guardando expediente G-2:', err?.message || err);
+    return { ok: false, error: err?.message || 'Error de red' };
+  }
+}
+
+export async function deleteExpedienteFromSupabase(expedienteId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!expedienteId) return { ok: false, error: 'ID inválido' };
+  try {
+    const { error } = await supabase.from('expedientes').delete().eq('id', expedienteId);
+    if (error) {
+      console.warn('[Supabase] Error eliminando expediente G-2:', error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción eliminando expediente G-2:', err?.message || err);
+    return { ok: false, error: err?.message || 'Error de red' };
+  }
+}
+
+/**
+ * Direct granular persistence for Clans / Criminal Networks
+ */
+export async function upsertClanInSupabase(clan: Clan): Promise<{ ok: boolean; error?: string }> {
+  if (!clan || !clan.id) return { ok: false, error: 'Clan inválido' };
+  try {
+    const row = {
+      id: clan.id,
+      name: clan.name,
+      threat_level: clan.threatLevel,
+      members_count: Number(clan.membersCount) || 0,
+      routes: clan.knownRoutes || [],
+      hotspots: clan.recentHotspots || [],
+      tactics: clan.tactics || '',
+      last_active: clan.lastActive || '',
+      phone_numbers: clan.phoneNumbers || clan.interceptedPhones || [],
+      radio_frequencies: clan.radioFrequencies || clan.interceptedFrequencies || [],
+      vehicles: clan.vehicles || [],
+      key_leaders: clan.keyLeaders || [],
+      seizures: clan.seizures || [],
+      notes: clan.notes || '',
+      metadata: { ...clan },
+      updated_at: new Date().toISOString()
+    };
+    const { error } = await supabase.from('clans').upsert([row], { onConflict: 'id' });
+    if (error) {
+      console.warn('[Supabase] Error guardando clan:', error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción guardando clan:', err?.message || err);
+    return { ok: false, error: err?.message || 'Error de red' };
+  }
+}
+
+export async function deleteClanFromSupabase(clanId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!clanId) return { ok: false, error: 'ID inválido' };
+  try {
+    const { error } = await supabase.from('clans').delete().eq('id', clanId);
+    if (error) {
+      console.warn('[Supabase] Error eliminando clan:', error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción eliminando clan:', err?.message || err);
+    return { ok: false, error: err?.message || 'Error de red' };
+  }
+}
+
+/**
  * Direct granular persistence for System Users (`system_users`)
  */
 export async function upsertSystemUserInSupabase(user: User): Promise<{ ok: boolean; error?: string }> {

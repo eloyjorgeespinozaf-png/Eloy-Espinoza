@@ -209,16 +209,17 @@ export const NetworkPresenceMonitor: React.FC<NetworkPresenceMonitorProps> = ({
 
   const handleTriggerSyncNow = async () => {
     setIsSyncing(true);
-    setSyncStatusNotice('Transmitiendo estado unificado a todos los dispositivos en red...');
+    setSyncStatusNotice('Restableciendo enlace en tiempo real y sincronizando todas las funciones...');
     playSyntheticBeep(920, 0.15);
     try {
       await onTriggerSyncAll();
       await triggerForceBroadcastAcrossAllDevices();
       await refreshDevices();
-      setSyncStatusNotice('¡Todos los terminales sincronizados exitosamente!');
-      setTimeout(() => setSyncStatusNotice(null), 3500);
+      setCloudConnected(cloudRealtimeMesh.getIsConnected());
+      setSyncStatusNotice('¡Enlace restablecido y todas las terminales sincronizadas en tiempo real!');
+      setTimeout(() => setSyncStatusNotice(null), 4000);
     } catch {
-      setSyncStatusNotice('Aviso: Transmisión completada mediante puente de relevo.');
+      setSyncStatusNotice('Aviso: Sincronización completada mediante malla en nube y puente de relevo.');
       setTimeout(() => setSyncStatusNotice(null), 3500);
     } finally {
       setIsSyncing(false);
