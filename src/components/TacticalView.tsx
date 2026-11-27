@@ -829,16 +829,18 @@ export default function TacticalView({
       finalMediaUrl = multimediaPreset;
     }
 
-    // Derive realistic origin sector from coordinates
-    let detectedSector = 'Sector Occidental Fronterizo';
-    if (coordinates.includes('68°34') || coordinates.includes('68°37')) {
-      detectedSector = 'Hito 14 - Frontera Chileno-Boliviana';
-    } else if (coordinates.includes('68°15') || coordinates.includes('Coipasa')) {
-      detectedSector = 'Salar de Coipasa (Sector Challapata)';
-    } else if (coordinates.includes('69°02') || coordinates.includes('Tambo')) {
-      detectedSector = 'Paso Tambo Quemado - Charaña';
-    } else if (coordinates.includes('Pisiga')) {
-      detectedSector = 'Paso No Habilitado Pisiga';
+    // Derive realistic origin sector from active patrol sector or coordinates
+    let detectedSector = selectedUnitDetails?.sector?.trim() || 'Territorio Nacional Bolivia';
+    if (!selectedUnitDetails?.sector) {
+      if (coordinates.includes('68°34') || coordinates.includes('68°37')) {
+        detectedSector = 'Hito 14 - Frontera Chileno-Boliviana';
+      } else if (coordinates.includes('68°15') || coordinates.includes('Coipasa')) {
+        detectedSector = 'Salar de Coipasa (Sector Challapata)';
+      } else if (coordinates.includes('69°02') || coordinates.includes('Tambo')) {
+        detectedSector = 'Paso Tambo Quemado - Charaña';
+      } else if (coordinates.includes('Pisiga')) {
+        detectedSector = 'Paso No Habilitado Pisiga';
+      }
     }
 
     const newReport: RawAlert = {

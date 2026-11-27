@@ -435,18 +435,23 @@ ${recommendedAction}
     e.preventDefault();
     if (!reportDetails.trim()) return;
 
+    const effectiveCoords = (reportCoordinates || '').trim() || patrol.coordinates || '19°13\'10"S 68°35\'50"W';
     const newReport: RawAlert = {
       id: `raw-${Date.now().toString().slice(-4)}`,
       sourceType: reportType,
       sourceName: `${patrol.name} (${sensorId})`,
-      coordinates: reportCoordinates,
+      coordinates: effectiveCoords,
       timestamp: new Date().toISOString(),
       details: reportDetails,
       reliability,
       certainty,
       status: 'PENDING',
       clandestineRouteId: routeId,
-      mediaUrl: capturedPhotoUrl || (reportType === 'IMINT' ? multimediaPreset : undefined)
+      mediaUrl: capturedPhotoUrl || (reportType === 'IMINT' ? multimediaPreset : undefined),
+      operatorName: patrol.commander ? `${patrol.commander} (${patrol.name})` : patrol.name,
+      originUnit: patrol.name,
+      originSector: patrol.sector || 'Territorio Nacional Bolivia',
+      transmissionChannel: `Canal VHF Táctico ${patrol.frequency || '142.850 MHz'}`
     };
 
     onSendFieldReport(newReport);

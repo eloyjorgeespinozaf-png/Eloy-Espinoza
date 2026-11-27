@@ -381,6 +381,38 @@ export async function fetchTacticalUnitsFromSupabase(): Promise<TacticalUnit[] |
 }
 
 /**
+ * Direct granular persistence for Raw Alerts (S-2 Field Reports transmitted to CFI)
+ */
+export async function upsertRawAlertInSupabase(alert: RawAlert): Promise<{ ok: boolean; error?: string }> {
+  if (!alert || !alert.id) return { ok: false, error: 'Alerta inválida' };
+  try {
+    const row = {
+      id: alert.id,
+      type: alert.sourceType || 'HUMINT',
+      title: alert.sourceName || 'Alerta S-2',
+      description: alert.details || '',
+      coordinates: alert.coordinates || '19°13\'10"S 68°35\'50"W',
+      timestamp: toSafeIsoTimestamp(alert.timestamp),
+      status: alert.status || 'PENDING',
+      priority: `${alert.reliability || 'B'}${alert.certainty || '2'}`,
+      source_sensor: alert.operatorName || alert.originUnit || alert.originSector || '',
+      media_url: alert.mediaUrl || null,
+      audio_url: null,
+      metadata: { ...alert }
+    };
+    const { error } = await supabase.from('raw_alerts').upsert([row], { onConflict: 'id' });
+    if (error) {
+      console.warn('[Supabase] Error guardando reporte crudo S-2:', error.message);
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    console.warn('[Supabase] Excepción guardando reporte crudo S-2:', err?.message || err);
+    return { ok: false, error: err?.message || 'Error de red' };
+  }
+}
+
+/**
  * Direct granular persistence for System Users (`system_users`)
  */
 export async function upsertSystemUserInSupabase(user: User): Promise<{ ok: boolean; error?: string }> {

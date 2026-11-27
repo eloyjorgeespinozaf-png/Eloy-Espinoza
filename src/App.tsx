@@ -75,7 +75,8 @@ import {
   fetchTacticalUnitsFromSupabase,
   upsertTacticalUnitInSupabase,
   upsertAllTacticalUnitsInSupabase,
-  deleteTacticalUnitFromSupabase
+  deleteTacticalUnitFromSupabase,
+  upsertRawAlertInSupabase
 } from './lib/supabase';
 import { 
   playSyntheticBeep, 
@@ -975,10 +976,15 @@ export default function App() {
         case 'SEND_FIELD_REPORT': {
           const report = payload?.report;
           if (report?.id) {
-            setRawAlerts(prev => (prev.some(a => a.id === report.id) ? prev : [report, ...prev]));
+            setRawAlerts(prev => {
+              if (prev.some(a => a.id === report.id)) return prev;
+              const next = [report, ...prev];
+              safeLocalStorage.setItem('PII_LCC_RAW_ALERTS', JSON.stringify(next));
+              return next;
+            });
             playSyntheticBeep(1100, 0.06);
             setRealtimeSyncToast({
-              message: `Alerta S-2 recibida de ${senderDeviceName}: ${report.sourceName || 'Reporte táctico'}`,
+              message: `Reporte crudo S-2 recibido de ${senderDeviceName}: ${report.sourceName || 'Reporte táctico'}`,
               timestamp: Date.now()
             });
           }
@@ -1812,8 +1818,13 @@ export default function App() {
 
   const handleSendFieldReport = (report: RawAlert) => {
     if (!validateBackendPermission('ROL_PATRULLA', 'Enviar Registro de Búsqueda de Campo (S-2)', report.coordinates)) return;
-    setRawAlerts(prev => [report, ...prev]);
+    setRawAlerts(prev => {
+      const next = prev.some(a => a.id === report.id) ? prev : [report, ...prev];
+      safeLocalStorage.setItem('PII_LCC_RAW_ALERTS', JSON.stringify(next));
+      return next;
+    });
     sendWsMessage('SEND_FIELD_REPORT', { report });
+    void upsertRawAlertInSupabase(report);
   };
 
   const handleUpdateUnitCoordinates = (unitNameOrId: string, newCoords: string) => {

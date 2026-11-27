@@ -23,7 +23,10 @@ import {
   Compass,
   Route,
   RotateCcw,
-  Target
+  Target,
+  AlertTriangle,
+  Radio,
+  X
 } from 'lucide-react';
 
 interface PatrolTrackingRadarProps {
@@ -31,7 +34,9 @@ interface PatrolTrackingRadarProps {
   rawAlerts?: RawAlert[];
   actionableIntel?: ActionableIntel[];
   selectedUnitName?: string | null;
+  selectedAlertId?: string | null;
   onSelectUnit?: (unitName: string) => void;
+  onSelectAlert?: (alert: RawAlert) => void;
   onOpenGoogleEarth?: (unit: TacticalUnit) => void;
   height?: number | string;
   isCompact?: boolean;
@@ -166,24 +171,34 @@ function buildPatrolMarkerIcon(
   });
 }
 
-function buildAlertMarkerIcon(alert: RawAlert): L.DivIcon {
+function buildAlertMarkerIcon(alert: RawAlert, isSelected: boolean): L.DivIcon {
   const isPending = alert.status === 'PENDING';
-  const safeLabel = escapeHtml(`${alert.sourceType} (${(alert.sourceName || 'S-2').slice(0, 12)})`);
+  const accentColor = isPending ? '#f97316' : '#10b981';
+  const originShort = (alert.originUnit || alert.sourceName || 'S-2').slice(0, 16);
+  const safeLabel = escapeHtml(`⚠ ${alert.sourceType} • ${originShort}`);
+  const ringStyle = isSelected
+    ? 'box-shadow:0 0 0 3px #facc15, 0 0 20px rgba(250,204,21,0.9);'
+    : `box-shadow:0 0 14px ${accentColor}cc;`;
+
   return L.divIcon({
     className: 'cfi-live-alert-marker',
     html: `
-      <div style="position:relative;display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-50%);">
-        <div style="position:relative;width:20px;height:20px;display:flex;align-items:center;justify-content:center;">
+      <div style="position:relative;display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-50%);pointer-events:auto;cursor:pointer;">
+        <div style="position:relative;width:28px;height:28px;display:flex;align-items:center;justify-content:center;">
           ${
             isPending
-              ? '<span style="position:absolute;inset:-4px;border-radius:9999px;border:2px solid #f97316;opacity:0.65;animation:ping 1.6s cubic-bezier(0,0,0.2,1) infinite;"></span>'
+              ? '<span style="position:absolute;inset:-6px;border-radius:9999px;border:2.5px solid #f97316;opacity:0.8;animation:ping 1.4s cubic-bezier(0,0,0.2,1) infinite;"></span>'
               : ''
           }
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="#f97316" stroke="#070b12" stroke-width="2" xmlns="http://www.w3.org/2000/svg">
-            <polygon points="12,3 22,20 2,20" />
-          </svg>
+          <div style="width:24px;height:24px;border-radius:6px;background:rgba(28,12,4,0.95);border:2px solid ${accentColor};${ringStyle}display:flex;align-items:center;justify-content:center;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="${accentColor}" stroke="#070b12" stroke-width="1.8" xmlns="http://www.w3.org/2000/svg">
+              <polygon points="12,2 22,20 2,20" />
+            </svg>
+          </div>
         </div>
-        <div style="margin-top:1px;background:rgba(15,10,5,0.88);border:1px solid rgba(249,115,22,0.75);color:#fdba74;font-family:monospace;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;white-space:nowrap;">
+        <div style="margin-top:2px;background:rgba(20,10,4,0.94);border:1.5px solid ${
+          isSelected ? '#facc15' : accentColor
+        };color:${isSelected ? '#fef08a' : '#fed7aa'};font-family:monospace;font-size:9.5px;font-weight:800;padding:1.5px 6px;border-radius:4px;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,0.85);">
           ${safeLabel}
         </div>
       </div>
@@ -197,12 +212,17 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
   tacticalUnits = [],
   rawAlerts = [],
   selectedUnitName = null,
+  selectedAlertId = null,
   onSelectUnit,
+  onSelectAlert,
   onOpenGoogleEarth,
   height = 460,
   title = 'CENTRO DE FUSIÓN (CFI) // MAPA DE SEGUIMIENTO DE PATRULLAS EN VIVO'
 }) => {
   const [internalSelectedUnit, setInternalSelectedUnit] = useState<string | null>(selectedUnitName);
+  const [internalSelectedAlertId, setInternalSelectedAlertId] = useState<string | null>(selectedAlertId);
+  const [rightPanelTab, setRightPanelTab] = useState<'PATROLS' | 'REPORTS'>('PATROLS');
+  const [incomingAlertBanner, setIncomingAlertBanner] = useState<RawAlert | null>(null);
   const [activeLayer, setActiveLayer] = useState<'ALL' | 'UNITS_ONLY' | 'ALERTS_ONLY'>('ALL');
   const [tileMode, setTileMode] = useState<MapTileMode>('GOOGLE_HYBRID');
   const [autoFollow, setAutoFollow] = useState<boolean>(true);
@@ -219,17 +239,63 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
   const markerAnimFramesRef = useRef<Map<string, number>>(new Map());
   const hasFittedInitialBoundsRef = useRef<boolean>(false);
   const onSelectUnitRef = useRef(onSelectUnit);
+  const onSelectAlertRef = useRef(onSelectAlert);
+  const knownAlertIdsRef = useRef<Set<string> | null>(null);
 
   useEffect(() => {
     onSelectUnitRef.current = onSelectUnit;
   }, [onSelectUnit]);
 
-  // Synchronize internal selection with prop
+  useEffect(() => {
+    onSelectAlertRef.current = onSelectAlert;
+  }, [onSelectAlert]);
+
+  // Synchronize internal selection with props
   useEffect(() => {
     if (selectedUnitName !== undefined) {
       setInternalSelectedUnit(selectedUnitName);
+      if (selectedUnitName) {
+        setInternalSelectedAlertId(null);
+      }
     }
   }, [selectedUnitName]);
+
+  useEffect(() => {
+    if (selectedAlertId !== undefined && selectedAlertId !== null) {
+      setInternalSelectedAlertId(selectedAlertId);
+      setInternalSelectedUnit(null);
+    }
+  }, [selectedAlertId]);
+
+  // Auto-detect newly transmitted raw field reports and highlight/focus them live on the map
+  useEffect(() => {
+    if (knownAlertIdsRef.current === null) {
+      knownAlertIdsRef.current = new Set((rawAlerts || []).map((a) => a.id));
+      return;
+    }
+
+    const newlyArrived = (rawAlerts || []).find((a) => !knownAlertIdsRef.current!.has(a.id));
+    (rawAlerts || []).forEach((a) => knownAlertIdsRef.current!.add(a.id));
+
+    if (newlyArrived) {
+      setIncomingAlertBanner(newlyArrived);
+      setInternalSelectedAlertId(newlyArrived.id);
+      setInternalSelectedUnit(null);
+      if (activeLayer === 'UNITS_ONLY') {
+        setActiveLayer('ALL');
+      }
+      const parsed = parseCoordinates(newlyArrived.coordinates);
+      if (parsed && mapInstanceRef.current) {
+        mapInstanceRef.current.flyTo([parsed.lat, parsed.lon], Math.max(mapInstanceRef.current.getZoom(), 11), {
+          duration: 0.9
+        });
+      }
+      const timer = window.setTimeout(() => {
+        setIncomingAlertBanner((curr) => (curr?.id === newlyArrived.id ? null : curr));
+      }, 9000);
+      return () => window.clearTimeout(timer);
+    }
+  }, [rawAlerts, activeLayer]);
 
   // Initialize Leaflet Map once
   useEffect(() => {
@@ -340,8 +406,23 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
 
   const handleSelect = useCallback((unitName: string) => {
     setInternalSelectedUnit((prev) => (prev === unitName ? null : unitName));
+    setInternalSelectedAlertId(null);
     if (onSelectUnitRef.current) {
       onSelectUnitRef.current(unitName);
+    }
+  }, []);
+
+  const handleSelectAlertOnMap = useCallback((alert: RawAlert) => {
+    setInternalSelectedAlertId(alert.id);
+    setInternalSelectedUnit(null);
+    const parsed = parseCoordinates(alert.coordinates);
+    if (parsed && mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo([parsed.lat, parsed.lon], Math.max(mapInstanceRef.current.getZoom(), 12), {
+        duration: 0.75
+      });
+    }
+    if (onSelectAlertRef.current) {
+      onSelectAlertRef.current(alert);
     }
   }, []);
 
@@ -479,7 +560,7 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
     }
   }, [tacticalUnits, activeLayer, internalSelectedUnit, trailHistory, headings, handleSelect]);
 
-  // Render S-2 Field Detection Alerts on Map
+  // Render Raw S-2 Field Reports on Map (never hidden behind patrols; with radar ring & leader line)
   useEffect(() => {
     const alertsLayer = alertsLayerRef.current;
     if (!alertsLayer) return;
@@ -487,43 +568,75 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
     alertsLayer.clearLayers();
     if (activeLayer !== 'ALL' && activeLayer !== 'ALERTS_ONLY') return;
 
-    (rawAlerts || []).forEach((alert) => {
+    const unitPositions: { lat: number; lon: number }[] = [];
+    (tacticalUnits || []).forEach((u) => {
+      const p = parseCoordinates(u.coordinates);
+      if (p) unitPositions.push(p);
+    });
+
+    const placedAlertPositions: { lat: number; lon: number }[] = [];
+
+    (rawAlerts || []).forEach((alert, idx) => {
       const parsed = parseCoordinates(alert.coordinates);
       if (!parsed) return;
 
-      const marker = L.marker([parsed.lat, parsed.lon], {
-        icon: buildAlertMarkerIcon(alert),
-        zIndexOffset: 250
+      const isSelected = internalSelectedAlertId === alert.id;
+      const isPending = alert.status === 'PENDING';
+
+      // Draw pulsing tactical radar circle centered on exact GPS coordinate of the raw report
+      L.circle([parsed.lat, parsed.lon], {
+        radius: isSelected ? 2200 : isPending ? 1500 : 900,
+        color: isSelected ? '#facc15' : isPending ? '#f97316' : '#10b981',
+        weight: isSelected ? 2.5 : 1.5,
+        dashArray: isPending ? '5 5' : undefined,
+        fillColor: isPending ? '#f97316' : '#10b981',
+        fillOpacity: isSelected ? 0.2 : 0.1
+      }).addTo(alertsLayer);
+
+      // Anti-overlap: if a patrol or another alert occupies the exact same spot, offset beacon slightly NE and draw leader line
+      let markerLat = parsed.lat;
+      let markerLon = parsed.lon;
+      const overlapsPatrol = unitPositions.some(
+        (up) => Math.hypot(up.lat - parsed.lat, up.lon - parsed.lon) < 0.0028
+      );
+      const overlapsAlertCount = placedAlertPositions.filter(
+        (ap) => Math.hypot(ap.lat - parsed.lat, ap.lon - parsed.lon) < 0.0028
+      ).length;
+
+      if (overlapsPatrol || overlapsAlertCount > 0) {
+        const angle = ((overlapsAlertCount + (overlapsPatrol ? 1 : 0)) * 55 + idx * 17) * (Math.PI / 180);
+        const radiusDeg = 0.0032 + overlapsAlertCount * 0.0014;
+        markerLat = parsed.lat + Math.sin(angle) * radiusDeg;
+        markerLon = parsed.lon + Math.cos(angle) * radiusDeg;
+
+        L.polyline(
+          [
+            [parsed.lat, parsed.lon],
+            [markerLat, markerLon]
+          ],
+          {
+            color: isSelected ? '#facc15' : '#f97316',
+            weight: 1.5,
+            dashArray: '3 3',
+            opacity: 0.9
+          }
+        ).addTo(alertsLayer);
+      }
+
+      placedAlertPositions.push({ lat: markerLat, lon: markerLon });
+
+      const marker = L.marker([markerLat, markerLon], {
+        icon: buildAlertMarkerIcon(alert, isSelected),
+        zIndexOffset: isSelected ? 1150 : 850
       });
 
-      // Safe DOM popup construction (no unsanitized innerHTML)
-      const popupEl = document.createElement('div');
-      popupEl.style.fontFamily = 'monospace';
-      popupEl.style.fontSize = '11px';
-      popupEl.style.maxWidth = '230px';
+      marker.on('click', () => {
+        handleSelectAlertOnMap(alert);
+      });
 
-      const titleEl = document.createElement('div');
-      titleEl.style.fontWeight = '700';
-      titleEl.style.color = '#ea580c';
-      titleEl.textContent = `${alert.sourceType} // ${alert.sourceName}`;
-      popupEl.appendChild(titleEl);
-
-      const coordEl = document.createElement('div');
-      coordEl.style.fontSize = '10px';
-      coordEl.style.marginTop = '3px';
-      coordEl.textContent = `GPS: ${alert.coordinates}`;
-      popupEl.appendChild(coordEl);
-
-      const detailsEl = document.createElement('div');
-      detailsEl.style.marginTop = '4px';
-      detailsEl.style.fontSize = '10px';
-      detailsEl.textContent = (alert.details || '').slice(0, 140);
-      popupEl.appendChild(detailsEl);
-
-      marker.bindPopup(popupEl);
       marker.addTo(alertsLayer);
     });
-  }, [rawAlerts, activeLayer]);
+  }, [rawAlerts, tacticalUnits, activeLayer, internalSelectedAlertId, handleSelectAlertOnMap]);
 
   const activeUnit = useMemo(() => {
     return tacticalUnits.find((u) => u.name === internalSelectedUnit) || null;
@@ -532,6 +645,18 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
   const activeUnitParsed = useMemo(() => {
     return activeUnit ? parseCoordinates(activeUnit.coordinates) : null;
   }, [activeUnit]);
+
+  const activeAlert = useMemo(() => {
+    return (rawAlerts || []).find((a) => a.id === internalSelectedAlertId) || null;
+  }, [rawAlerts, internalSelectedAlertId]);
+
+  const activeAlertParsed = useMemo(() => {
+    return activeAlert ? parseCoordinates(activeAlert.coordinates) : null;
+  }, [activeAlert]);
+
+  const pendingAlertsCount = useMemo(() => {
+    return (rawAlerts || []).filter((a) => a.status === 'PENDING').length;
+  }, [rawAlerts]);
 
   // Auto-follow selected patrol in real time as it moves on Maps
   useEffect(() => {
@@ -581,10 +706,18 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
     const map = mapInstanceRef.current;
     if (!map) return;
     const points: [number, number][] = [];
-    tacticalUnits.forEach((u) => {
-      const parsed = parseCoordinates(u.coordinates);
-      if (parsed) points.push([parsed.lat, parsed.lon]);
-    });
+    if (activeLayer !== 'ALERTS_ONLY') {
+      tacticalUnits.forEach((u) => {
+        const parsed = parseCoordinates(u.coordinates);
+        if (parsed) points.push([parsed.lat, parsed.lon]);
+      });
+    }
+    if (activeLayer !== 'UNITS_ONLY') {
+      (rawAlerts || []).forEach((a) => {
+        const parsed = parseCoordinates(a.coordinates);
+        if (parsed) points.push([parsed.lat, parsed.lon]);
+      });
+    }
     if (points.length === 0) {
       map.flyTo(BOLIVIA_CENTER, 6, { duration: 0.7 });
     } else if (points.length === 1) {
@@ -596,6 +729,7 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
 
   const handleFocusUnitOnMap = (unit: TacticalUnit) => {
     setInternalSelectedUnit(unit.name);
+    setInternalSelectedAlertId(null);
     if (onSelectUnitRef.current) {
       onSelectUnitRef.current(unit.name);
     }
@@ -643,7 +777,7 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
               </span>
             </div>
             <p className="text-[10px] text-slate-400 font-mono">
-              {tacticalUnits.length} Unidades en red // Seguimiento de movimiento y trayectoria GPS sobre mapa real
+              {tacticalUnits.length} Patrullas en red • {rawAlerts.length} Reportes Crudos S-2 ({pendingAlertsCount} pendientes) // Seguimiento en vivo sobre mapa real
             </p>
           </div>
         </div>
@@ -695,7 +829,7 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
                 activeLayer === 'ALERTS_ONLY' ? 'bg-orange-500 text-white font-bold' : 'text-slate-400 hover:text-white'
               }`}
             >
-              ALERTAS S-2
+              REPORTES S-2 ({rawAlerts.length})
             </button>
           </div>
 
@@ -750,6 +884,39 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
             style={{ height: mapHeightStyle }}
           />
 
+          {/* Incoming Raw Field Report Live Notification Banner (Top Left/Center) */}
+          {incomingAlertBanner && (
+            <div className="absolute top-3 left-12 right-3 sm:right-auto sm:max-w-md z-[450] bg-[#1d0d04]/95 backdrop-blur-md border-2 border-orange-500 rounded-xl px-3 py-2 shadow-[0_0_25px_rgba(249,115,22,0.5)] flex items-center justify-between gap-2 animate-fade-in">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full bg-orange-400 animate-ping shrink-0" />
+                <div className="min-w-0 text-[10px] font-mono">
+                  <div className="text-orange-300 font-bold uppercase truncate">
+                    NUEVO REPORTE CRUDO S-2 • {incomingAlertBanner.sourceType}
+                  </div>
+                  <div className="text-white truncate">
+                    {incomingAlertBanner.originUnit || incomingAlertBanner.sourceName} — {incomingAlertBanner.coordinates}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleSelectAlertOnMap(incomingAlertBanner)}
+                  className="px-2 py-1 rounded bg-orange-500 hover:bg-orange-400 text-black font-bold text-[9px] font-mono cursor-pointer"
+                >
+                  Centrar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIncomingAlertBanner(null)}
+                  className="p-1 text-orange-300 hover:text-white cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Live HUD Legend Overlay (Bottom Left) */}
           <div className="absolute bottom-3 left-3 z-[400] bg-[#080d1a]/90 backdrop-blur-md border border-[#1e2738] p-2.5 rounded-lg text-[9px] font-mono space-y-1 shadow-lg text-left pointer-events-none">
             <div className="flex items-center gap-1.5">
@@ -763,14 +930,99 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
               <span className="text-slate-300">En Interdicción Directa</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 bg-[#f97316] rounded-full inline-block" />
-              <span className="text-slate-300">Detección Órgano S-2</span>
+              <span className="w-2.5 h-2.5 bg-[#f97316] rounded-sm inline-block animate-pulse" />
+              <span className="text-orange-300 font-bold">
+                Reportes Crudos S-2 ({rawAlerts.length})
+              </span>
             </div>
             <div className="flex items-center gap-1.5 pt-0.5 border-t border-[#1e2738] text-cyan-300">
               <Route className="w-3 h-3" />
               <span>Estela GPS en vivo • Zoom {mapZoom}x</span>
             </div>
           </div>
+
+          {/* Selected Raw Report Tactical Overlay Card (Top Right) */}
+          {activeAlert && activeAlertParsed && (
+            <div className="absolute top-3 right-3 z-[420] bg-[#140c06]/95 backdrop-blur-md border-2 border-orange-500/75 p-3 rounded-lg text-xs font-mono shadow-2xl animate-fade-in text-left max-w-xs">
+              <div className="flex items-center justify-between gap-2 border-b border-orange-500/30 pb-1.5 mb-2">
+                <div className="flex items-center gap-1.5 text-orange-400 font-bold truncate">
+                  <AlertTriangle className="w-3.5 h-3.5 animate-pulse shrink-0" />
+                  <span className="truncate">REPORTE CRUDO // {activeAlert.sourceType}</span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <span
+                    className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                      activeAlert.status === 'PENDING'
+                        ? 'bg-orange-500/25 text-orange-300 border border-orange-500/50'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    }`}
+                  >
+                    {activeAlert.status}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setInternalSelectedAlertId(null)}
+                    className="text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1 text-[10px] text-slate-200">
+                <p className="font-bold text-white truncate">
+                  {activeAlert.originUnit || activeAlert.sourceName}
+                </p>
+                <p>
+                  <span className="text-slate-400">SECTOR:</span>{' '}
+                  <span className="text-orange-200">{activeAlert.originSector || 'Territorio Nacional'}</span>
+                </p>
+                <p>
+                  <span className="text-slate-400">GPS:</span>{' '}
+                  <b className="text-yellow-300">{activeAlert.coordinates}</b>
+                </p>
+                <p>
+                  <span className="text-slate-400">EVALUACIÓN:</span>{' '}
+                  <span className="text-amber-300 font-bold">
+                    {activeAlert.reliability}-{activeAlert.certainty}
+                  </span>{' '}
+                  <span className="text-slate-500">• {formatReportTime(activeAlert.timestamp)}</span>
+                </p>
+                <p className="bg-black/50 p-1.5 rounded border border-orange-500/25 text-slate-200 leading-snug max-h-20 overflow-y-auto">
+                  {activeAlert.details}
+                </p>
+                {activeAlert.mediaUrl &&
+                  (activeAlert.mediaUrl.startsWith('data:image') || activeAlert.mediaUrl.startsWith('http')) && (
+                    <img
+                      src={activeAlert.mediaUrl}
+                      alt="Evidencia del reporte"
+                      className="w-full h-24 object-cover rounded border border-orange-500/40 mt-1"
+                    />
+                  )}
+                <div className="pt-1.5 flex items-center gap-1.5">
+                  <a
+                    href={`https://www.google.com/maps?q=${activeAlertParsed.lat.toFixed(6)},${activeAlertParsed.lon.toFixed(6)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 bg-orange-600/25 hover:bg-orange-600/40 border border-orange-500/60 text-orange-200 text-[9px] font-bold py-1 px-2 rounded flex items-center justify-center gap-1 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Google Maps</span>
+                  </a>
+                  {onSelectAlert && (
+                    <button
+                      type="button"
+                      onClick={() => onSelectAlert(activeAlert)}
+                      className="flex-1 bg-cyan-600/25 hover:bg-cyan-600/40 border border-cyan-500/60 text-cyan-200 text-[9px] font-bold py-1 px-2 rounded flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <Radio className="w-3 h-3" />
+                      <span>Analizar CFI</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Selected Unit Live Movement Telemetry Overlay (Top Right) */}
           {activeUnit && activeUnitParsed && (
@@ -836,20 +1088,108 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
           )}
         </div>
 
-        {/* Right Column: Tactical Units Real-Time Telemetry List */}
+        {/* Right Column: Tactical Units & Live Raw Reports Feed */}
         <div className="lg:col-span-4 bg-[#0a0f1d] p-4 flex flex-col justify-between space-y-3">
           <div className="space-y-3">
-            <div className="flex items-center justify-between border-b border-[#1a2333] pb-2">
-              <div className="flex items-center gap-2 text-white text-xs font-mono font-bold">
-                <Navigation className="w-4 h-4 text-emerald-400" />
-                <span>ESTADO DE PATRULLAS (TELEMETRÍA)</span>
-              </div>
-              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30 font-bold">
-                TIEMPO REAL
-              </span>
+            {/* 2-Tab Switcher: PATRULLAS | REPORTES S-2 */}
+            <div className="flex items-center gap-1.5 border-b border-[#1a2333] pb-2">
+              <button
+                type="button"
+                onClick={() => setRightPanelTab('PATROLS')}
+                className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-mono font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                  rightPanelTab === 'PATROLS'
+                    ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300'
+                    : 'bg-[#0f1526] border-[#1e2738] text-slate-400 hover:text-white'
+                }`}
+              >
+                <Navigation className="w-3.5 h-3.5" />
+                <span>PATRULLAS ({tacticalUnits.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRightPanelTab('REPORTS')}
+                className={`flex-1 py-1.5 px-2 rounded-lg text-[10px] font-mono font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                  rightPanelTab === 'REPORTS'
+                    ? 'bg-orange-500/20 border-orange-500/60 text-orange-300'
+                    : 'bg-[#0f1526] border-[#1e2738] text-slate-400 hover:text-white'
+                }`}
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>REPORTES S-2 ({rawAlerts.length})</span>
+                {pendingAlertsCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-orange-500 text-black text-[9px] font-black animate-pulse">
+                    {pendingAlertsCount}
+                  </span>
+                )}
+              </button>
             </div>
 
-            {/* Scrollable list of units */}
+            {/* Scrollable list: either Patrols or Raw S-2 Reports */}
+            {rightPanelTab === 'REPORTS' ? (
+              <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+                {rawAlerts.length === 0 ? (
+                  <div className="text-center py-8 text-xs font-mono text-slate-500">
+                    No se han transmitido reportes en crudo S-2 todavía.
+                  </div>
+                ) : (
+                  rawAlerts.map((alert) => {
+                    const isSelected = internalSelectedAlertId === alert.id;
+                    const parsed = parseCoordinates(alert.coordinates);
+                    const isPending = alert.status === 'PENDING';
+
+                    return (
+                      <div
+                        key={alert.id}
+                        onClick={() => handleSelectAlertOnMap(alert)}
+                        className={`p-3 rounded-lg border transition-all cursor-pointer text-left space-y-1.5 ${
+                          isSelected
+                            ? 'bg-orange-950/50 border-orange-400 shadow-md ring-1 ring-orange-400/40'
+                            : 'bg-[#120d0a] border-orange-900/40 hover:border-orange-500/60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span
+                              className={`w-2 h-2 rounded-full shrink-0 ${
+                                isPending ? 'bg-orange-400 animate-ping' : 'bg-emerald-400'
+                              }`}
+                            />
+                            <span className="text-[11px] font-mono font-bold text-orange-200 uppercase truncate">
+                              {alert.sourceType} • {alert.originUnit || alert.sourceName}
+                            </span>
+                          </div>
+                          <span
+                            className={`text-[8px] font-mono px-1.5 py-0.5 rounded font-bold shrink-0 ${
+                              isPending
+                                ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40'
+                                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                            }`}
+                          >
+                            {alert.status}
+                          </span>
+                        </div>
+
+                        <p className="text-[10px] font-mono text-slate-200 line-clamp-2 leading-snug">
+                          {alert.details}
+                        </p>
+
+                        <div className="bg-black/50 px-2 py-1 rounded border border-orange-900/30 flex items-center justify-between gap-2 text-[9px] font-mono">
+                          <span className="text-yellow-300 font-bold truncate">{alert.coordinates}</span>
+                          <span className="text-slate-400 shrink-0">{formatReportTime(alert.timestamp)}</span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[9px] font-mono text-slate-400">
+                          <span className="truncate">{alert.originSector || 'Territorio Nacional'}</span>
+                          {parsed && (
+                            <span className="text-orange-300 font-bold shrink-0">Ver en Mapa →</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : (
             <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
               {tacticalUnits.length === 0 ? (
                 <div className="text-center py-8 text-xs font-mono text-slate-500">
@@ -973,6 +1313,7 @@ export const PatrolTrackingRadar: React.FC<PatrolTrackingRadarProps> = ({
                 })
               )}
             </div>
+            )}
           </div>
 
           {/* Quick status bar on footer */}

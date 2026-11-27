@@ -689,10 +689,15 @@ ${recommendedAction}
                 ? 'bg-emerald-600 text-black border-emerald-400'
                 : 'bg-[#0d1626] hover:bg-[#15233c] text-emerald-300 border-emerald-500/40'
             }`}
-            title="Abre el Mapa en Vivo de telemetría y seguimiento de movimiento de patrullas"
+            title="Abre el Mapa en Vivo de telemetría, seguimiento de movimiento de patrullas y reportes crudos S-2"
           >
             <MapPin className="w-4 h-4" />
             <span>Mapa Patrullas</span>
+            {pendingAlerts.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-orange-500 text-black text-[9px] font-black leading-none">
+                {pendingAlerts.length} S-2
+              </span>
+            )}
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
           </button>
 
@@ -726,6 +731,8 @@ ${recommendedAction}
             actionableIntel={actionableIntel}
             selectedUnitName={selectedPatrolForFocus}
             onSelectUnit={(name) => setSelectedPatrolForFocus(name)}
+            selectedAlertId={activeFeedTab === 'S2' ? selectedRecordId : null}
+            onSelectAlert={(alert) => handleSelectAlert(alert)}
             onOpenGoogleEarth={(unit) => {
               setSelectedPatrolForEarth(unit);
               setIsGoogleEarthModalOpen(true);

@@ -465,6 +465,18 @@ export default function StrategicView({
                   tacticalUnits={tacticalUnits}
                   rawAlerts={rawAlerts}
                   actionableIntel={actionableIntel}
+                  selectedAlertId={activeHotspot}
+                  onSelectAlert={(alert) => {
+                    setActiveHotspot(alert.id);
+                    const match = actionableIntel.find(i => i.rawAlertId === alert.id || i.coordinates === alert.coordinates);
+                    if (match) {
+                      handleIntelChange(match.id);
+                    } else {
+                      setCodeName(`OP_${alert.id.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`);
+                      setCustomObjective(`Interdicción táctica inmediata en ${alert.coordinates}: ${alert.details.slice(0, 80)}`);
+                      setAssignedUnit(tacticalUnits[0]?.name || 'Patrulla Delta-3');
+                    }
+                  }}
                   title="CEO-LCC // MAPA EN VIVO DE MOVIMIENTO Y POSICIONES GNSS"
                   onOpenGoogleEarth={(unit) => {
                     setSelectedPatrolForEarth(unit);
@@ -528,6 +540,30 @@ export default function StrategicView({
                   );
                 })}
 
+                {/* Render live Raw Alerts (S-2) on Vector Map */}
+                {(rawAlerts || []).map((alert, idx) => {
+                  const pos = getUnitMapPosition(alert.coordinates, idx + 4);
+                  const rx = Math.min(460, Math.max(30, pos.x + 14));
+                  const ry = Math.min(370, Math.max(30, pos.y - 12));
+                  const isSelected = activeHotspot === alert.id;
+                  const isPending = alert.status === 'PENDING';
+                  const color = isPending ? '#f97316' : alert.status === 'PROCESSED' ? '#22d3ee' : '#71717a';
+                  return (
+                    <g
+                      key={alert.id}
+                      onClick={() => setActiveHotspot(isSelected ? null : alert.id)}
+                      className="cursor-pointer group"
+                    >
+                      <title>{`REPORTE S-2: ${alert.sourceName} (${alert.coordinates})`}</title>
+                      <circle cx={rx} cy={ry} r={isSelected ? '14' : '9'} fill="none" stroke={color} strokeWidth="1.5" className={isPending || isSelected ? 'animate-pulse' : ''} />
+                      <polygon points={`${rx},${ry-6} ${rx+6},${ry} ${rx},${ry+6} ${rx-6},${ry}`} fill={color} stroke="#ffffff" strokeWidth="1" />
+                      <text x={rx + 10} y={ry + 3} fill={isSelected ? '#ffffff' : '#fdba74'} fontSize="8" fontFamily="monospace" fontWeight="bold">
+                        S-2: {alert.sourceName.slice(0, 18)}
+                      </text>
+                    </g>
+                  );
+                })}
+
                 {/* Render interactive Hotspots */}
                 {mapHotspots.map(spot => {
                   const isSelected = activeHotspot === spot.id;
@@ -564,8 +600,12 @@ export default function StrategicView({
                   <span className="text-[#888]">Línea de Límite Fronterizo</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 bg-[#3b82f6] inline-block rotate-45" />
+                  <span className="w-2 h-2 bg-[#10b981] inline-block rotate-45" />
                   <span className="text-[#888]">Patrullas de Terreno Activas</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 bg-[#f97316] inline-block rotate-45" />
+                  <span className="text-orange-300">Reportes Crudos S-2 ({rawAlerts.length})</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-[#f43f5e] inline-block" />
@@ -573,11 +613,40 @@ export default function StrategicView({
                 </div>
               </div>
 
-              {/* Selected hotspot HUD detail */}
+              {/* Selected hotspot or raw alert HUD detail */}
               {activeHotspot && (
-                <div className="absolute top-3 right-3 bg-[#0a0a0a]/95 border border-red-500/20 p-3 rounded-lg text-xs font-mono max-w-[200px] shadow-lg animate-fade-in">
+                <div className="absolute top-3 right-3 bg-[#0a0a0a]/95 border border-orange-500/30 p-3 rounded-lg text-xs font-mono max-w-[230px] shadow-lg animate-fade-in">
                   {(() => {
                     const spot = mapHotspots.find(h => h.id === activeHotspot);
+                    const matchedAlert = rawAlerts.find(a => a.id === activeHotspot);
+                    if (matchedAlert) {
+                      return (
+                        <div className="space-y-1.5 text-left">
+                          <p className="font-bold text-orange-300 border-b border-orange-500/20 pb-1 flex items-center gap-1">
+                            <Radio className="w-3 h-3 text-orange-400 animate-pulse" />
+                            S-2: {matchedAlert.sourceName}
+                          </p>
+                          <p className="text-[10px] text-cyan-300">COORD: {matchedAlert.coordinates}</p>
+                          <p className="text-[10px] text-zinc-300 line-clamp-3">{matchedAlert.details}</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const match = actionableIntel.find(i => i.rawAlertId === matchedAlert.id || i.coordinates === matchedAlert.coordinates);
+                              if (match) {
+                                handleIntelChange(match.id);
+                              } else {
+                                setCodeName(`OP_${matchedAlert.id.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`);
+                                setCustomObjective(`Interdicción táctica inmediata en ${matchedAlert.coordinates}: ${matchedAlert.details.slice(0, 80)}`);
+                                setAssignedUnit(tacticalUnits[0]?.name || 'Patrulla Delta-3');
+                              }
+                            }}
+                            className="w-full mt-1 bg-orange-600/25 hover:bg-orange-600/40 text-orange-300 border border-orange-500/40 rounded px-2 py-1 text-[10px] font-bold transition-colors cursor-pointer"
+                          >
+                            Emitir Orden para Reporte S-2
+                          </button>
+                        </div>
+                      );
+                    }
                     return spot ? (
                       <div className="space-y-1.5 text-left">
                         <p className="font-bold text-white border-b border-[#1a1a1a] pb-1 flex items-center gap-1">
