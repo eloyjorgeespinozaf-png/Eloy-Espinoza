@@ -54,6 +54,7 @@ import DataStorageManagerModal from './components/DataStorageManagerModal';
 import SupabaseSyncModal from './components/SupabaseSyncModal';
 import { MultiDeviceSyncModal } from './components/MultiDeviceSyncModal';
 import { NetworkPresenceMonitor } from './components/NetworkPresenceMonitor';
+import { TacticalRadioPanel } from './components/TacticalRadioPanel';
 import { requestDeviceLocation, getCachedDeviceLocation, detectDevicePlatform } from './utils/deviceLocation';
 import { generateDeviceRealLocationKml, downloadKmlFile } from './utils/geo';
 import { 
@@ -68,7 +69,7 @@ import {
 } from './services/MultiDeviceSyncService';
 import { cloudRealtimeMesh, CloudMeshActionPacket } from './services/CloudRealtimeMesh';
 
-import { Shield, Radio, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2, Smartphone, Laptop, Image as ImageIcon, Palette, Globe, Crown, Database, HardDrive, Users, Save, Cloud, X } from 'lucide-react';
+import { Shield, Radio, Mic, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2, Smartphone, Laptop, Image as ImageIcon, Palette, Globe, Crown, Database, HardDrive, Users, Save, Cloud, X } from 'lucide-react';
 import { useAuth, PRESET_USERS } from './context/AuthContext';
 import { safeStorage } from './utils/storage';
 import {
@@ -198,6 +199,22 @@ export default function App() {
   const [showSupabaseModal, setShowSupabaseModal] = useState<boolean>(false);
   const [showMultiDeviceSyncModal, setShowMultiDeviceSyncModal] = useState<boolean>(false);
   const [showNetworkPresenceMonitor, setShowNetworkPresenceMonitor] = useState<boolean>(false);
+  const [showTacticalRadio, setShowTacticalRadio] = useState<boolean>(false);
+  const [radioSummary, setRadioSummary] = useState<{
+    connected: boolean;
+    totalUnread: number;
+    onlineCount: number;
+    isReceiving: boolean;
+    isTransmitting: boolean;
+    activeChannelCode: string;
+  }>({
+    connected: false,
+    totalUnread: 0,
+    onlineCount: 1,
+    isReceiving: false,
+    isTransmitting: false,
+    activeChannelCode: 'CH-1'
+  });
   const [showCodeViewerModal, setShowCodeViewerModal] = useState<boolean>(false);
   const [syncedDevicesCount, setSyncedDevicesCount] = useState<number>(1);
   const [networkLatencyMs, setNetworkLatencyMs] = useState<number | null>(null);
@@ -2726,6 +2743,42 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
                 </span>
               </button>
 
+              {/* Real-Time Multi-Organ Tactical VHF PTT Radio Channel Button */}
+              <button
+                type="button"
+                id="btn-header-tactical-radio"
+                onClick={() => {
+                  setShowTacticalRadio((prev) => !prev);
+                  playCyberClick('laser', 0.08);
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer text-xs font-mono font-bold whitespace-nowrap active:scale-95 ${
+                  radioSummary.isTransmitting || radioSummary.isReceiving
+                    ? 'bg-rose-950/90 hover:bg-rose-900 text-rose-100 border-rose-400 shadow-[0_0_18px_rgba(244,63,94,0.45)] animate-pulse'
+                    : showTacticalRadio
+                      ? 'bg-emerald-600 text-black border-emerald-300 shadow-[0_0_16px_rgba(16,185,129,0.45)]'
+                      : 'bg-emerald-950/75 hover:bg-emerald-900 text-emerald-300 hover:text-white border-emerald-500/70 shadow-[0_0_12px_rgba(16,185,129,0.28)]'
+                }`}
+                title="Canal de Radio Táctico VHF en Tiempo Real (Voz PTT y Mensajes entre Mando, Fusión, Búsqueda y Terreno)"
+              >
+                <Mic className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden lg:inline">
+                  {radioSummary.isTransmitting
+                    ? 'TX AL AIRE'
+                    : radioSummary.isReceiving
+                      ? 'RX AL AIRE'
+                      : 'Radio Táctica'}
+                </span>
+                <span className="lg:hidden">Radio</span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded font-bold border border-current/30 bg-black/25">
+                  {radioSummary.activeChannelCode}
+                </span>
+                {radioSummary.totalUnread > 0 && (
+                  <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-orange-500 text-black font-black">
+                    {radioSummary.totalUnread}
+                  </span>
+                )}
+              </button>
+
               {/* Copy Source Code Global Button */}
               <button
                 type="button"
@@ -3899,6 +3952,25 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
         onUpdateUnitCoords={handleUpdateUnitCoordinates}
       />
 
+      {/* Real-Time Multi-Organ Tactical VHF PTT Radio Channel (Mando <-> Fusión <-> Búsqueda <-> Terreno) */}
+      <TacticalRadioPanel
+        operatorName={
+          user?.name ||
+          (currentRole === 'ROL_CEO'
+            ? 'GRAL. E. MARTÍNEZ'
+            : currentRole === 'ROL_FUSION'
+              ? 'TTE. CNEL. S. ROJAS'
+              : currentRole === 'ROL_BUSQUEDA'
+                ? 'MY. R. VARGAS'
+                : 'CB1. F. VALENZUELA')
+        }
+        role={currentRole}
+        organName={user?.organName}
+        isOpen={showTacticalRadio}
+        onToggleOpen={setShowTacticalRadio}
+        onStatusChange={setRadioSummary}
+      />
+
       {/* Comprehensive Source Code Viewer & Copier Modal */}
       {showCodeViewerModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md animate-fade-in">
@@ -3928,6 +4000,29 @@ SISTEMA DE SEGURIDAD CAD-C2 DE LÍNEA DE CONTROL CLANDESTINA
              currentRole === 'ROL_BUSQUEDA' ? 'S-2' : 'PATRULLA'}
           </span>
         </div>
+
+        {/* Mobile Action 0: Canal de Radio Táctico PTT en Tiempo Real */}
+        <button
+          type="button"
+          id="btn-mobile-dock-radio"
+          onClick={() => {
+            setShowTacticalRadio((prev) => !prev);
+            playCyberClick('laser', 0.08);
+          }}
+          className={`flex-1 min-w-0 flex items-center justify-center gap-1 py-2 px-1.5 rounded-lg border transition-all cursor-pointer text-[11px] font-mono font-bold active:scale-95 ${
+            radioSummary.isTransmitting || radioSummary.isReceiving
+              ? 'bg-rose-900 text-white border-rose-400 animate-pulse'
+              : showTacticalRadio
+                ? 'bg-emerald-600 text-black border-emerald-300'
+                : 'bg-emerald-950/90 hover:bg-emerald-900 text-emerald-200 border-emerald-500/80'
+          }`}
+          title="Canal de Radio Táctico VHF en Tiempo Real (PTT)"
+        >
+          <Mic className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">
+            Radio{radioSummary.totalUnread > 0 ? ` (${radioSummary.totalUnread})` : ''}
+          </span>
+        </button>
 
         {/* Mobile Action 1: Monitor de Red y Sincronización en Tiempo Real */}
         <button

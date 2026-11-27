@@ -1,6 +1,6 @@
 {
-  "version": "v2.6.6-OTA",
-  "buildId": "ais-build-2026-11-26-live-gps-terminal-fix",
-  "builtAt": "2026-11-27T01:35:00.000Z",
-  "changelog": "El botón GPS en Vivo ahora siempre actualiza y sobrescribe las coordenadas predeterminadas con la ubicación real actual de la terminal mediante adquisición multi-nivel (GNSS satelital, posicionamiento Wi-Fi/OS y respaldo de red IP) con confirmación inmediata debajo del campo y sincronización en vivo con CFI y mapas."
+  "version": "v2.6.7-OTA",
+  "buildId": "ais-build-2026-11-26-tactical-radio-ptt",
+  "builtAt": "2026-11-27T02:20:00.000Z",
+  "changelog": "Nuevo Canal de Radio Táctico VHF en Tiempo Real con voz PTT en vivo, reproducción de transmisiones, 4 frecuencias (Conjunta, Mando-Fusión, Búsqueda-Terreno y Emergencia CH-4), presencia en vivo de terminales en sintonía y códigos breves tácticos."
 }

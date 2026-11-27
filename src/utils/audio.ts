@@ -583,3 +583,91 @@ export function initCyberAudioListener(): () => void {
     window.removeEventListener('click', handleClick, { capture: true });
   };
 }
+
+/**
+ * Tono táctico VHF de apertura de transmisión PTT (Push-To-Talk)
+ */
+export function playRadioPttStart(volume = 0.09): void {
+  if (isAudioMuted()) return;
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    const dest = getMasterNode(ctx);
+
+    // Short squelch click + ascending VHF carrier chirp
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1050, t);
+    osc.frequency.exponentialRampToValueAtTime(1480, t + 0.055);
+
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(volume, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.065);
+
+    osc.connect(gain);
+    gain.connect(dest);
+    osc.start(t);
+    osc.stop(t + 0.075);
+  } catch {}
+}
+
+/**
+ * Clásico "Roger Beep" militar de cierre de transmisión VHF
+ */
+export function playRadioRogerBeep(volume = 0.09): void {
+  if (isAudioMuted()) return;
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    const dest = getMasterNode(ctx);
+
+    const tones = [
+      { freq: 1320, start: 0, dur: 0.055 },
+      { freq: 990, start: 0.06, dur: 0.075 }
+    ];
+    tones.forEach((tone) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(tone.freq, t + tone.start);
+      gain.gain.setValueAtTime(0.001, t + tone.start);
+      gain.gain.linearRampToValueAtTime(volume, t + tone.start + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + tone.start + tone.dur);
+      osc.connect(gain);
+      gain.connect(dest);
+      osc.start(t + tone.start);
+      osc.stop(t + tone.start + tone.dur + 0.01);
+    });
+  } catch {}
+}
+
+/**
+ * Alerta prioritaria de Canal 4 (Emergencia / Interdicción)
+ */
+export function playRadioEmergencyTone(volume = 0.12): void {
+  if (isAudioMuted()) return;
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    const dest = getMasterNode(ctx);
+
+    [0, 0.13, 0.26].forEach((offset, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(idx % 2 === 0 ? 1560 : 1180, t + offset);
+      gain.gain.setValueAtTime(0.001, t + offset);
+      gain.gain.linearRampToValueAtTime(volume, t + offset + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + offset + 0.1);
+      osc.connect(gain);
+      gain.connect(dest);
+      osc.start(t + offset);
+      osc.stop(t + offset + 0.11);
+    });
+  } catch {}
+}
+
