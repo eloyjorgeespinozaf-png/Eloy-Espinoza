@@ -2,17 +2,22 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * Gestor y Hook de Telemetría GNSS / GPS en Vivo del Dispositivo Físico (PII-LCC)
- * Provee geolocalización real de alta precisión para teléfonos, tablets y laptops
+ * Provee geolocalización real multi-nivel (GNSS Alta Precisión -> Red OS/Wi-Fi -> Geolocalización IP Terminal)
+ * para teléfonos, tablets y laptops/PCs en cualquier navegador o entorno instalado.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { convertToDMS, formatToMilitaryDMS } from './geo';
 import { safeStorage } from './storage';
 
+export type LocationFixSource = 'GNSS_HIGH' | 'NETWORK_BROWSER' | 'IP_FALLBACK' | 'CACHED';
+
 export interface DeviceLocationState {
   lat: number;
   lon: number;
   dms: string;
+  dmsLat?: string;
+  dmsLon?: string;
   accuracy: number | null; // en metros
   altitude: number | null; // en metros s.n.m.
   altitudeAccuracy: number | null;
@@ -23,6 +28,10 @@ export interface DeviceLocationState {
   isLive: boolean;
   deviceType: string;
   error: string | null;
+  source?: LocationFixSource;
+  sourceLabel?: string;
+  locationName?: string | null;
+  browserPermissionDenied?: boolean;
 }
 
 const STORAGE_KEY = 'PII_LCC_DEVICE_REAL_GPS';
@@ -61,10 +70,13 @@ export function getCachedDeviceLocation(): DeviceLocationState | null {
     const raw = safeStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed.lat === 'number' && typeof parsed.lon === 'number') {
+      if (parsed && typeof parsed.lat === 'number' && typeof parsed.lon === 'number' && (parsed.lat !== 0 || parsed.lon !== 0)) {
         return {
           ...parsed,
-          isLive: false // Se marca como cached hasta la siguiente fijación por satélite
+          dmsLat: parsed.dmsLat || convertToDMS(parsed.lat, true),
+          dmsLon: parsed.dmsLon || convertToDMS(parsed.lon, false),
+          isLive: false, // Se marca como cached hasta la siguiente fijación
+          source: parsed.source || 'CACHED'
         };
       }
     }
@@ -85,91 +97,239 @@ export function saveCachedDeviceLocation(loc: DeviceLocationState): void {
   }
 }
 
-/**
- * Solicita una lectura física única de alta precisión vía Geolocation API
- */
-export function requestDeviceLocation(): Promise<DeviceLocationState> {
+function buildStateFromGeoPosition(
+  pos: GeolocationPosition,
+  source: 'GNSS_HIGH' | 'NETWORK_BROWSER'
+): DeviceLocationState {
+  const { latitude, longitude, accuracy, altitude, altitudeAccuracy, heading, speed } = pos.coords;
+  const dmsLat = convertToDMS(latitude, true);
+  const dmsLon = convertToDMS(longitude, false);
+  const dmsStr = `${dmsLat} ${dmsLon}`;
+  const roundedAcc = accuracy !== undefined && Number.isFinite(accuracy) ? Math.round(accuracy) : null;
+
+  return {
+    lat: latitude,
+    lon: longitude,
+    dms: dmsStr,
+    dmsLat,
+    dmsLon,
+    accuracy: roundedAcc,
+    altitude: altitude !== null && altitude !== undefined ? Math.round(altitude) : null,
+    altitudeAccuracy: altitudeAccuracy ? Math.round(altitudeAccuracy) : null,
+    heading: heading !== null && heading !== undefined ? Math.round(heading) : null,
+    speed: speed !== null && speed !== undefined ? Math.round(speed * 3.6) : null,
+    timestamp: pos.timestamp || Date.now(),
+    isoTime: new Date(pos.timestamp || Date.now()).toISOString(),
+    isLive: true,
+    deviceType: detectDevicePlatform(),
+    error: null,
+    source,
+    sourceLabel: source === 'GNSS_HIGH' ? 'GPS Satelital (Alta Precisión)' : 'Posicionamiento OS / Wi-Fi',
+    locationName: null,
+    browserPermissionDenied: false
+  };
+}
+
+function getBrowserPositionOnce(options: PositionOptions): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      const errState: DeviceLocationState = {
-        lat: 0,
-        lon: 0,
-        dms: 'NO DISPONIBLE',
-        accuracy: null,
-        altitude: null,
-        altitudeAccuracy: null,
-        heading: null,
-        speed: null,
-        timestamp: Date.now(),
-        isoTime: new Date().toISOString(),
-        isLive: false,
-        deviceType: detectDevicePlatform(),
-        error: 'El dispositivo o navegador no soporta geolocalización satelital (GPS).'
-      };
-      reject(errState);
+      reject({ code: 0, message: 'Geolocalización no soportada' });
       return;
     }
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
+}
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude, accuracy, altitude, altitudeAccuracy, heading, speed } = pos.coords;
-        const dmsStr = formatToMilitaryDMS(latitude, longitude);
+async function fetchWithTimeout(url: string, timeoutMs = 4000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal, cache: 'no-store' });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Fallback real de geolocalización por IP pública directa desde el navegador de la terminal.
+ * Resuelve la ubicación física aproximada de la terminal cuando el sensor GNSS/Windows Location
+ * no está disponible o está bloqueado por políticas del navegador/iframe.
+ */
+async function resolveClientIpLocation(browserPermissionDenied: boolean): Promise<DeviceLocationState | null> {
+  const providers: Array<{
+    url: string;
+    parse: (data: any) => { lat: number; lon: number; label: string | null } | null;
+  }> = [
+    {
+      url: 'https://ipwho.is/',
+      parse: (d) => {
+        if (!d || d.success === false) return null;
+        const lat = Number(d.latitude);
+        const lon = Number(d.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        const parts = [d.city, d.region, d.country].filter(Boolean);
+        return { lat, lon, label: parts.length ? parts.join(', ') : null };
+      }
+    },
+    {
+      url: 'https://get.geojs.io/v1/ip/geo.json',
+      parse: (d) => {
+        if (!d) return null;
+        const lat = Number(d.latitude);
+        const lon = Number(d.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        const parts = [d.city, d.region, d.country].filter(Boolean);
+        return { lat, lon, label: parts.length ? parts.join(', ') : null };
+      }
+    },
+    {
+      url: 'https://ipapi.co/json/',
+      parse: (d) => {
+        if (!d || d.error) return null;
+        const lat = Number(d.latitude);
+        const lon = Number(d.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        const parts = [d.city, d.region, d.country_name].filter(Boolean);
+        return { lat, lon, label: parts.length ? parts.join(', ') : null };
+      }
+    }
+  ];
+
+  for (const provider of providers) {
+    try {
+      const resp = await fetchWithTimeout(provider.url, 4000);
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      const parsed = provider.parse(data);
+      if (parsed && (parsed.lat !== 0 || parsed.lon !== 0)) {
+        const dmsLat = convertToDMS(parsed.lat, true);
+        const dmsLon = convertToDMS(parsed.lon, false);
         const state: DeviceLocationState = {
-          lat: latitude,
-          lon: longitude,
-          dms: dmsStr,
-          accuracy: accuracy !== undefined ? Math.round(accuracy) : null,
-          altitude: altitude !== null && altitude !== undefined ? Math.round(altitude) : null,
-          altitudeAccuracy: altitudeAccuracy ? Math.round(altitudeAccuracy) : null,
-          heading: heading !== null && heading !== undefined ? Math.round(heading) : null,
-          speed: speed !== null && speed !== undefined ? Math.round(speed * 3.6) : null, // km/h
-          timestamp: pos.timestamp || Date.now(),
-          isoTime: new Date(pos.timestamp || Date.now()).toISOString(),
-          isLive: true,
-          deviceType: detectDevicePlatform(),
-          error: null
-        };
-        saveCachedDeviceLocation(state);
-        resolve(state);
-      },
-      (err) => {
-        let msg = 'Error en el sensor GPS.';
-        if (err.code === err.PERMISSION_DENIED) {
-          msg = 'Permiso de ubicación denegado en este dispositivo. Habilite el acceso en configuración.';
-        } else if (err.code === err.POSITION_UNAVAILABLE) {
-          msg = 'Señal satelital GPS no disponible en este momento.';
-        } else if (err.code === err.TIMEOUT) {
-          msg = 'Tiempo límite de espera satelital agotado.';
-        }
-        const cached = getCachedDeviceLocation();
-        const state: DeviceLocationState = {
-          lat: cached?.lat || 0,
-          lon: cached?.lon || 0,
-          dms: cached?.dms || 'NO DISPONIBLE',
-          accuracy: cached?.accuracy || null,
-          altitude: cached?.altitude || null,
+          lat: parsed.lat,
+          lon: parsed.lon,
+          dms: `${dmsLat} ${dmsLon}`,
+          dmsLat,
+          dmsLon,
+          accuracy: 2500,
+          altitude: null,
           altitudeAccuracy: null,
           heading: null,
           speed: null,
           timestamp: Date.now(),
           isoTime: new Date().toISOString(),
-          isLive: false,
+          isLive: true,
           deviceType: detectDevicePlatform(),
-          error: msg
+          error: null,
+          source: 'IP_FALLBACK',
+          sourceLabel: 'Red IP de la Terminal',
+          locationName: parsed.label,
+          browserPermissionDenied
         };
-        reject(state);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 12000,
-        maximumAge: 0
+        saveCachedDeviceLocation(state);
+        return state;
       }
-    );
-  });
+    } catch {
+      // Try next provider
+    }
+  }
+  return null;
+}
+
+/**
+ * Solicita una lectura física real y fresca de la ubicación de la terminal con cascada automática:
+ * 1) GNSS de alta precisión (enableHighAccuracy: true, maximumAge: 0)
+ * 2) Posicionamiento OS / Wi-Fi del navegador (enableHighAccuracy: false, maximumAge: 0)
+ * 3) Geolocalización por Red IP directa de la terminal (si el GPS del navegador falla o está bloqueado)
+ */
+export async function requestDeviceLocation(options?: {
+  allowIpFallback?: boolean;
+}): Promise<DeviceLocationState> {
+  const allowIpFallback = options?.allowIpFallback !== false;
+  let lastErrorMsg = 'Señal satelital GPS no disponible en este momento.';
+  let permissionDenied = false;
+
+  if (typeof navigator !== 'undefined' && navigator.geolocation) {
+    // Nivel 1: GPS/GNSS de alta precisión (sin caché)
+    try {
+      const highPos = await getBrowserPositionOnce({
+        enableHighAccuracy: true,
+        timeout: 6000,
+        maximumAge: 0
+      });
+      const state = buildStateFromGeoPosition(highPos, 'GNSS_HIGH');
+      saveCachedDeviceLocation(state);
+      return state;
+    } catch (err1: any) {
+      if (err1?.code === 1) {
+        permissionDenied = true;
+        lastErrorMsg = 'Permiso de ubicación denegado en el navegador.';
+      } else if (err1?.code === 2) {
+        lastErrorMsg = 'Sensor GNSS físico no disponible; intentando posicionamiento por red Wi-Fi/OS.';
+      } else if (err1?.code === 3) {
+        lastErrorMsg = 'Tiempo de espera satelital agotado; intentando posicionamiento por red Wi-Fi/OS.';
+      }
+
+      // Nivel 2: Posicionamiento OS / Wi-Fi del navegador (clave para PCs Windows, laptops e interiores)
+      if (!permissionDenied) {
+        try {
+          const netPos = await getBrowserPositionOnce({
+            enableHighAccuracy: false,
+            timeout: 6500,
+            maximumAge: 0
+          });
+          const state = buildStateFromGeoPosition(netPos, 'NETWORK_BROWSER');
+          saveCachedDeviceLocation(state);
+          return state;
+        } catch (err2: any) {
+          if (err2?.code === 1) {
+            permissionDenied = true;
+            lastErrorMsg = 'Permiso de ubicación denegado en el navegador.';
+          } else if (err2?.code === 2) {
+            lastErrorMsg = 'Ubicación del sistema operativo temporalmente no disponible.';
+          } else if (err2?.code === 3) {
+            lastErrorMsg = 'Tiempo límite de espera GPS agotado.';
+          }
+        }
+      }
+    }
+  } else {
+    lastErrorMsg = 'El navegador no expone la API de geolocalización satelital.';
+  }
+
+  // Nivel 3: Geolocalización real por Red IP directa de la terminal (garantiza actualizar el punto donde está la terminal)
+  if (allowIpFallback) {
+    const ipState = await resolveClientIpLocation(permissionDenied);
+    if (ipState) {
+      return ipState;
+    }
+  }
+
+  const cached = getCachedDeviceLocation();
+  const errState: DeviceLocationState = {
+    lat: cached?.lat || 0,
+    lon: cached?.lon || 0,
+    dms: cached?.dms || 'NO DISPONIBLE',
+    dmsLat: cached?.dmsLat,
+    dmsLon: cached?.dmsLon,
+    accuracy: cached?.accuracy || null,
+    altitude: cached?.altitude || null,
+    altitudeAccuracy: null,
+    heading: null,
+    speed: null,
+    timestamp: Date.now(),
+    isoTime: new Date().toISOString(),
+    isLive: false,
+    deviceType: detectDevicePlatform(),
+    error: lastErrorMsg,
+    source: 'CACHED',
+    browserPermissionDenied: permissionDenied
+  };
+  throw errState;
 }
 
 /**
  * Inicia monitoreo continuo (watchPosition) de la posición real del dispositivo
+ * con degradación automática de alta precisión a red OS/Wi-Fi si el hardware GNSS no responde.
  */
 export function watchDevicePosition(
   onUpdate: (data: DeviceLocationState) => void,
@@ -180,51 +340,64 @@ export function watchDevicePosition(
     return () => {};
   }
 
-  const watchId = navigator.geolocation.watchPosition(
-    (pos) => {
-      const { latitude, longitude, accuracy, altitude, altitudeAccuracy, heading, speed } = pos.coords;
-      const dmsStr = formatToMilitaryDMS(latitude, longitude);
-      const state: DeviceLocationState = {
-        lat: latitude,
-        lon: longitude,
-        dms: dmsStr,
-        accuracy: accuracy !== undefined ? Math.round(accuracy) : null,
-        altitude: altitude !== null && altitude !== undefined ? Math.round(altitude) : null,
-        altitudeAccuracy: altitudeAccuracy ? Math.round(altitudeAccuracy) : null,
-        heading: heading !== null && heading !== undefined ? Math.round(heading) : null,
-        speed: speed !== null && speed !== undefined ? Math.round(speed * 3.6) : null,
-        timestamp: pos.timestamp || Date.now(),
-        isoTime: new Date(pos.timestamp || Date.now()).toISOString(),
-        isLive: true,
-        deviceType: detectDevicePlatform(),
-        error: null
-      };
-      saveCachedDeviceLocation(state);
-      onUpdate(state);
-    },
-    (err) => {
-      let msg = 'Error en seguimiento GPS.';
-      if (err.code === err.PERMISSION_DENIED) {
-        msg = 'Permiso GPS denegado por el usuario.';
-      } else if (err.code === err.POSITION_UNAVAILABLE) {
-        msg = 'Ubicación física temporalmente no disponible.';
-      } else if (err.code === err.TIMEOUT) {
-        msg = 'Demora en recepción satelital GPS.';
+  let activeWatchId: number | null = null;
+  let stopped = false;
+  let usingFallbackMode = false;
+
+  const startWatch = (highAccuracy: boolean) => {
+    if (stopped) return;
+    if (activeWatchId !== null) {
+      try {
+        navigator.geolocation.clearWatch(activeWatchId);
+      } catch {
+        // ignore
       }
-      if (onError) onError(msg);
-    },
-    {
-      enableHighAccuracy: true,
-      maximumAge: 1000,
-      timeout: 15000
     }
-  );
+
+    activeWatchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        if (stopped) return;
+        const state = buildStateFromGeoPosition(pos, highAccuracy ? 'GNSS_HIGH' : 'NETWORK_BROWSER');
+        saveCachedDeviceLocation(state);
+        onUpdate(state);
+      },
+      (err) => {
+        if (stopped) return;
+        // Si alta precisión falla por timeout o sensor no disponible, cambiar automáticamente a Wi-Fi/OS
+        if (highAccuracy && !usingFallbackMode && err.code !== err.PERMISSION_DENIED) {
+          usingFallbackMode = true;
+          startWatch(false);
+          return;
+        }
+        let msg = 'Error en seguimiento GPS.';
+        if (err.code === err.PERMISSION_DENIED) {
+          msg = 'Permiso GPS denegado por el usuario.';
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          msg = 'Ubicación física temporalmente no disponible.';
+        } else if (err.code === err.TIMEOUT) {
+          msg = 'Demora en recepción satelital GPS.';
+        }
+        if (onError) onError(msg);
+      },
+      {
+        enableHighAccuracy: highAccuracy,
+        maximumAge: highAccuracy ? 1000 : 5000,
+        timeout: highAccuracy ? 8000 : 12000
+      }
+    );
+  };
+
+  startWatch(true);
 
   return () => {
-    try {
-      navigator.geolocation.clearWatch(watchId);
-    } catch (e) {
-      console.warn('[PII-LCC GPS] clearWatch error:', e);
+    stopped = true;
+    if (activeWatchId !== null) {
+      try {
+        navigator.geolocation.clearWatch(activeWatchId);
+      } catch (e) {
+        console.warn('[PII-LCC GPS] clearWatch error:', e);
+      }
+      activeWatchId = null;
     }
   };
 }

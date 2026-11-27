@@ -6,7 +6,8 @@
  * para cada patrulla con acceso individual por contraseña.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { requestDeviceLocation } from '../utils/deviceLocation';
 import { 
   TacticalUnit, 
   AutomatedOrder, 
@@ -167,40 +168,69 @@ export function PatrolOperationalDashboard({
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
   const [isLocatingDevice, setIsLocatingDevice] = useState<boolean>(false);
   const [showGoogleEarthModal, setShowGoogleEarthModal] = useState<boolean>(false);
+  const [gpsFlashActive, setGpsFlashActive] = useState<boolean>(false);
+  const [gpsInlineStatus, setGpsInlineStatus] = useState<{
+    type: 'loading' | 'success' | 'warning' | 'error';
+    text: string;
+    detail?: string;
+  } | null>(null);
+  const lastPatrolIdRef = useRef<string>(patrol.id);
+  const lastLiveCoordsRef = useRef<string | null>(null);
 
-  // Captura inmediata de ubicación actual del dispositivo y sincronización en tiempo real con CFI y Mando
-  const acquireDashboardGpsLocation = () => {
-    if (!navigator.geolocation) {
-      setSuccessBanner("SISTEMA GNSS: Geolocalización no soportada en este navegador.");
-      return;
-    }
+  // Captura inmediata y forzada de la ubicación real de esta terminal (sobrescribe coordenadas predeterminadas)
+  const acquireDashboardGpsLocation = async () => {
     setIsLocatingDevice(true);
+    setGpsInlineStatus({
+      type: 'loading',
+      text: 'Adquiriendo ubicación real de esta terminal (GNSS Satelital / Wi-Fi / Red)...'
+    });
     playSyntheticBeep(800, 0.08);
 
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude, accuracy } = pos.coords;
-        const formatted = formatToMilitaryDMS(latitude, longitude);
-        setReportCoordinates(formatted);
-        const parts = formatted.split(/\s+/);
-        if (parts[0]) setTelemetryLat(parts[0]);
-        if (parts[1]) setTelemetryLon(parts[1]);
-        setIsLocatingDevice(false);
+    try {
+      const loc = await requestDeviceLocation({ allowIpFallback: true });
+      const formatted = loc.dms || formatToMilitaryDMS(loc.lat, loc.lon);
+      lastLiveCoordsRef.current = formatted;
+      setReportCoordinates(formatted);
+      const parts = formatted.split(/\s+/);
+      if (parts[0]) setTelemetryLat(parts[0]);
+      if (parts[1]) setTelemetryLon(parts[1]);
+      setIsLocatingDevice(false);
+      setGpsFlashActive(true);
+      setTimeout(() => setGpsFlashActive(false), 2600);
 
-        // Transmisión inmediata a Central de Fusión y Mando
-        onUpdateUnitCoordinates(patrol.name, formatted);
+      // Transmisión inmediata a Central de Fusión y Mando
+      onUpdateUnitCoordinates(patrol.name, formatted);
 
-        playSyntheticBeep(1200, 0.2);
-        setSuccessBanner(`POSICIÓN GPS EN VIVO TRANSMITIDA: ${patrol.name} fijada en ${formatted} (±${Math.round(accuracy)}m). Sincronizada con CFI.`);
-        setTimeout(() => setSuccessBanner(null), 4000);
-      },
-      (err) => {
-        setIsLocatingDevice(false);
-        setSuccessBanner(`ERROR GPS: ${err.message || "No se pudo adquirir posición."}`);
-        setTimeout(() => setSuccessBanner(null), 4000);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
+      const accuracyTxt = loc.accuracy ? `±${Math.round(loc.accuracy)}m` : 'Aprox.';
+      const placeTxt = loc.locationName ? ` • ${loc.locationName}` : '';
+      const timeTxt = new Date().toLocaleTimeString();
+
+      if (loc.source === 'IP_FALLBACK') {
+        setGpsInlineStatus({
+          type: 'warning',
+          text: `Terminal ubicada vía ${loc.sourceLabel || 'Red IP'}${placeTxt} (${formatted})`,
+          detail: loc.browserPermissionDenied
+            ? `Actualizado ${timeTxt} (${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}). Habilite Ubicación en el navegador para precisión métrica.`
+            : `Actualizado ${timeTxt} (${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}). Posición sincronizada con CFI.`
+        });
+      } else {
+        setGpsInlineStatus({
+          type: 'success',
+          text: `Ubicación real fijada vía ${loc.sourceLabel || 'GNSS'} (${accuracyTxt})${placeTxt}`,
+          detail: `Actualizado ${timeTxt} • ${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)} • Sincronizado con CFI`
+        });
+      }
+
+      playSyntheticBeep(1200, 0.2);
+      setSuccessBanner(`POSICIÓN GPS EN VIVO TRANSMITIDA: ${patrol.name} fijada en ${formatted} (${loc.sourceLabel || 'GNSS'} ${accuracyTxt}${placeTxt}). Sincronizada con CFI.`);
+      setTimeout(() => setSuccessBanner(null), 4500);
+    } catch (err: any) {
+      setIsLocatingDevice(false);
+      const errMsg = err?.error || 'No se pudo adquirir la posición de la terminal.';
+      setGpsInlineStatus({ type: 'error', text: errMsg });
+      setSuccessBanner(`ERROR GPS: ${errMsg}`);
+      setTimeout(() => setSuccessBanner(null), 4500);
+    }
   };
 
   // Pending alerts count
@@ -216,15 +246,28 @@ export function PatrolOperationalDashboard({
 
   const nextExpedienteId = `REG-2026-${String(g2Records.length + 1).padStart(3, '0')}`;
 
-  // Keep coordinates updated if patrol prop updates
+  // Sync coordinates when switching to a different patrol, or when patrol coords match/change externally
   useEffect(() => {
-    if (patrol.coordinates) {
+    const switchedPatrol = lastPatrolIdRef.current !== patrol.id;
+    if (switchedPatrol) {
+      lastPatrolIdRef.current = patrol.id;
+      lastLiveCoordsRef.current = null;
+      setGpsInlineStatus(null);
+      if (patrol.coordinates) {
+        setReportCoordinates(patrol.coordinates);
+        const parts = patrol.coordinates.split(/\s+/);
+        if (parts[0]) setTelemetryLat(parts[0]);
+        if (parts[1]) setTelemetryLon(parts[1]);
+      }
+      return;
+    }
+    if (patrol.coordinates && (!lastLiveCoordsRef.current || patrol.coordinates === lastLiveCoordsRef.current)) {
       setReportCoordinates(patrol.coordinates);
       const parts = patrol.coordinates.split(/\s+/);
       if (parts[0]) setTelemetryLat(parts[0]);
       if (parts[1]) setTelemetryLon(parts[1]);
     }
-  }, [patrol.coordinates]);
+  }, [patrol.id, patrol.coordinates]);
 
   // Extract alert ideas
   const extractAlertIdeas = (alert: RawAlert): string[] => {
@@ -1292,19 +1335,26 @@ ${recommendedAction}
                   <input
                     type="text"
                     value={reportCoordinates || ''}
-                    onChange={(e) => setReportCoordinates(e.target.value)}
-                    className="flex-1 bg-[#121722] text-[#10b981] font-mono font-bold border border-[#22293a] rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-[#10b981]"
+                    onChange={(e) => {
+                      lastLiveCoordsRef.current = e.target.value;
+                      setReportCoordinates(e.target.value);
+                    }}
+                    className={`flex-1 bg-[#121722] font-mono font-bold border rounded-lg px-3 py-2 text-xs focus:outline-none transition-all ${
+                      gpsFlashActive
+                        ? 'border-emerald-400 text-emerald-300 ring-2 ring-emerald-500/40 bg-emerald-950/30'
+                        : 'text-[#10b981] border-[#22293a] focus:border-[#10b981]'
+                    }`}
                   />
                   <button
                     type="button"
-                    onClick={acquireDashboardGpsLocation}
+                    onClick={() => void acquireDashboardGpsLocation()}
                     disabled={isLocatingDevice}
                     className={`px-3 py-2 text-xs font-mono rounded-lg flex items-center gap-1.5 font-bold transition-all shadow-md active:scale-95 cursor-pointer whitespace-nowrap ${
                       isLocatingDevice
                         ? 'bg-emerald-800 text-emerald-200 animate-pulse'
                         : 'bg-emerald-600 hover:bg-emerald-500 text-black'
                     }`}
-                    title="Obtiene la posición geográfica real del dispositivo y la transmite a la CFI y al Mando"
+                    title="Obtiene la posición geográfica real actual de esta terminal y sobrescribe cualquier coordenada predeterminada"
                   >
                     <Navigation className={`w-3.5 h-3.5 ${isLocatingDevice ? 'animate-spin' : ''}`} />
                     <span>{isLocatingDevice ? 'Fijando...' : 'GPS en Vivo'}</span>
@@ -1313,6 +1363,7 @@ ${recommendedAction}
                     type="button"
                     onClick={() => {
                       if (patrol.coordinates) {
+                        lastLiveCoordsRef.current = patrol.coordinates;
                         setReportCoordinates(patrol.coordinates);
                         onUpdateUnitCoordinates(patrol.name, patrol.coordinates);
                         playSyntheticBeep(900, 0.05);
@@ -1336,6 +1387,22 @@ ${recommendedAction}
                     <span>Google Earth (KML)</span>
                   </button>
                 </div>
+                {gpsInlineStatus && (
+                  <div
+                    className={`rounded-lg px-2.5 py-1.5 text-[10px] font-mono border flex flex-col gap-0.5 ${
+                      gpsInlineStatus.type === 'loading'
+                        ? 'bg-cyan-950/40 border-cyan-500/40 text-cyan-200 animate-pulse'
+                        : gpsInlineStatus.type === 'success'
+                          ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                          : gpsInlineStatus.type === 'warning'
+                            ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
+                            : 'bg-rose-950/40 border-rose-500/40 text-rose-300'
+                    }`}
+                  >
+                    <span className="font-bold">{gpsInlineStatus.text}</span>
+                    {gpsInlineStatus.detail && <span className="text-[9px] opacity-85">{gpsInlineStatus.detail}</span>}
+                  </div>
+                )}
               </div>
 
               <div>

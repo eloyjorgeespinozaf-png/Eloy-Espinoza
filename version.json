@@ -1,6 +1,6 @@
 {
-  "version": "v2.6.5-OTA",
-  "buildId": "ais-build-2026-11-26-live-raw-reports-maps",
-  "builtAt": "2026-11-27T01:05:00.000Z",
-  "changelog": "Los reportes en crudo S-2 transmitidos a la Central de Fusión se sincronizan en tiempo real y aparecen automáticamente en el Mapa de Seguimiento de Patrullas en Vivo y en el Centro de Situación // Cuadro Operacional Común con alertas de llegada, marcadores anti-solapamiento y selección directa."
+  "version": "v2.6.6-OTA",
+  "buildId": "ais-build-2026-11-26-live-gps-terminal-fix",
+  "builtAt": "2026-11-27T01:35:00.000Z",
+  "changelog": "El botón GPS en Vivo ahora siempre actualiza y sobrescribe las coordenadas predeterminadas con la ubicación real actual de la terminal mediante adquisición multi-nivel (GNSS satelital, posicionamiento Wi-Fi/OS y respaldo de red IP) con confirmación inmediata debajo del campo y sincronización en vivo con CFI y mapas."
 }

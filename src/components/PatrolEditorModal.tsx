@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { playSyntheticBeep, playChime } from '../utils/audio';
 import { parseCoordinates, formatToMilitaryDMS } from '../utils/geo';
+import { requestDeviceLocation } from '../utils/deviceLocation';
 import {
   resolveBoliviaLocation,
   searchLocalBoliviaLocations,
@@ -654,34 +655,31 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
     }
   };
 
-  const handleUseDeviceGPS = () => {
-    if (!navigator.geolocation) {
-      setGeoFeedback({ type: 'error', text: 'Geolocalización GPS no disponible en este navegador.' });
-      return;
-    }
+  const handleUseDeviceGPS = async () => {
     setIsLocatingGps(true);
-    setGeoFeedback({ type: 'info', text: 'Obteniendo señal GPS del dispositivo...' });
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setIsLocatingGps(false);
-        const { latitude, longitude, accuracy } = pos.coords;
-        applyLatLonPosition(
-          latitude,
-          longitude,
-          `GPS real capturado (±${Math.round(accuracy)}m). Puedes ajustar las coordenadas si lo requieres.`,
-          13
-        );
-        playSyntheticBeep(950, 0.08, 'sine');
-      },
-      () => {
-        setIsLocatingGps(false);
-        setGeoFeedback({
-          type: 'error',
-          text: 'No se pudo obtener el GPS del dispositivo. Verifique permisos o ingrese las coordenadas manualmente.'
-        });
-      },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
+    setGeoFeedback({ type: 'info', text: 'Obteniendo ubicación real de esta terminal (GNSS / Wi-Fi / Red)...' });
+    try {
+      const loc = await requestDeviceLocation({ allowIpFallback: true });
+      setIsLocatingGps(false);
+      const accuracyTxt = loc.accuracy ? `±${Math.round(loc.accuracy)}m` : 'Aprox.';
+      const placeTxt = loc.locationName ? ` (${loc.locationName})` : '';
+      applyLatLonPosition(
+        loc.lat,
+        loc.lon,
+        `Ubicación de terminal fijada vía ${loc.sourceLabel || 'GPS'} (${accuracyTxt})${placeTxt}. Puedes ajustar las coordenadas si lo requieres.`,
+        loc.source === 'IP_FALLBACK' ? 11 : 13
+      );
+      if (loc.locationName && !sector.trim()) {
+        setSector(loc.locationName);
+      }
+      playSyntheticBeep(950, 0.08, 'sine');
+    } catch (err: any) {
+      setIsLocatingGps(false);
+      setGeoFeedback({
+        type: 'error',
+        text: err?.error || 'No se pudo obtener la ubicación de esta terminal. Verifique permisos o ingrese las coordenadas manualmente.'
+      });
+    }
   };
 
   const handleDetectSectorFromPin = async () => {
