@@ -1146,27 +1146,24 @@ async function startServer() {
       return res.json(cached.payload);
     }
 
-    const queryNominatim = async (countryRestrict: boolean) => {
+    const isInsideBolivia = (lat: number, lon: number) =>
+      lat >= -23.05 && lat <= -9.55 && lon >= -69.85 && lon <= -57.35;
+
+    const queryNominatim = async () => {
       const params = new URLSearchParams({
         format: "json",
         addressdetails: "1",
-        limit: "6",
+        limit: "8",
+        countrycodes: "bo",
         q: rawQ
       });
-      if (countryRestrict) {
-        params.set("countrycodes", "bo");
-      } else {
-        // South America / Bolivia border viewbox bias
-        params.set("viewbox", "-70.5,-9.5,-57.0,-23.5");
-        params.set("bounded", "0");
-      }
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
       try {
         const resp = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
           headers: {
-            "User-Agent": "PII-LCC-C4ISR-Bolivia/2.5",
+            "User-Agent": "PII-LCC-C4ISR-Bolivia/2.6",
             "Accept-Language": "es"
           },
           signal: controller.signal
@@ -1179,17 +1176,59 @@ async function startServer() {
       }
     };
 
-    try {
-      let items = await queryNominatim(true);
-      if (items.length === 0) {
-        items = await queryNominatim(false);
+    const queryPhotonBolivia = async () => {
+      const params = new URLSearchParams({
+        q: `${rawQ}, Bolivia`,
+        limit: "8",
+        bbox: "-69.75,-22.95,-57.40,-9.60"
+      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      try {
+        const resp = await fetch(`https://photon.komoot.io/api/?${params.toString()}`, {
+          headers: { "User-Agent": "PII-LCC-C4ISR-Bolivia/2.6" },
+          signal: controller.signal
+        });
+        if (!resp.ok) return [];
+        const data: any = await resp.json();
+        const features = Array.isArray(data?.features) ? data.features : [];
+        return features
+          .map((f: any) => {
+            const coords = f?.geometry?.coordinates;
+            const props = f?.properties || {};
+            if (!Array.isArray(coords) || coords.length < 2) return null;
+            const lon = Number(coords[0]);
+            const lat = Number(coords[1]);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon) || !isInsideBolivia(lat, lon)) return null;
+            const countryCode = String(props.countrycode || "").toLowerCase();
+            if (countryCode && countryCode !== "bo") return null;
+            const name = props.name || props.city || props.town || props.village || rawQ;
+            const department = props.state || props.county || "";
+            const parts = [name, props.city && props.city !== name ? props.city : "", department, "Bolivia"].filter(Boolean);
+            return {
+              name: String(name).slice(0, 100),
+              displayName: parts.join(", ").slice(0, 220),
+              department: String(department).slice(0, 80),
+              lat,
+              lon
+            };
+          })
+          .filter(Boolean);
+      } catch {
+        return [];
+      } finally {
+        clearTimeout(timeoutId);
       }
+    };
 
-      const results = items
+    try {
+      const items = await queryNominatim();
+
+      let results = items
         .map((item: any) => {
           const lat = Number(item?.lat);
           const lon = Number(item?.lon);
-          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+          if (!Number.isFinite(lat) || !Number.isFinite(lon) || !isInsideBolivia(lat, lon)) return null;
           const addr = item?.address || {};
           const department = addr.state || addr.region || addr.county || "";
           const shortName =
@@ -1211,11 +1250,16 @@ async function startServer() {
         })
         .filter(Boolean);
 
+      if (results.length === 0) {
+        results = await queryPhotonBolivia();
+      }
+
       const payload = { results };
       setGeoCache(cacheKey, payload);
       return res.json(payload);
     } catch {
-      return res.json({ results: [] });
+      const photonFallback = await queryPhotonBolivia();
+      return res.json({ results: photonFallback });
     }
   });
 

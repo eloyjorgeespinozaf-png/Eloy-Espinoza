@@ -1,6 +1,6 @@
 {
-  "version": "v2.6.2-OTA",
-  "buildId": "ais-build-2026-11-26-vercel-ota",
-  "builtAt": "2026-11-26T23:45:00.000Z",
-  "changelog": "Soporte completo para despliegues en Vercel: caché sin bloqueo de HTML/SW, actualización OTA automática vía /version.json, geocodificación directa de Bolivia y fondos tácticos predeterminados."
+  "version": "v2.6.4-OTA",
+  "buildId": "ais-build-2026-11-26-bolivia-auto-geo-map",
+  "builtAt": "2026-11-27T00:25:00.000Z",
+  "changelog": "Al incrementar patrullas ahora las coordenadas de cualquier lugar de Bolivia aparecen automáticamente al escribir el nombre; si el lugar no es conocido, se abre el mapa interactivo de Bolivia con mira central en vivo y accesos a los 9 departamentos."
 }

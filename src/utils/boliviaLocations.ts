@@ -26,6 +26,48 @@ export interface ResolvedLocationResult {
   source: 'LOCAL_GAZETTEER' | 'OSM_NOMINATIM';
 }
 
+export const BOLIVIA_BOUNDS = {
+  minLat: -23.05,
+  maxLat: -9.55,
+  minLon: -69.85,
+  maxLon: -57.35,
+  centerLat: -16.2902,
+  centerLon: -63.5887
+} as const;
+
+export function isInsideBolivia(lat: number, lon: number): boolean {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lon) &&
+    lat >= BOLIVIA_BOUNDS.minLat &&
+    lat <= BOLIVIA_BOUNDS.maxLat &&
+    lon >= BOLIVIA_BOUNDS.minLon &&
+    lon <= BOLIVIA_BOUNDS.maxLon
+  );
+}
+
+export interface BoliviaDepartmentView {
+  id: string;
+  label: string;
+  lat: number;
+  lon: number;
+  zoom: number;
+  aliases?: string[];
+}
+
+export const BOLIVIA_DEPARTMENTS: BoliviaDepartmentView[] = [
+  { id: 'ALL', label: 'Todo Bolivia', lat: -16.2902, lon: -63.5887, zoom: 6 },
+  { id: 'LP', label: 'La Paz', lat: -16.2000, lon: -68.1500, zoom: 8, aliases: ['la paz', 'lpz'] },
+  { id: 'OR', label: 'Oruro', lat: -18.5500, lon: -67.6500, zoom: 8, aliases: ['oruro'] },
+  { id: 'PT', label: 'Potosí', lat: -20.5500, lon: -66.6500, zoom: 8, aliases: ['potosi', 'potosí'] },
+  { id: 'CB', label: 'Cochabamba', lat: -17.3935, lon: -65.9500, zoom: 8, aliases: ['cochabamba', 'cbba'] },
+  { id: 'CH', label: 'Chuquisaca', lat: -19.6500, lon: -64.4500, zoom: 8, aliases: ['chuquisaca', 'sucre'] },
+  { id: 'TJ', label: 'Tarija', lat: -21.6500, lon: -64.1500, zoom: 8, aliases: ['tarija'] },
+  { id: 'SC', label: 'Santa Cruz', lat: -17.7500, lon: -61.5000, zoom: 7, aliases: ['santa cruz', 'scz'] },
+  { id: 'BN', label: 'Beni', lat: -13.7500, lon: -65.3500, zoom: 7, aliases: ['beni'] },
+  { id: 'PD', label: 'Pando', lat: -11.1500, lon: -67.5500, zoom: 8, aliases: ['pando'] }
+];
+
 export const BOLIVIA_LOCATIONS: BoliviaLocationEntry[] = [
   // === SANTA CRUZ & FRONTERA ESTE (BRASIL / PARAGUAY) ===
   { name: 'San Matías', department: 'Santa Cruz', zone: 'Frontera Brasil (Este)', lat: -16.3600, lon: -58.4044, freq: '144.250 MHz', aliases: ['san matias', 'frontera mato grosso', 'caceres'] },
@@ -121,7 +163,117 @@ export const BOLIVIA_LOCATIONS: BoliviaLocationEntry[] = [
   { name: 'Sucre', department: 'Chuquisaca', zone: 'Capital Constitucional', lat: -19.0196, lon: -65.2619, freq: '141.500 MHz' },
   { name: 'Monteagudo', department: 'Chuquisaca', zone: 'Chaco Chuquisaqueño', lat: -19.8050, lon: -63.9547, freq: '141.550 MHz' },
   { name: 'Camargo', department: 'Chuquisaca', zone: 'Nor Cinti', lat: -20.6408, lon: -65.2094, freq: '141.550 MHz' },
-  { name: 'Macharetí', department: 'Chuquisaca', zone: 'Chaco / Ruta Paraguay', lat: -20.8167, lon: -63.3667, freq: '143.800 MHz', aliases: ['machareti'] }
+  { name: 'Macharetí', department: 'Chuquisaca', zone: 'Chaco / Ruta Paraguay', lat: -20.8167, lon: -63.3667, freq: '143.800 MHz', aliases: ['machareti'] },
+
+  // === MUNICIPIOS, LOCALIDADES Y HITOS ADICIONALES (9 DEPARTAMENTOS) ===
+  // Santa Cruz adicional
+  { name: 'Puerto Busch', department: 'Santa Cruz', zone: 'Triángulo Dionisio Foianini / Frontera Brasil-Paraguay', lat: -20.0686, lon: -57.9917, freq: '144.450 MHz', aliases: ['foianini', 'busch'] },
+  { name: 'Carmen Rivero Tórrez', department: 'Santa Cruz', zone: 'Germán Busch / Corredor Este', lat: -18.8167, lon: -58.6167, freq: '144.300 MHz', aliases: ['el carmen', 'carmen rivero torrez'] },
+  { name: 'Cotoca', department: 'Santa Cruz', zone: 'Área Metropolitana Santa Cruz', lat: -17.7539, lon: -62.9967, freq: '144.000 MHz' },
+  { name: 'La Guardia', department: 'Santa Cruz', zone: 'Andrés Ibáñez', lat: -17.8931, lon: -63.3311, freq: '144.000 MHz' },
+  { name: 'El Torno', department: 'Santa Cruz', zone: 'Andrés Ibáñez', lat: -17.9869, lon: -63.3814, freq: '144.000 MHz' },
+  { name: 'Samaipata', department: 'Santa Cruz', zone: 'Florida / Valles Cruceños', lat: -18.1803, lon: -63.8756, freq: '144.000 MHz' },
+  { name: 'Mairana', department: 'Santa Cruz', zone: 'Florida / Valles', lat: -18.1200, lon: -63.9564, freq: '144.000 MHz' },
+  { name: 'Comarapa', department: 'Santa Cruz', zone: 'Caballero / Carretera Antigua', lat: -17.9153, lon: -64.5314, freq: '144.000 MHz' },
+  { name: 'Portachuelo', department: 'Santa Cruz', zone: 'Sara / Norte Integrado', lat: -17.3517, lon: -63.3947, freq: '144.000 MHz' },
+  { name: 'Mineros', department: 'Santa Cruz', zone: 'Obispo Santistevan', lat: -17.1189, lon: -63.2314, freq: '144.000 MHz' },
+  { name: 'Buena Vista', department: 'Santa Cruz', zone: 'Ichilo', lat: -17.4589, lon: -63.6594, freq: '144.000 MHz' },
+  { name: 'San Carlos', department: 'Santa Cruz', zone: 'Ichilo', lat: -17.4050, lon: -63.7333, freq: '144.000 MHz' },
+  { name: 'Okinawa Uno', department: 'Santa Cruz', zone: 'Warnes', lat: -17.2189, lon: -62.8939, freq: '144.000 MHz', aliases: ['okinawa'] },
+  { name: 'Pailón', department: 'Santa Cruz', zone: 'Chiquitos', lat: -17.6589, lon: -62.7192, freq: '144.050 MHz', aliases: ['pailon'] },
+  { name: 'Charagua', department: 'Santa Cruz', zone: 'Cordillera / Chaco', lat: -19.7917, lon: -63.1986, freq: '143.900 MHz' },
+  { name: 'Cabezas', department: 'Santa Cruz', zone: 'Cordillera / Ruta Chaco', lat: -18.7869, lon: -63.3156, freq: '143.950 MHz' },
+  { name: 'San Miguel de Velasco', department: 'Santa Cruz', zone: 'Velasco / Chiquitanía', lat: -16.6981, lon: -60.9675, freq: '144.100 MHz', aliases: ['san miguel'] },
+  { name: 'San Rafael de Velasco', department: 'Santa Cruz', zone: 'Velasco / Chiquitanía', lat: -16.7869, lon: -60.6739, freq: '144.100 MHz', aliases: ['san rafael'] },
+  { name: 'San Javier', department: 'Santa Cruz', zone: 'Ñuflo de Chávez', lat: -16.2747, lon: -62.5072, freq: '144.100 MHz' },
+  { name: 'San Ramón', department: 'Santa Cruz', zone: 'Ñuflo de Chávez', lat: -16.6156, lon: -62.4981, freq: '144.100 MHz', aliases: ['san ramon'] },
+  { name: 'Cuatro Cañadas', department: 'Santa Cruz', zone: 'Ñuflo de Chávez', lat: -17.2697, lon: -62.5594, freq: '144.050 MHz', aliases: ['cuatro canadas'] },
+
+  // La Paz adicional
+  { name: 'Achacachi', department: 'La Paz', zone: 'Omasuyos / Altiplano Norte', lat: -16.0444, lon: -68.6850, freq: '141.850 MHz' },
+  { name: 'Huarina', department: 'La Paz', zone: 'Omasuyos / Lago Titicaca', lat: -16.2000, lon: -68.6000, freq: '141.850 MHz' },
+  { name: 'Batallas', department: 'La Paz', zone: 'Los Andes', lat: -16.2981, lon: -68.5322, freq: '141.900 MHz' },
+  { name: 'Tiahuanaco', department: 'La Paz', zone: 'Ingavi / Ruta Desaguadero', lat: -16.5556, lon: -68.6731, freq: '141.850 MHz', aliases: ['tiwanaku', 'tiahuanacu'] },
+  { name: 'Sica Sica', department: 'La Paz', zone: 'Aroma / Carretera Oruro', lat: -17.3333, lon: -67.7333, freq: '142.200 MHz' },
+  { name: 'Lahuachaca', department: 'La Paz', zone: 'Aroma', lat: -17.3750, lon: -67.6750, freq: '142.200 MHz' },
+  { name: 'Coroico', department: 'La Paz', zone: 'Nor Yungas', lat: -16.1889, lon: -67.7272, freq: '141.950 MHz' },
+  { name: 'Chulumani', department: 'La Paz', zone: 'Sud Yungas', lat: -16.4089, lon: -67.5269, freq: '141.950 MHz' },
+  { name: 'Sorata', department: 'La Paz', zone: 'Larecaja', lat: -15.7731, lon: -68.6489, freq: '141.800 MHz' },
+  { name: 'Guanay', department: 'La Paz', zone: 'Larecaja / Norte', lat: -15.4981, lon: -67.8797, freq: '141.700 MHz' },
+  { name: 'Palos Blancos', department: 'La Paz', zone: 'Sud Yungas / Alto Beni', lat: -15.5833, lon: -67.2500, freq: '141.700 MHz' },
+  { name: 'San Buenaventura', department: 'La Paz', zone: 'Iturralde / Río Beni', lat: -14.4369, lon: -67.5369, freq: '145.050 MHz' },
+  { name: 'Corocoro', department: 'La Paz', zone: 'Pacajes', lat: -17.1719, lon: -68.4500, freq: '142.100 MHz' },
+  { name: 'Calacoto', department: 'La Paz', zone: 'Pacajes / Ruta Charaña', lat: -17.2833, lon: -68.6333, freq: '142.100 MHz' },
+  { name: 'Escoma', department: 'La Paz', zone: 'Camacho / Frontera Perú', lat: -15.6667, lon: -69.1333, freq: '141.750 MHz' },
+  { name: 'Pelechuco', department: 'La Paz', zone: 'Franz Tamayo / Frontera Perú', lat: -14.8167, lon: -69.0667, freq: '141.650 MHz' },
+
+  // Oruro adicional
+  { name: 'Caracollo', department: 'Oruro', zone: 'Cercado / Nudo Carretero', lat: -17.6386, lon: -67.2167, freq: '142.450 MHz' },
+  { name: 'Poopó', department: 'Oruro', zone: 'Lago Poopó', lat: -18.3803, lon: -66.9661, freq: '142.550 MHz', aliases: ['poopo'] },
+  { name: 'Pazña', department: 'Oruro', zone: 'Poopó', lat: -18.6000, lon: -66.9167, freq: '142.600 MHz', aliases: ['pazna'] },
+  { name: 'Salinas de Garci Mendoza', department: 'Oruro', zone: 'Ladislao Cabrera / Inter-Salar', lat: -19.6333, lon: -67.6833, freq: '142.750 MHz', aliases: ['salinas'] },
+  { name: 'Corque', department: 'Oruro', zone: 'Carangas', lat: -18.3489, lon: -67.6694, freq: '142.700 MHz' },
+  { name: 'Toledo', department: 'Oruro', zone: 'Saucarí / Ruta Pisiga', lat: -18.1806, lon: -67.4069, freq: '142.650 MHz' },
+  { name: 'Andamarca', department: 'Oruro', zone: 'Sud Carangas', lat: -18.7833, lon: -67.5167, freq: '142.700 MHz' },
+  { name: 'Orinoca', department: 'Oruro', zone: 'Sud Carangas', lat: -18.9722, lon: -67.2417, freq: '142.700 MHz' },
+  { name: 'Eucaliptus', department: 'Oruro', zone: 'Tomás Barrón', lat: -17.5978, lon: -67.5117, freq: '142.400 MHz' },
+  { name: 'Machacamarca', department: 'Oruro', zone: 'Pantaleón Dalence', lat: -18.1722, lon: -67.0222, freq: '142.500 MHz' },
+
+  // Potosí adicional
+  { name: 'Uncía', department: 'Potosí', zone: 'Bustillo / Norte Potosí', lat: -18.4675, lon: -66.5681, freq: '140.550 MHz', aliases: ['uncia'] },
+  { name: 'Betanzos', department: 'Potosí', zone: 'Cornelio Saavedra', lat: -19.5531, lon: -65.4539, freq: '140.500 MHz' },
+  { name: 'Colquechaca', department: 'Potosí', zone: 'Chayanta', lat: -18.6989, lon: -66.0042, freq: '140.550 MHz' },
+  { name: 'Cotagaita', department: 'Potosí', zone: 'Nor Chichas', lat: -20.8167, lon: -65.6667, freq: '140.750 MHz' },
+  { name: 'Colcha K', department: 'Potosí', zone: 'Nor Lípez / Suroeste', lat: -20.7417, lon: -67.6583, freq: '140.450 MHz', aliases: ['colcha'] },
+  { name: 'San Pablo de Lípez', department: 'Potosí', zone: 'Sud Lípez / Frontera Sur', lat: -21.6833, lon: -66.6167, freq: '140.400 MHz', aliases: ['san pablo de lipez'] },
+  { name: 'San Cristóbal', department: 'Potosí', zone: 'Nor Lípez', lat: -21.0950, lon: -67.1636, freq: '140.500 MHz', aliases: ['san cristobal'] },
+  { name: 'Porco', department: 'Potosí', zone: 'Quijarro', lat: -19.7747, lon: -65.9869, freq: '140.550 MHz' },
+  { name: 'Puna', department: 'Potosí', zone: 'Linares', lat: -19.7967, lon: -65.5033, freq: '140.550 MHz' },
+
+  // Cochabamba adicional
+  { name: 'Tiquipaya', department: 'Cochabamba', zone: 'Quillacollo', lat: -17.3381, lon: -66.2189, freq: '141.200 MHz' },
+  { name: 'Vinto', department: 'Cochabamba', zone: 'Quillacollo', lat: -17.3967, lon: -66.3133, freq: '141.200 MHz' },
+  { name: 'Sipe Sipe', department: 'Cochabamba', zone: 'Quillacollo', lat: -17.4547, lon: -66.3578, freq: '141.200 MHz' },
+  { name: 'Punata', department: 'Cochabamba', zone: 'Valle Alto', lat: -17.5422, lon: -65.8350, freq: '141.200 MHz' },
+  { name: 'Cliza', department: 'Cochabamba', zone: 'Valle Alto', lat: -17.5892, lon: -65.9328, freq: '141.200 MHz' },
+  { name: 'Tarata', department: 'Cochabamba', zone: 'Esteban Arze', lat: -17.6111, lon: -66.0206, freq: '141.200 MHz' },
+  { name: 'Capinota', department: 'Cochabamba', zone: 'Capinota', lat: -17.7150, lon: -66.2636, freq: '141.200 MHz' },
+  { name: 'Mizque', department: 'Cochabamba', zone: 'Cono Sur', lat: -17.9411, lon: -65.3403, freq: '141.250 MHz' },
+  { name: 'Totora', department: 'Cochabamba', zone: 'Carrasco', lat: -17.7267, lon: -65.1931, freq: '141.250 MHz' },
+  { name: 'Shinahota', department: 'Cochabamba', zone: 'Trópico de Cochabamba', lat: -16.9950, lon: -65.2450, freq: '141.300 MHz' },
+  { name: 'Entre Ríos (Cochabamba)', department: 'Cochabamba', zone: 'Carrasco / Trópico', lat: -17.1967, lon: -64.5361, freq: '141.300 MHz', aliases: ['entre rios cbba'] },
+  { name: 'Puerto Villarroel', department: 'Cochabamba', zone: 'Trópico / Río Ichilo', lat: -16.8400, lon: -64.7931, freq: '141.300 MHz', aliases: ['villarroel'] },
+  { name: 'Independencia', department: 'Cochabamba', zone: 'Ayopaya', lat: -17.0833, lon: -66.8167, freq: '141.250 MHz' },
+
+  // Chuquisaca adicional
+  { name: 'Tarabuco', department: 'Chuquisaca', zone: 'Yamparáez', lat: -19.1817, lon: -64.9150, freq: '141.500 MHz' },
+  { name: 'Padilla', department: 'Chuquisaca', zone: 'Tomina', lat: -19.3089, lon: -64.3028, freq: '141.500 MHz' },
+  { name: 'Zudáñez', department: 'Chuquisaca', zone: 'Zudáñez', lat: -19.1194, lon: -64.7014, freq: '141.500 MHz', aliases: ['zudanez'] },
+  { name: 'Villa Serrano', department: 'Chuquisaca', zone: 'Belisario Boeto', lat: -19.1244, lon: -64.3247, freq: '141.500 MHz', aliases: ['serrano'] },
+  { name: 'Muyupampa', department: 'Chuquisaca', zone: 'Luis Calvo / Chaco', lat: -19.8975, lon: -63.7497, freq: '141.550 MHz', aliases: ['villa vaca guzman'] },
+  { name: 'San Lucas', department: 'Chuquisaca', zone: 'Nor Cinti', lat: -20.1000, lon: -65.1333, freq: '141.550 MHz' },
+  { name: 'Culpina', department: 'Chuquisaca', zone: 'Sud Cinti', lat: -20.8264, lon: -64.9481, freq: '141.550 MHz' },
+  { name: 'Villa Abecia', department: 'Chuquisaca', zone: 'Sud Cinti', lat: -20.9767, lon: -65.2300, freq: '141.550 MHz' },
+
+  // Tarija adicional
+  { name: 'Entre Ríos (Tarija)', department: 'Tarija', zone: 'O\'Connor', lat: -21.5261, lon: -64.1731, freq: '143.450 MHz', aliases: ['entre rios tarija'] },
+  { name: 'San Lorenzo', department: 'Tarija', zone: 'Méndez', lat: -21.4167, lon: -64.7500, freq: '143.400 MHz' },
+  { name: 'Uriondo', department: 'Tarija', zone: 'Avilés / Valle de la Concepción', lat: -21.6967, lon: -64.6550, freq: '143.400 MHz', aliases: ['valle de la concepcion'] },
+  { name: 'Yunchará', department: 'Tarija', zone: 'Avilés / Zona Alta', lat: -21.8167, lon: -65.2000, freq: '143.400 MHz', aliases: ['yunchara'] },
+  { name: 'El Puente', department: 'Tarija', zone: 'Méndez', lat: -21.2333, lon: -65.2167, freq: '143.400 MHz' },
+
+  // Beni & Pando adicional
+  { name: 'San Borja', department: 'Beni', zone: 'Ballivián', lat: -14.8583, lon: -66.7475, freq: '145.050 MHz' },
+  { name: 'Reyes', department: 'Beni', zone: 'Ballivián', lat: -14.2969, lon: -67.3358, freq: '145.050 MHz' },
+  { name: 'San Ignacio de Moxos', department: 'Beni', zone: 'Moxos', lat: -14.9961, lon: -65.6400, freq: '145.000 MHz', aliases: ['moxos'] },
+  { name: 'Santa Rosa del Yacuma', department: 'Beni', zone: 'Ballivián', lat: -14.0706, lon: -66.7881, freq: '145.050 MHz', aliases: ['santa rosa'] },
+  { name: 'Baures', department: 'Beni', zone: 'Iténez / Frontera Brasil', lat: -13.6556, lon: -63.6956, freq: '145.350 MHz' },
+  { name: 'Huacaraje', department: 'Beni', zone: 'Iténez', lat: -13.5922, lon: -63.8806, freq: '145.350 MHz' },
+  { name: 'San Ramón (Beni)', department: 'Beni', zone: 'Mamoré', lat: -13.2667, lon: -64.6167, freq: '145.350 MHz' },
+  { name: 'Puerto Rico', department: 'Pando', zone: 'Manuripi', lat: -11.1033, lon: -67.5542, freq: '145.150 MHz' },
+  { name: 'El Sena', department: 'Pando', zone: 'Madre de Dios', lat: -11.4717, lon: -67.2439, freq: '145.200 MHz', aliases: ['sena'] },
+  { name: 'Filadelfia', department: 'Pando', zone: 'Manuripi / Frontera Perú', lat: -11.3333, lon: -68.7667, freq: '145.150 MHz' },
+  { name: 'Bella Flor', department: 'Pando', zone: 'Nicolás Suárez / Frontera Brasil', lat: -11.1167, lon: -68.1833, freq: '145.100 MHz' }
 ];
 
 /**
@@ -184,6 +336,57 @@ export function searchLocalBoliviaLocations(query: string, limit: number = 8): R
 }
 
 /**
+ * Returns an immediate high-confidence match from the local Bolivian gazetteer
+ * when the user types an exact place name, alias, or "Lugar - Departamento".
+ * Used for zero-latency auto-coordinate population as the operator types.
+ */
+export function findBestInstantBoliviaMatch(query: string): ResolvedLocationResult | null {
+  const q = normalizeLocationText(query);
+  if (q.length < 3) return null;
+
+  for (const entry of BOLIVIA_LOCATIONS) {
+    const normName = normalizeLocationText(entry.name);
+    const normDept = normalizeLocationText(entry.department);
+    const normFull = `${normName} ${normDept}`;
+    const normAliases = (entry.aliases || []).map(normalizeLocationText);
+
+    if (
+      normName === q ||
+      normFull === q ||
+      normAliases.includes(q)
+    ) {
+      return {
+        name: entry.name,
+        displayName: `${entry.name}, ${entry.department}${entry.zone ? ` (${entry.zone})` : ''}`,
+        department: entry.department,
+        lat: entry.lat,
+        lon: entry.lon,
+        dms: formatToMilitaryDMS(entry.lat, entry.lon),
+        source: 'LOCAL_GAZETTEER'
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * If an unknown rural/border place mentions a Bolivian department name,
+ * returns that department's map view so the interactive map opens right in the target region.
+ */
+export function detectDepartmentHintInQuery(query: string): BoliviaDepartmentView | null {
+  const q = normalizeLocationText(query);
+  if (!q) return null;
+  for (const dept of BOLIVIA_DEPARTMENTS) {
+    if (dept.id === 'ALL') continue;
+    const keys = [normalizeLocationText(dept.label), ...(dept.aliases || []).map(normalizeLocationText)];
+    if (keys.some(k => k.length >= 3 && q.includes(k))) {
+      return dept;
+    }
+  }
+  return null;
+}
+
+/**
  * Resolves ANY place name in Bolivia (or neighboring borders):
  * 1. Exact/strong match in built-in Bolivian gazetteer (instant & offline-ready)
  * 2. Live geocoding via backend proxy `/api/geo/search` (OpenStreetMap Nominatim)
@@ -235,10 +438,10 @@ export async function resolveBoliviaLocation(query: string): Promise<ResolvedLoc
     // Fall through to direct Nominatim CORS lookup
   }
 
-  if (!proxyWorked) {
+  if (!proxyWorked || remoteResults.length === 0) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5500);
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       const nomUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=bo&limit=8&accept-language=es&q=${encodeURIComponent(trimmed)}`;
       const resp = await fetch(nomUrl, { signal: controller.signal });
       clearTimeout(timeoutId);
@@ -246,7 +449,7 @@ export async function resolveBoliviaLocation(query: string): Promise<ResolvedLoc
         const items = await resp.json();
         if (Array.isArray(items)) {
           remoteResults = items
-            .filter((item: any) => Number.isFinite(Number(item.lat)) && Number.isFinite(Number(item.lon)))
+            .filter((item: any) => isInsideBolivia(Number(item.lat), Number(item.lon)))
             .map((item: any) => {
               const lat = Number(item.lat);
               const lon = Number(item.lon);
@@ -257,6 +460,7 @@ export async function resolveBoliviaLocation(query: string): Promise<ResolvedLoc
                 addr.city ||
                 addr.town ||
                 addr.village ||
+                addr.hamlet ||
                 addr.municipality ||
                 String(item.display_name || trimmed).split(',')[0].trim();
               return {
@@ -270,6 +474,49 @@ export async function resolveBoliviaLocation(query: string): Promise<ResolvedLoc
               };
             });
         }
+      }
+    } catch {
+      // Fall through to Photon OSM fallback below
+    }
+  }
+
+  // Secondary CORS-friendly OpenStreetMap Photon fallback restricted strictly to Bolivia
+  if (remoteResults.length === 0) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(`${trimmed}, Bolivia`)}&limit=8&bbox=-69.75,-22.95,-57.40,-9.60`;
+      const resp = await fetch(photonUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (resp.ok) {
+        const data = await resp.json();
+        const features = Array.isArray(data?.features) ? data.features : [];
+        remoteResults = features
+          .map((f: any) => {
+            const coords = f?.geometry?.coordinates;
+            const props = f?.properties || {};
+            if (!Array.isArray(coords) || coords.length < 2) return null;
+            const lon = Number(coords[0]);
+            const lat = Number(coords[1]);
+            if (!isInsideBolivia(lat, lon)) return null;
+            const cc = String(props.countrycode || '').toLowerCase();
+            if (cc && cc !== 'bo') return null;
+            const name = props.name || props.city || props.town || props.village || trimmed;
+            const dept = props.state || props.county || '';
+            const display = [name, props.city && props.city !== name ? props.city : '', dept, 'Bolivia']
+              .filter(Boolean)
+              .join(', ');
+            return {
+              name: String(name),
+              displayName: display,
+              department: String(dept),
+              lat,
+              lon,
+              dms: formatToMilitaryDMS(lat, lon),
+              source: 'OSM_NOMINATIM' as const
+            };
+          })
+          .filter(Boolean) as ResolvedLocationResult[];
       }
     } catch {
       // Offline or timeout — localMatches still works seamlessly

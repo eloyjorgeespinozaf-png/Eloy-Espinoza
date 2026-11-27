@@ -66,6 +66,7 @@ import {
   subscribeToLocalTabSync, 
   normalizeCrossVersionState 
 } from './services/MultiDeviceSyncService';
+import { cloudRealtimeMesh, CloudMeshActionPacket } from './services/CloudRealtimeMesh';
 
 import { Shield, Radio, Zap, Navigation, Clock, User as UserIcon, AlertCircle, Eye, Settings, HelpCircle, FileText, Lock, Unlock, LogOut, Key, AlertTriangle, Terminal, Layers, RefreshCw, Bell, Volume2, VolumeX, Code, Download, Moon, Sun, Sliders, Check, EyeOff, Gamepad2, Smartphone, Laptop, Image as ImageIcon, Palette, Globe, Crown, Database, HardDrive, Users, Save, Cloud, X } from 'lucide-react';
 import { useAuth, PRESET_USERS } from './context/AuthContext';
@@ -532,8 +533,9 @@ export default function App() {
     }
 
     if (state.syncedDevices && Array.isArray(state.syncedDevices)) {
-      window.dispatchEvent(new CustomEvent('synced-devices-update', { detail: { devices: state.syncedDevices } }));
-      setSyncedDevicesCount(state.syncedDevices.filter((d: any) => d.isOnline).length);
+      const mergedDevices = cloudRealtimeMesh.mergeExpressDevices(state.syncedDevices);
+      window.dispatchEvent(new CustomEvent('synced-devices-update', { detail: { devices: mergedDevices } }));
+      setSyncedDevicesCount(mergedDevices.filter((d: any) => d.isOnline).length);
     }
 
     if (incomingLogs && incomingLogs.length > 0) {
@@ -587,13 +589,41 @@ export default function App() {
     });
   }, []);
 
-  // Resilient helper to dispatch tactical messages via WebSocket or fallback HTTP POST across all devices
+  // Keep latest state snapshot ref for peer FULL_STATE_SNAPSHOT responses across Vercel/cloud terminals
+  const latestTacticalSnapshotRef = useRef({
+    rawAlerts,
+    clans,
+    actionableIntel,
+    activeOrders,
+    tacticalUnits,
+    expedientes,
+    auditLogs
+  });
+  useEffect(() => {
+    latestTacticalSnapshotRef.current = {
+      rawAlerts,
+      clans,
+      actionableIntel,
+      activeOrders,
+      tacticalUnits,
+      expedientes,
+      auditLogs
+    };
+  }, [rawAlerts, clans, actionableIntel, activeOrders, tacticalUnits, expedientes, auditLogs]);
+
+  // Flag whether Express /api/sync exists on this host (false on static Vercel deploys after first 404)
+  const expressSyncAvailableRef = useRef<boolean>(true);
+
+  // Resilient helper to dispatch tactical messages via Supabase Cloud Realtime Mesh + WebSocket + HTTP fallback
   const sendWsMessage = useCallback(async (type: string, payload: any) => {
     const devId = getOrCreateDeviceId();
     const devName = getDeviceName();
     const devPlatform = detectSyncPlatform();
 
-    // 1. Direct WebSocket transmission when connected
+    // 0. Always broadcast via global Supabase Realtime Cloud Mesh (works natively on Vercel, PWAs, & cross-network!)
+    const sentViaCloud = await cloudRealtimeMesh.broadcastAction(type, payload);
+
+    // 1. Direct WebSocket transmission when Express /ws-sync is connected
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       try {
         socketRef.current.send(JSON.stringify({ 
@@ -617,7 +647,7 @@ export default function App() {
     if (activeSocket && activeSocket.readyState === WebSocket.CONNECTING) {
       try {
         await new Promise<void>((resolve) => {
-          const timeout = setTimeout(resolve, 800);
+          const timeout = setTimeout(resolve, 600);
           const interval = setInterval(() => {
             const currentStatus = (socketRef.current as any)?.readyState;
             if (currentStatus === WebSocket.OPEN || currentStatus === WebSocket.CLOSED) {
@@ -652,12 +682,20 @@ export default function App() {
       return;
     }
 
+    // If Express /api/sync is known unavailable (static Vercel deploy) and Cloud Mesh already delivered it, done!
+    if (!expressSyncAvailableRef.current) {
+      if (!sentViaCloud) {
+        offlineActionQueueRef.current.push({ type, payload });
+      }
+      return;
+    }
+
     // 4. Secure HTTP Sync Fallback with timeout & automatic queueing on transient failures
     try {
       const hubUrl = getActiveSyncHubUrl();
       const syncEndpoint = `${hubUrl}/api/sync`;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 7000);
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
       const response = await fetch(syncEndpoint, {
         method: 'POST',
         headers: {
@@ -680,16 +718,19 @@ export default function App() {
       });
       clearTimeout(timeoutId);
 
-      if (response.ok) {
+      const ct = response.headers.get('content-type') || '';
+      if (response.ok && ct.includes('application/json')) {
         const state = await response.json();
         handleStateSyncRef.current(state);
-      } else {
-        console.warn('[PII-LCC Network] HTTP Sync Fallback status non-200, action queued for retry:', response.status);
+      } else if (response.status === 404 || response.status === 405) {
+        expressSyncAvailableRef.current = false;
+      } else if (!sentViaCloud) {
         offlineActionQueueRef.current.push({ type, payload });
       }
-    } catch (err: any) {
-      console.warn('[PII-LCC Network] HTTP Sync Fallback deferred (network unavailable, action queued):', err?.message || err);
-      offlineActionQueueRef.current.push({ type, payload });
+    } catch {
+      if (!sentViaCloud) {
+        offlineActionQueueRef.current.push({ type, payload });
+      }
     }
   }, [appVersion]);
 
@@ -748,8 +789,9 @@ export default function App() {
             }
 
             if (type === 'SYNCED_DEVICES_UPDATE' && payload?.devices) {
-              window.dispatchEvent(new CustomEvent('synced-devices-update', { detail: payload }));
-              setSyncedDevicesCount(payload.devices.filter((d: any) => d.isOnline).length);
+              const mergedDevices = cloudRealtimeMesh.mergeExpressDevices(payload.devices);
+              window.dispatchEvent(new CustomEvent('synced-devices-update', { detail: { devices: mergedDevices } }));
+              setSyncedDevicesCount(mergedDevices.filter((d: any) => d.isOnline).length);
               return;
             }
 
@@ -895,12 +937,302 @@ export default function App() {
     };
   }, [drainActionQueue, appVersion, user]);
 
-  // HTTP fallback polling loop with backoff and link prioritization
+  // Global Supabase Realtime Cloud Mesh (Presence + Live Bidirectional Interaction across Vercel, PWAs & AI Studio)
+  useEffect(() => {
+    cloudRealtimeMesh.connect({
+      deviceId: getOrCreateDeviceId(),
+      deviceName: getDeviceName(),
+      installedVersion: appVersion,
+      platform: detectSyncPlatform(),
+      role: user ? user.role : selectedLoginRole || 'ROL_CEO',
+      userName: user?.name
+    });
+
+    const handleSyncedDevicesEvent = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (Array.isArray(detail?.devices)) {
+        const online = detail.devices.filter((d: any) => d.isOnline).length;
+        setSyncedDevicesCount(Math.max(1, online));
+      }
+    };
+
+    const handleTerminalJoined = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.deviceName) {
+        playSyntheticBeep(980, 0.08);
+        setRealtimeSyncToast({
+          message: `Terminal conectada: ${detail.deviceName}${detail.userName ? ` (${detail.userName})` : ''} [${detail.role || 'OPERADOR'}]`,
+          timestamp: Date.now()
+        });
+      }
+    };
+
+    const unsubscribeAction = cloudRealtimeMesh.onAction((packet: CloudMeshActionPacket) => {
+      const { type, payload, senderDeviceName } = packet;
+      if (!type) return;
+
+      switch (type) {
+        case 'SEND_FIELD_REPORT': {
+          const report = payload?.report;
+          if (report?.id) {
+            setRawAlerts(prev => (prev.some(a => a.id === report.id) ? prev : [report, ...prev]));
+            playSyntheticBeep(1100, 0.06);
+            setRealtimeSyncToast({
+              message: `Alerta S-2 recibida de ${senderDeviceName}: ${report.sourceName || 'Reporte táctico'}`,
+              timestamp: Date.now()
+            });
+          }
+          break;
+        }
+        case 'UPDATE_ALERT_STATUS': {
+          if (payload?.id && payload?.status) {
+            setRawAlerts(prev => prev.map(a => (a.id === payload.id ? { ...a, status: payload.status } : a)));
+          }
+          break;
+        }
+        case 'PROMOTE_TO_INTEL': {
+          const intel = payload?.intel;
+          if (intel?.id) {
+            setActionableIntel(prev => (prev.some(i => i.id === intel.id) ? prev : [intel, ...prev]));
+            if (intel.rawAlertId) {
+              setRawAlerts(prev =>
+                prev.map(a =>
+                  a.id === intel.rawAlertId
+                    ? {
+                        ...a,
+                        status: 'PROCESSED',
+                        reliability: payload?.updatedReliability || a.reliability,
+                        certainty: payload?.updatedCertainty || a.certainty,
+                        clandestineRouteId: payload?.routeId || a.clandestineRouteId
+                      }
+                    : a
+                )
+              );
+            }
+            playSyntheticBeep(1050, 0.06);
+            setRealtimeSyncToast({
+              message: `Inteligencia CFI validada desde ${senderDeviceName}: ${intel.title}`,
+              timestamp: Date.now()
+            });
+          }
+          break;
+        }
+        case 'ARCHIVE_INTEL': {
+          if (payload?.id) {
+            setActionableIntel(prev =>
+              prev.map(i => (i.id === payload.id ? { ...i, status: 'ARCHIVED' as any } : i))
+            );
+          }
+          break;
+        }
+        case 'CREATE_ORDER': {
+          const order = payload?.order;
+          if (order?.id) {
+            setActiveOrders(prev => (prev.some(o => o.id === order.id) ? prev : [order, ...prev]));
+            playSyntheticBeep(1200, 0.08);
+            setRealtimeSyncToast({
+              message: `Nueva Orden OOA emitida desde ${senderDeviceName}: ${order.codeName}`,
+              timestamp: Date.now()
+            });
+          }
+          break;
+        }
+        case 'CANCEL_ORDER': {
+          if (payload?.id) {
+            setActiveOrders(prev =>
+              prev.map(o =>
+                o.id === payload.id
+                  ? {
+                      ...o,
+                      status: 'CANCELLED',
+                      updates: payload.updateMsg ? [...(o.updates || []), payload.updateMsg] : o.updates
+                    }
+                  : o
+              )
+            );
+          }
+          break;
+        }
+        case 'CONFIRM_ORDER': {
+          if (payload?.id && payload?.newStatus) {
+            setActiveOrders(prev =>
+              prev.map(o =>
+                o.id === payload.id
+                  ? {
+                      ...o,
+                      status: payload.newStatus,
+                      updates: payload.statusText
+                        ? [...(o.updates || []), `${new Date().toLocaleTimeString('es-BO')}: ${payload.statusText}`]
+                        : o.updates
+                    }
+                  : o
+              )
+            );
+            if (payload.unitName && payload.unitStatus) {
+              setTacticalUnits(prev =>
+                prev.map(u => (u.name === payload.unitName ? { ...u, status: payload.unitStatus } : u))
+              );
+            }
+          }
+          break;
+        }
+        case 'ORDER_UPDATE': {
+          if (payload?.orderId && payload?.updateMsg) {
+            setActiveOrders(prev =>
+              prev.map(o =>
+                o.id === payload.orderId
+                  ? { ...o, updates: [...(o.updates || []), payload.updateMsg] }
+                  : o
+              )
+            );
+          }
+          break;
+        }
+        case 'SAVE_EXPEDIENTE': {
+          const exp = payload?.expediente;
+          if (exp?.id) {
+            setExpedientes(prev => {
+              const exists = prev.some(e => e.id === exp.id);
+              const next = exists ? prev.map(e => (e.id === exp.id ? exp : e)) : [exp, ...prev];
+              safeStorage.setItem('pii_lcc_expedientes', JSON.stringify(next));
+              return next;
+            });
+          }
+          break;
+        }
+        case 'DELETE_EXPEDIENTE': {
+          if (payload?.expedienteId) {
+            setExpedientes(prev => {
+              const next = prev.filter(e => e.id !== payload.expedienteId);
+              safeStorage.setItem('pii_lcc_expedientes', JSON.stringify(next));
+              return next;
+            });
+          }
+          break;
+        }
+        case 'ADD_TACTICAL_UNIT': {
+          const unit = payload?.unit;
+          if (unit?.id) {
+            setTacticalUnits(prev => {
+              if (prev.some(u => u.id === unit.id)) return prev;
+              const next = [...prev, unit];
+              safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
+              return next;
+            });
+            playSyntheticBeep(920, 0.06);
+            setRealtimeSyncToast({
+              message: `Patrulla registrada desde ${senderDeviceName}: ${unit.name}`,
+              timestamp: Date.now()
+            });
+          }
+          break;
+        }
+        case 'UPDATE_TACTICAL_UNIT': {
+          if (payload?.unitId && payload?.updates) {
+            setTacticalUnits(prev => {
+              const next = prev.map(u => (u.id === payload.unitId ? { ...u, ...payload.updates } : u));
+              safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
+              return next;
+            });
+          }
+          break;
+        }
+        case 'DELETE_TACTICAL_UNIT': {
+          if (payload?.unitId) {
+            setTacticalUnits(prev => {
+              const next = prev.filter(u => u.id !== payload.unitId);
+              safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
+              return next;
+            });
+          }
+          break;
+        }
+        case 'UPDATE_UNIT_COORDINATES': {
+          if (payload?.newCoords && (payload?.unitId || payload?.unitName)) {
+            setTacticalUnits(prev => {
+              const next = prev.map(u =>
+                (payload.unitId && u.id === payload.unitId) || (payload.unitName && u.name === payload.unitName)
+                  ? { ...u, coordinates: payload.newCoords, lastReportTime: new Date().toISOString() }
+                  : u
+              );
+              safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(next));
+              return next;
+            });
+            playSyntheticBeep(1150, 0.05);
+            setRealtimeSyncToast({
+              message: `GPS actualizado por ${senderDeviceName}: ${payload.unitName || 'Patrulla'} → ${payload.newCoords}`,
+              timestamp: Date.now()
+            });
+          }
+          break;
+        }
+        case 'SYNC_TACTICAL_UNITS': {
+          if (Array.isArray(payload?.units) && payload.units.length > 0) {
+            setTacticalUnits(payload.units);
+            safeLocalStorage.setItem('PII_LCC_TACTICAL_UNITS', JSON.stringify(payload.units));
+          }
+          break;
+        }
+        case 'TACTICAL_RADIO_MESSAGE': {
+          if (payload?.commsMessage) {
+            window.dispatchEvent(new CustomEvent('tactical-comms-message', { detail: payload.commsMessage }));
+            playSyntheticBeep(880, 0.08);
+            setRealtimeSyncToast({
+              message: `Radio (${payload.commsMessage.senderName || senderDeviceName}): "${String(payload.commsMessage.text || '').slice(0, 48)}"`,
+              timestamp: Date.now()
+            });
+          }
+          break;
+        }
+        case 'LOG_AUDIT_ACTION': {
+          const entry = payload?.logEntry;
+          if (entry?.id && !sentLogsRef.current.has(entry.id)) {
+            sentLogsRef.current.add(entry.id);
+            setAuditLogs(prev => (prev.some(l => l.id === entry.id) ? prev : [entry, ...prev].slice(0, 200)));
+          }
+          break;
+        }
+        case 'TRIGGER_FORCE_BROADCAST': {
+          // Respond with our current tactical snapshot so requesting terminal receives live peer state on Vercel too
+          cloudRealtimeMesh.broadcastAction('FULL_STATE_SNAPSHOT', latestTacticalSnapshotRef.current);
+          break;
+        }
+        case 'FULL_STATE_SNAPSHOT': {
+          if (payload && typeof payload === 'object') {
+            handleStateSyncRef.current(payload, false);
+          }
+          break;
+        }
+      }
+    });
+
+    window.addEventListener('synced-devices-update', handleSyncedDevicesEvent);
+    window.addEventListener('cloud-mesh-terminal-joined', handleTerminalJoined);
+
+    return () => {
+      unsubscribeAction();
+      window.removeEventListener('synced-devices-update', handleSyncedDevicesEvent);
+      window.removeEventListener('cloud-mesh-terminal-joined', handleTerminalJoined);
+    };
+  }, [appVersion, user, selectedLoginRole]);
+
+  // Keep Cloud Realtime Mesh identity synchronized when operator logs in/changes role
+  useEffect(() => {
+    cloudRealtimeMesh.updateIdentity({
+      deviceName: getDeviceName(),
+      installedVersion: appVersion,
+      role: user ? user.role : selectedLoginRole || 'ROL_CEO',
+      userName: user?.name
+    });
+  }, [user, selectedLoginRole, appVersion]);
+
+  // HTTP fallback polling loop with backoff (automatically skipped on static Vercel hosts where Cloud Realtime Mesh is active)
   useEffect(() => {
     let pollInterval: any;
 
     const performPoll = async () => {
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      if (!expressSyncAvailableRef.current) return;
       if (socketRef.current && (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)) {
         return;
       }
@@ -923,17 +1255,20 @@ export default function App() {
           signal: controller.signal
         });
         clearTimeout(timeoutId);
-        if (response.ok) {
+        const ct = response.headers.get('content-type') || '';
+        if (response.ok && ct.includes('application/json')) {
           const state = await response.json();
           handleStateSyncRef.current(state);
+        } else if (response.status === 404 || response.status === 405) {
+          expressSyncAvailableRef.current = false;
         }
-      } catch (err) {
-        console.warn('[PII-LCC Network] Notice: Central node polling deferred:', err);
+      } catch {
+        // Non-blocking — CloudRealtimeMesh handles cross-device sync
       }
     };
 
     const initialTimer = setTimeout(performPoll, 3500);
-    pollInterval = setInterval(performPoll, 6000);
+    pollInterval = setInterval(performPoll, 8000);
 
     return () => {
       clearTimeout(initialTimer);

@@ -39,6 +39,11 @@ import {
   getActiveSyncHubUrl,
   setCustomSyncHubUrl
 } from '../services/MultiDeviceSyncService';
+import {
+  cloudRealtimeMesh,
+  CloudMeshActivityEvent,
+  CloudMeshPingReply
+} from '../services/CloudRealtimeMesh';
 import { playSyntheticBeep, playCyberClick } from '../utils/audio';
 
 interface MultiDeviceSyncModalProps {
@@ -69,7 +74,11 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
   const [devices, setDevices] = useState<SyncedDeviceRecord[]>([]);
   const [isLoadingDevices, setIsLoadingDevices] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isPinging, setIsPinging] = useState(false);
   const [isBroadcastingOta, setIsBroadcastingOta] = useState(false);
+  const [cloudConnected, setCloudConnected] = useState<boolean>(() => cloudRealtimeMesh.getIsConnected());
+  const [activityLog, setActivityLog] = useState<CloudMeshActivityEvent[]>(() => cloudRealtimeMesh.getActivityLog());
+  const [pingReplies, setPingReplies] = useState<CloudMeshPingReply[]>([]);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   
@@ -86,14 +95,15 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
 
   const myPlatform = detectDevicePlatform();
 
-  // Load connected devices from server
+  // Load connected devices from server + global Supabase Cloud Realtime Mesh
   const loadDevices = useCallback(async () => {
     setIsLoadingDevices(true);
     const start = Date.now();
     try {
       const list = await fetchConnectedDevicesList();
       setDevices(list);
-      setLatencyMs(Date.now() - start);
+      setActivityLog(cloudRealtimeMesh.getActivityLog());
+      setLatencyMs(cloudRealtimeMesh.getLastLatencyMs() ?? Math.max(1, Date.now() - start));
     } catch (err) {
       console.warn('Error loading devices list:', err);
     } finally {
@@ -109,16 +119,33 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
     }
   }, [isOpen, loadDevices]);
 
-  // Listen for real-time SYNCED_DEVICES_UPDATE events from websocket
+  // Listen for real-time SYNCED_DEVICES_UPDATE & Cloud Realtime Mesh events
   useEffect(() => {
+    const unsubStatus = cloudRealtimeMesh.onStatusChange(setCloudConnected);
+    const unsubPong = cloudRealtimeMesh.onPingReply((reply) => {
+      setPingReplies(prev => [reply, ...prev.filter(r => r.fromDeviceId !== reply.fromDeviceId)].slice(0, 10));
+      setLatencyMs(reply.rttMs);
+      setSyncStatusMsg(`¡Terminal ${reply.fromDeviceName} respondió al PING en ${reply.rttMs} ms!`);
+      playSyntheticBeep(1180, 0.08);
+    });
+
     const handleDevicesUpdate = (e: CustomEvent) => {
       if (e.detail?.devices) {
         setDevices(e.detail.devices);
       }
     };
+    const handleActivity = (e: CustomEvent) => {
+      if (Array.isArray(e.detail?.log)) {
+        setActivityLog(e.detail.log);
+      }
+    };
     window.addEventListener('synced-devices-update' as any, handleDevicesUpdate as any);
+    window.addEventListener('cloud-mesh-activity' as any, handleActivity as any);
     return () => {
+      unsubStatus();
+      unsubPong();
       window.removeEventListener('synced-devices-update' as any, handleDevicesUpdate as any);
+      window.removeEventListener('cloud-mesh-activity' as any, handleActivity as any);
     };
   }, []);
 
@@ -128,10 +155,27 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
     if (tempName.trim()) {
       setDeviceName(tempName.trim());
       setMyDeviceNameState(tempName.trim());
+      cloudRealtimeMesh.updateIdentity({ deviceName: tempName.trim() });
       setIsEditingName(false);
       playCyberClick('laser', 0.1);
       loadDevices();
     }
+  };
+
+  const handlePingTerminals = async () => {
+    setIsPinging(true);
+    setPingReplies([]);
+    playSyntheticBeep(960, 0.1);
+    const res = await cloudRealtimeMesh.sendLivePingToAllTerminals();
+    const remoteCount = devices.filter(d => d.isOnline && d.deviceId !== myDeviceId).length;
+    setSyncStatusMsg(
+      res.sent
+        ? remoteCount > 0
+          ? `PING enviado a ${remoteCount} terminal(es) remota(s). Esperando confirmación...`
+          : 'PING enviado por Nube Realtime. Abre la app en otro equipo para comprobar la respuesta en vivo.'
+        : 'Reconectando canal Nube Realtime...'
+    );
+    setTimeout(() => setIsPinging(false), 1800);
   };
 
   const handleForceSyncAll = async () => {
@@ -325,7 +369,7 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
                     {latencyMs !== null ? `${latencyMs} ms de latencia` : 'Enlace Sincronizado'}
                   </div>
                   <div className="text-[10px] text-zinc-400">
-                    WebSocket + Fallback HTTP Activos
+                    {cloudConnected ? 'Nube Realtime (Vercel/PWA) + WS Activos' : 'WebSocket + Fallback HTTP Activos'}
                   </div>
                 </div>
                 <button
@@ -483,7 +527,13 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
                             </span>
                           </div>
                           <span className="text-[9px] text-zinc-500 font-mono">
-                            {device.transport === 'WEBSOCKET' ? 'WS (0ms)' : 'HTTP Poll'}
+                            {device.transport === 'HIBRIDO_CLOUD_WS'
+                              ? 'Nube + WS'
+                              : device.transport === 'SUPABASE_REALTIME'
+                              ? 'Nube Realtime'
+                              : device.transport === 'WEBSOCKET'
+                              ? 'WS (0ms)'
+                              : 'HTTP Poll'}
                           </span>
                         </div>
                       </div>
@@ -493,6 +543,36 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
               )}
             </div>
           </div>
+
+          {/* Live Ping Confirmations & Recent Terminal Activity Log */}
+          {(pingReplies.length > 0 || activityLog.length > 0) && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Registro en Vivo de Ingresos e Interacciones ({activityLog.length})</span>
+                </span>
+                {pingReplies.length > 0 && (
+                  <span className="text-[10px] text-emerald-400 font-bold">
+                    ✓ {pingReplies.length} respuesta(s) PING confirmada(s)
+                  </span>
+                )}
+              </div>
+              <div className="border border-zinc-800 rounded-xl bg-black/60 divide-y divide-zinc-800/70 max-h-[140px] overflow-y-auto">
+                {activityLog.slice(0, 12).map((evt) => (
+                  <div key={evt.id} className="px-3 py-1.5 flex items-center justify-between gap-2 text-[10px]">
+                    <div className="min-w-0 truncate">
+                      <span className="font-bold text-cyan-300">{evt.deviceName}</span>
+                      <span className="text-zinc-400"> — {evt.summary}</span>
+                    </div>
+                    <span className="text-zinc-500 font-mono shrink-0">
+                      {new Date(evt.timestamp).toLocaleTimeString('es-BO', { hour12: false })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Doctrinal Compatibility Guarantee Box */}
           <div className="p-3 bg-emerald-950/20 border border-emerald-500/30 rounded-xl flex items-start gap-2.5 text-emerald-300 text-[10px]">
@@ -515,7 +595,19 @@ export const MultiDeviceSyncModal: React.FC<MultiDeviceSyncModalProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            {/* Action 0: Live Ping-Pong Interaction Test */}
+            <button
+              type="button"
+              onClick={handlePingTerminals}
+              disabled={isPinging}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500/50 text-emerald-300 font-bold transition-all active:scale-95 cursor-pointer disabled:opacity-50 text-xs"
+              title="Enviar señal PING en vivo para comprobar que las demás terminales responden"
+            >
+              <Zap className={`w-3.5 h-3.5 text-emerald-400 ${isPinging ? 'animate-ping' : ''}`} />
+              <span>{isPinging ? 'Probando...' : 'Probar Interacción'}</span>
+            </button>
+
             {/* Action 1: Broadcast OTA to all installed versions */}
             <button
               type="button"

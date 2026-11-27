@@ -16,8 +16,14 @@ import { parseCoordinates, formatToMilitaryDMS } from '../utils/geo';
 import {
   resolveBoliviaLocation,
   searchLocalBoliviaLocations,
+  findBestInstantBoliviaMatch,
+  detectDepartmentHintInQuery,
   reverseGeocodeBolivia,
-  ResolvedLocationResult
+  BOLIVIA_DEPARTMENTS,
+  BOLIVIA_BOUNDS,
+  isInsideBolivia,
+  ResolvedLocationResult,
+  BoliviaDepartmentView
 } from '../utils/boliviaLocations';
 
 interface PatrolEditorModalProps {
@@ -60,17 +66,21 @@ const AVAILABLE_EQUIPMENT = [
 ];
 
 const TILE_LAYERS = {
-  DARK: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; OpenStreetMap &copy; CARTO'
+  STREETS: {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; OpenStreetMap'
   },
   SATELLITE: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: 'Tiles &copy; Esri'
   },
-  STREETS: {
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; OpenStreetMap'
+  TOPO: {
+    url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; OpenStreetMap &copy; OpenTopoMap'
+  },
+  DARK: {
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; OpenStreetMap &copy; CARTO'
   }
 } as const;
 
@@ -109,15 +119,42 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [isLocatingGps, setIsLocatingGps] = useState(false);
   const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
-  const [geoFeedback, setGeoFeedback] = useState<{ type: 'ok' | 'info' | 'error'; text: string } | null>(null);
+  const [geoFeedback, setGeoFeedback] = useState<{ type: 'ok' | 'info' | 'warn' | 'error'; text: string } | null>(null);
   const [showMapPicker, setShowMapPicker] = useState(false);
-  const [mapLayer, setMapLayer] = useState<MapLayerKey>('DARK');
+  const [mapLayer, setMapLayer] = useState<MapLayerKey>('STREETS');
+  const [followMapCenter, setFollowMapCenter] = useState(true);
+  const [isUnknownPlaceMode, setIsUnknownPlaceMode] = useState(false);
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.Marker | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
   const suggestionsContainerRef = useRef<HTMLDivElement | null>(null);
+  const followMapCenterRef = useRef<boolean>(true);
+  const isProgrammaticMapMoveRef = useRef<boolean>(false);
+  const pendingMapViewRef = useRef<{ lat: number; lon: number; zoom: number } | null>(null);
+  const autoGeocodeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoGeocodeReqIdRef = useRef<number>(0);
+
+  useEffect(() => {
+    followMapCenterRef.current = followMapCenter;
+  }, [followMapCenter]);
+
+  const moveMapProgrammatically = (lat: number, lon: number, zoom?: number) => {
+    const map = mapInstanceRef.current;
+    const marker = markerRef.current;
+    if (!map || !marker) {
+      pendingMapViewRef.current = { lat, lon, zoom: zoom ?? 11 };
+      return;
+    }
+    isProgrammaticMapMoveRef.current = true;
+    marker.setLatLng([lat, lon]);
+    const targetZoom = zoom ?? Math.max(map.getZoom(), 10);
+    map.setView([lat, lon], targetZoom, { animate: true });
+    window.setTimeout(() => {
+      isProgrammaticMapMoveRef.current = false;
+    }, 350);
+  };
 
   const syncDecimalsFromCoordString = (coordStr: string) => {
     const parsed = parseCoordinates(coordStr);
@@ -134,12 +171,9 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
     setCoordinates(dms);
     setDecimalLat(clampedLat.toFixed(5));
     setDecimalLon(clampedLon.toFixed(5));
+    setIsUnknownPlaceMode(false);
 
-    if (mapInstanceRef.current && markerRef.current) {
-      markerRef.current.setLatLng([clampedLat, clampedLon]);
-      const targetZoom = panZoom ?? Math.max(mapInstanceRef.current.getZoom(), 9);
-      mapInstanceRef.current.setView([clampedLat, clampedLon], targetZoom, { animate: true });
-    }
+    moveMapProgrammatically(clampedLat, clampedLon, panZoom);
 
     if (feedbackText) {
       setGeoFeedback({ type: 'ok', text: feedbackText });
@@ -148,11 +182,19 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      if (autoGeocodeTimerRef.current) {
+        clearTimeout(autoGeocodeTimerRef.current);
+        autoGeocodeTimerRef.current = null;
+      }
+      autoGeocodeReqIdRef.current += 1;
+      pendingMapViewRef.current = null;
       setConfirmDelete(false);
       setGeoFeedback(null);
       setPlaceSuggestions([]);
       setShowSuggestions(false);
       setShowMapPicker(false);
+      setIsUnknownPlaceMode(false);
+      setFollowMapCenter(true);
 
       if (mode === 'EDIT' && patrol) {
         const initCoords = patrol.coordinates || '19°13\'10"S 68°35\'50"W';
@@ -207,6 +249,15 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [showSuggestions]);
 
+  // Cleanup pending auto-geocode timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoGeocodeTimerRef.current) {
+        clearTimeout(autoGeocodeTimerRef.current);
+      }
+    };
+  }, []);
+
   // Initialize & teardown interactive Leaflet Map Picker of Bolivia
   useEffect(() => {
     if (!isOpen || !showMapPicker || !mapContainerRef.current) {
@@ -219,14 +270,25 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
       return;
     }
 
+    const pendingView = pendingMapViewRef.current;
+    pendingMapViewRef.current = null;
     const parsed = parseCoordinates(coordinates);
-    const initialLat = parsed ? parsed.lat : -16.2902;
-    const initialLon = parsed ? parsed.lon : -63.5887;
-    const initialZoom = parsed ? 10 : 5;
+    const initialLat = pendingView ? pendingView.lat : parsed ? parsed.lat : BOLIVIA_BOUNDS.centerLat;
+    const initialLon = pendingView ? pendingView.lon : parsed ? parsed.lon : BOLIVIA_BOUNDS.centerLon;
+    const initialZoom = pendingView ? pendingView.zoom : parsed ? 10 : 6;
+
+    const boliviaMaxBounds = L.latLngBounds(
+      L.latLng(-25.5, -73.0),
+      L.latLng(-7.5, -54.5)
+    );
 
     const map = L.map(mapContainerRef.current, {
       center: [initialLat, initialLon],
       zoom: initialZoom,
+      minZoom: 5,
+      maxZoom: 18,
+      maxBounds: boliviaMaxBounds,
+      maxBoundsViscosity: 0.7,
       zoomControl: true
     });
 
@@ -239,9 +301,9 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
 
     const tacticalPinIcon = L.divIcon({
       className: 'patrol-picker-pin',
-      html: `<div style="width:22px;height:22px;border-radius:9999px;background:#eab308;border:3px solid #0b0c10;box-shadow:0 0 14px rgba(234,179,8,0.9);display:flex;align-items:center;justify-content:center;"><div style="width:6px;height:6px;border-radius:9999px;background:#0b0c10;"></div></div>`,
-      iconSize: [22, 22],
-      iconAnchor: [11, 11]
+      html: `<div style="width:24px;height:24px;border-radius:9999px;background:#eab308;border:3px solid #0b0c10;box-shadow:0 0 16px rgba(234,179,8,0.95);display:flex;align-items:center;justify-content:center;"><div style="width:6px;height:6px;border-radius:9999px;background:#0b0c10;"></div></div>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
     });
 
     const marker = L.marker([initialLat, initialLon], {
@@ -249,31 +311,92 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
       icon: tacticalPinIcon
     }).addTo(map);
 
-    marker.on('dragend', () => {
+    const updateFromLatLng = (lat: number, lng: number, feedback?: string, beepFreq?: number) => {
+      const dms = formatToMilitaryDMS(lat, lng);
+      setCoordinates(dms);
+      setDecimalLat(lat.toFixed(5));
+      setDecimalLon(lng.toFixed(5));
+      if (feedback) {
+        setGeoFeedback({
+          type: isInsideBolivia(lat, lng) ? 'ok' : 'warn',
+          text: feedback
+        });
+      }
+      if (beepFreq) {
+        playSyntheticBeep(beepFreq, 0.04, 'sine');
+      }
+    };
+
+    // Live updates while moving/panning the map (Mira Central mode)
+    map.on('move', () => {
+      if (isProgrammaticMapMoveRef.current || !followMapCenterRef.current) return;
+      const center = map.getCenter();
+      marker.setLatLng([center.lat, center.lng]);
+      const dms = formatToMilitaryDMS(center.lat, center.lng);
+      setCoordinates(dms);
+      setDecimalLat(center.lat.toFixed(5));
+      setDecimalLon(center.lng.toFixed(5));
+    });
+
+    map.on('moveend', () => {
+      if (isProgrammaticMapMoveRef.current || !followMapCenterRef.current) return;
+      const center = map.getCenter();
+      marker.setLatLng([center.lat, center.lng]);
+      const dms = formatToMilitaryDMS(center.lat, center.lng);
+      const inside = isInsideBolivia(center.lat, center.lng);
+      updateFromLatLng(
+        center.lat,
+        center.lng,
+        inside
+          ? `Coordenadas obtenidas al mover el mapa: ${dms} (${center.lat.toFixed(5)}, ${center.lng.toFixed(5)})`
+          : `Atención: punto fuera de límites de Bolivia (${dms}). Desplaza el mapa hacia territorio nacional.`
+      );
+    });
+
+    // Live updates while dragging the yellow tactical pin
+    marker.on('drag', () => {
       const pos = marker.getLatLng();
       const dms = formatToMilitaryDMS(pos.lat, pos.lng);
       setCoordinates(dms);
       setDecimalLat(pos.lat.toFixed(5));
       setDecimalLon(pos.lng.toFixed(5));
-      setGeoFeedback({
-        type: 'ok',
-        text: `Pin ajustado manualmente: ${dms} (${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)})`
-      });
-      playSyntheticBeep(820, 0.04, 'sine');
     });
 
+    marker.on('dragend', () => {
+      const pos = marker.getLatLng();
+      const dms = formatToMilitaryDMS(pos.lat, pos.lng);
+      const inside = isInsideBolivia(pos.lat, pos.lng);
+      updateFromLatLng(
+        pos.lat,
+        pos.lng,
+        inside
+          ? `Pin ajustado manualmente: ${dms} (${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)})`
+          : `Atención: pin fuera de territorio de Bolivia (${dms}).`,
+        820
+      );
+    });
+
+    // Click anywhere on Bolivia map to jump pin & extract coordinates immediately
     map.on('click', (e: L.LeafletMouseEvent) => {
       const { lat, lng } = e.latlng;
       marker.setLatLng([lat, lng]);
+      if (followMapCenterRef.current) {
+        isProgrammaticMapMoveRef.current = true;
+        map.panTo([lat, lng], { animate: true });
+        window.setTimeout(() => {
+          isProgrammaticMapMoveRef.current = false;
+        }, 300);
+      }
       const dms = formatToMilitaryDMS(lat, lng);
-      setCoordinates(dms);
-      setDecimalLat(lat.toFixed(5));
-      setDecimalLon(lng.toFixed(5));
-      setGeoFeedback({
-        type: 'ok',
-        text: `Ubicación fijada en mapa: ${dms} (${lat.toFixed(5)}, ${lng.toFixed(5)}) — Puedes seguir ajustando.`
-      });
-      playSyntheticBeep(880, 0.05, 'sine');
+      const inside = isInsideBolivia(lat, lng);
+      updateFromLatLng(
+        lat,
+        lng,
+        inside
+          ? `Ubicación fijada en mapa de Bolivia: ${dms} (${lat.toFixed(5)}, ${lng.toFixed(5)})`
+          : `Punto marcado (${dms}). Verifica que se encuentre dentro de Bolivia.`,
+        880
+      );
     });
 
     mapInstanceRef.current = map;
@@ -311,31 +434,142 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
   const parsedCurrentCoords = parseCoordinates(coordinates);
 
   const handleSelectPreset = (preset: typeof SECTOR_PRESETS[0]) => {
+    if (autoGeocodeTimerRef.current) {
+      clearTimeout(autoGeocodeTimerRef.current);
+      autoGeocodeTimerRef.current = null;
+    }
+    autoGeocodeReqIdRef.current += 1;
     setSector(preset.name);
     setCoordinates(preset.coords);
     syncDecimalsFromCoordString(preset.coords);
     setFrequency(preset.freq);
     setShowSuggestions(false);
+    setIsUnknownPlaceMode(false);
     const parsed = parseCoordinates(preset.coords);
-    if (parsed && mapInstanceRef.current && markerRef.current) {
-      markerRef.current.setLatLng([parsed.lat, parsed.lon]);
-      mapInstanceRef.current.setView([parsed.lat, parsed.lon], 10, { animate: true });
+    if (parsed) {
+      moveMapProgrammatically(parsed.lat, parsed.lon, 10);
     }
     setGeoFeedback({
       type: 'ok',
-      text: `Hito cargado: ${preset.name}. Puedes modificar las coordenadas libremente.`
+      text: `Hito cargado: ${preset.name}. Puedes modificar las coordenadas o mover el mapa libremente.`
     });
     playSyntheticBeep(750, 0.05, 'sine');
   };
 
+  const openMapForUnknownPlace = (query: string) => {
+    const deptHint = detectDepartmentHintInQuery(query);
+    const targetLat = deptHint ? deptHint.lat : BOLIVIA_BOUNDS.centerLat;
+    const targetLon = deptHint ? deptHint.lon : BOLIVIA_BOUNDS.centerLon;
+    const targetZoom = deptHint ? deptHint.zoom : 6;
+
+    setIsUnknownPlaceMode(true);
+    setFollowMapCenter(true);
+    setShowSuggestions(false);
+
+    if (showMapPicker && mapInstanceRef.current && markerRef.current) {
+      moveMapProgrammatically(targetLat, targetLon, targetZoom);
+    } else {
+      pendingMapViewRef.current = { lat: targetLat, lon: targetLon, zoom: targetZoom };
+      setShowMapPicker(true);
+    }
+
+    setGeoFeedback({
+      type: 'warn',
+      text: deptHint
+        ? `Lugar "${query}" no encontrado en el registro. Se abrió el mapa en ${deptHint.label}: desplaza el mapa o haz clic para obtener sus coordenadas.`
+        : `Lugar "${query}" no conocido en el registro de Bolivia. Muévete por el mapa (arrastra, haz zoom o haz clic) para obtener las coordenadas exactas.`
+    });
+  };
+
+  const executeBoliviaGeocode = async (queryRaw: string, isAuto: boolean) => {
+    const query = queryRaw.trim();
+    if (!query) {
+      if (!isAuto) {
+        setGeoFeedback({ type: 'error', text: 'Escriba un lugar, ciudad, comunidad o hito de Bolivia para ubicarlo.' });
+      }
+      return;
+    }
+
+    const reqId = ++autoGeocodeReqIdRef.current;
+    setIsGeocoding(true);
+    if (!isAuto) {
+      setGeoFeedback({ type: 'info', text: `Buscando "${query}" en todo el territorio de Bolivia...` });
+    }
+
+    try {
+      const results = await resolveBoliviaLocation(query);
+      // Ignore stale responses if the operator kept typing
+      if (reqId !== autoGeocodeReqIdRef.current) return;
+
+      if (results.length > 0) {
+        const best = results[0];
+        setPlaceSuggestions(results);
+        setShowSuggestions(!isAuto && results.length > 1);
+        applyLatLonPosition(
+          best.lat,
+          best.lon,
+          `✓ Coordenadas de ${best.displayName}: ${best.dms}. Puedes ajustarlas manualmente o en el mapa.`,
+          11
+        );
+        if (!isAuto) {
+          playSyntheticBeep(900, 0.08, 'sine');
+        }
+      } else {
+        setPlaceSuggestions([]);
+        openMapForUnknownPlace(query);
+      }
+    } finally {
+      if (reqId === autoGeocodeReqIdRef.current) {
+        setIsGeocoding(false);
+      }
+    }
+  };
+
   const handleSectorChange = (val: string) => {
     setSector(val);
-    const matches = searchLocalBoliviaLocations(val, 6);
+    if (autoGeocodeTimerRef.current) {
+      clearTimeout(autoGeocodeTimerRef.current);
+      autoGeocodeTimerRef.current = null;
+    }
+
+    const trimmed = val.trim();
+    const matches = searchLocalBoliviaLocations(trimmed, 6);
     setPlaceSuggestions(matches);
-    setShowSuggestions(matches.length > 0 && val.trim().length >= 2);
+    setShowSuggestions(matches.length > 0 && trimmed.length >= 2);
+
+    if (trimmed.length < 3) {
+      autoGeocodeReqIdRef.current += 1;
+      setIsGeocoding(false);
+      return;
+    }
+
+    // 1. Zero-latency auto-coordinates when matching a known Bolivian city/town/border immediately
+    const instantMatch = findBestInstantBoliviaMatch(trimmed);
+    if (instantMatch) {
+      autoGeocodeReqIdRef.current += 1;
+      setIsGeocoding(false);
+      applyLatLonPosition(
+        instantMatch.lat,
+        instantMatch.lon,
+        `✓ Ubicación automática en Bolivia: ${instantMatch.displayName} (${instantMatch.dms})`,
+        11
+      );
+      return;
+    }
+
+    // 2. Automatic debounced search across ALL of Bolivia (Nominatim + Photon) as user finishes typing
+    autoGeocodeTimerRef.current = setTimeout(() => {
+      void executeBoliviaGeocode(trimmed, true);
+    }, 600);
   };
 
   const handlePickSuggestion = (loc: ResolvedLocationResult) => {
+    if (autoGeocodeTimerRef.current) {
+      clearTimeout(autoGeocodeTimerRef.current);
+      autoGeocodeTimerRef.current = null;
+    }
+    autoGeocodeReqIdRef.current += 1;
+    setIsGeocoding(false);
     const label = loc.department && !loc.name.toLowerCase().includes(loc.department.toLowerCase())
       ? `${loc.name} - ${loc.department}`
       : loc.name;
@@ -344,43 +578,34 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
     applyLatLonPosition(
       loc.lat,
       loc.lon,
-      `Ubicado en ${loc.displayName}. Ahora puedes modificar las coordenadas manualmente o en el mapa.`,
+      `✓ Ubicado en ${loc.displayName} (${loc.dms}). Puedes mover el mapa o editar las coordenadas.`,
       11
     );
     playSyntheticBeep(840, 0.06, 'sine');
   };
 
   const handleGeocodeSector = async () => {
-    const query = sector.trim();
-    if (!query) {
-      setGeoFeedback({ type: 'error', text: 'Escriba un lugar, ciudad o hito de Bolivia para ubicarlo.' });
-      return;
+    if (autoGeocodeTimerRef.current) {
+      clearTimeout(autoGeocodeTimerRef.current);
+      autoGeocodeTimerRef.current = null;
     }
+    await executeBoliviaGeocode(sector, false);
+  };
 
-    setIsGeocoding(true);
-    setGeoFeedback({ type: 'info', text: `Buscando "${query}" en el territorio nacional...` });
-    try {
-      const results = await resolveBoliviaLocation(query);
-      if (results.length > 0) {
-        const best = results[0];
-        setPlaceSuggestions(results);
-        setShowSuggestions(results.length > 1);
-        applyLatLonPosition(
-          best.lat,
-          best.lon,
-          `Ubicado en ${best.displayName} (${best.dms}). Puedes editar las coordenadas libremente.`,
-          11
-        );
-        playSyntheticBeep(900, 0.08, 'sine');
-      } else {
-        setGeoFeedback({
-          type: 'error',
-          text: `No se encontró "${query}" automáticamente. Ingresa las coordenadas manualmente o marca el punto en el Mapa de Bolivia.`
-        });
-      }
-    } finally {
-      setIsGeocoding(false);
-    }
+  const handleJumpDepartment = (dept: BoliviaDepartmentView) => {
+    const dms = formatToMilitaryDMS(dept.lat, dept.lon);
+    setCoordinates(dms);
+    setDecimalLat(dept.lat.toFixed(5));
+    setDecimalLon(dept.lon.toFixed(5));
+    moveMapProgrammatically(dept.lat, dept.lon, dept.zoom);
+    setGeoFeedback({
+      type: 'info',
+      text:
+        dept.id === 'ALL'
+          ? 'Vista completa de Bolivia. Haz zoom y desplaza el mapa hasta el lugar exacto.'
+          : `Mapa centrado en ${dept.label} (${dms}). Desplaza el mapa o haz clic para afinar las coordenadas.`
+    });
+    playSyntheticBeep(760, 0.04, 'sine');
   };
 
   const handleCoordinatesInputChange = (val: string) => {
@@ -389,10 +614,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
     if (parsed) {
       setDecimalLat(parsed.lat.toFixed(5));
       setDecimalLon(parsed.lon.toFixed(5));
-      if (mapInstanceRef.current && markerRef.current) {
-        markerRef.current.setLatLng([parsed.lat, parsed.lon]);
-        mapInstanceRef.current.panTo([parsed.lat, parsed.lon], { animate: true });
-      }
+      moveMapProgrammatically(parsed.lat, parsed.lon);
     }
   };
 
@@ -411,10 +633,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
     ) {
       const dms = formatToMilitaryDMS(latNum, lonNum);
       setCoordinates(dms);
-      if (mapInstanceRef.current && markerRef.current) {
-        markerRef.current.setLatLng([latNum, lonNum]);
-        mapInstanceRef.current.panTo([latNum, lonNum], { animate: true });
-      }
+      moveMapProgrammatically(latNum, lonNum);
     }
   };
 
@@ -695,10 +914,10 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="text-[10px] font-bold text-cyan-300 uppercase flex items-center gap-1.5">
                 <MapPin className="w-3.5 h-3.5 text-cyan-400" />
-                Sector y Coordenadas Geográficas (Todo el Territorio Nacional)
+                Sector y Coordenadas Geográficas (Todo el Territorio de Bolivia)
               </label>
               <span className="text-[9px] text-neutral-400">
-                Ubica cualquier lugar de Bolivia y modifica las coordenadas libremente
+                Al escribir el lugar aparecen sus coordenadas; si no es conocido, muévete en el mapa
               </span>
             </div>
 
@@ -720,11 +939,11 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
               ))}
             </div>
 
-            {/* Sector / Place Name with Autocomplete & Geocoder + Editable Coordinates */}
+            {/* Sector / Place Name with Auto-Geocoder + Editable Coordinates */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div ref={suggestionsContainerRef} className="relative">
                 <label className="block text-[9px] text-neutral-400 uppercase mb-0.5">
-                  Nombre de Sector / Lugar / Hito (Ej. San Matías, Cobija, Yacuiba...)
+                  Lugar / Municipio / Comunidad / Hito en Bolivia (Auto-Ubica al Escribir)
                 </label>
                 <div className="flex gap-1.5">
                   <div className="relative flex-1">
@@ -747,7 +966,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                           handleGeocodeSector();
                         }
                       }}
-                      placeholder="Ej: San Matías, Puerto Quijarro, Desaguadero..."
+                      placeholder="Ej: San Matías, Mizque, Samaipata, Cobija, Yacuiba..."
                       className="w-full bg-[#141620] border border-neutral-700 rounded-lg pl-8 pr-2.5 py-1.5 text-white focus:outline-none focus:border-cyan-400"
                     />
                   </div>
@@ -755,7 +974,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                     type="button"
                     onClick={handleGeocodeSector}
                     disabled={isGeocoding}
-                    title="Buscar coordenadas automáticas de este lugar en Bolivia (luego podrás modificarlas)"
+                    title="Buscar coordenadas automáticas de este lugar en Bolivia (o abrir mapa si no es conocido)"
                     className="px-2.5 py-1.5 rounded-lg bg-cyan-600/25 hover:bg-cyan-600/40 text-cyan-300 border border-cyan-500/50 text-[10px] font-bold flex items-center gap-1 whitespace-nowrap transition-all cursor-pointer disabled:opacity-50"
                   >
                     {isGeocoding ? (
@@ -791,17 +1010,30 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-0.5">
                   <label className="block text-[9px] text-neutral-400 uppercase">
-                    Coordenadas Lat / Lon (DMS o Decimal — Editables)
+                    Coordenadas Lat / Lon (Automáticas y Editables)
                   </label>
-                  {coordinates.trim() && (
+                  {isGeocoding ? (
+                    <span className="text-[9px] font-bold text-cyan-300 flex items-center gap-1">
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                      Buscando en Bolivia...
+                    </span>
+                  ) : coordinates.trim() ? (
                     <span
                       className={`text-[9px] font-bold ${
-                        parsedCurrentCoords ? 'text-emerald-400' : 'text-amber-400'
+                        parsedCurrentCoords
+                          ? isInsideBolivia(parsedCurrentCoords.lat, parsedCurrentCoords.lon)
+                            ? 'text-emerald-400'
+                            : 'text-amber-400'
+                          : 'text-amber-400'
                       }`}
                     >
-                      {parsedCurrentCoords ? '✓ Coordenadas válidas' : '⚠ Revisar formato'}
+                      {parsedCurrentCoords
+                        ? isInsideBolivia(parsedCurrentCoords.lat, parsedCurrentCoords.lon)
+                          ? '✓ Coordenadas en Bolivia'
+                          : '⚠ Fuera de límite nacional'
+                        : '⚠ Revisar formato'}
                     </span>
-                  )}
+                  ) : null}
                 </div>
                 <div className="flex gap-1.5">
                   <input
@@ -869,7 +1101,7 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                   }`}
                 >
                   <MapIcon className="w-3.5 h-3.5" />
-                  {showMapPicker ? 'Ocultar Mapa' : 'Ubicar en Mapa de Bolivia'}
+                  {showMapPicker ? 'Ocultar Mapa' : 'Mover en Mapa de Bolivia'}
                 </button>
 
                 <button
@@ -910,6 +1142,8 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                 className={`px-2.5 py-1.5 rounded-lg text-[10px] border flex items-center justify-between gap-2 ${
                   geoFeedback.type === 'ok'
                     ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                    : geoFeedback.type === 'warn'
+                    ? 'bg-amber-950/50 border-amber-500/50 text-amber-200'
                     : geoFeedback.type === 'error'
                     ? 'bg-red-950/40 border-red-500/40 text-red-300'
                     : 'bg-cyan-950/40 border-cyan-500/40 text-cyan-300'
@@ -919,23 +1153,62 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setGeoFeedback(null)}
-                  className="text-neutral-400 hover:text-white cursor-pointer"
+                  className="text-neutral-400 hover:text-white cursor-pointer shrink-0"
                 >
                   <X className="w-3 h-3" />
                 </button>
               </div>
             )}
 
-            {/* Embedded Interactive Map of Bolivia (Click Anywhere or Drag Tactical Pin) */}
+            {/* Embedded Interactive Map of Bolivia (Pan/Move Live Crosshair, Click Anywhere, or Drag Tactical Pin) */}
             {showMapPicker && (
-              <div className="space-y-1.5 pt-1">
+              <div className="space-y-2 pt-1.5 border-t border-cyan-500/20">
+                {/* 9-Department Quick Jump Bar */}
+                <div className="flex flex-wrap items-center gap-1">
+                  <span className="text-[9px] text-neutral-400 uppercase mr-1">Ir a Depto:</span>
+                  {BOLIVIA_DEPARTMENTS.map((dept) => (
+                    <button
+                      key={dept.id}
+                      type="button"
+                      onClick={() => handleJumpDepartment(dept)}
+                      className={`px-2 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer ${
+                        dept.id === 'ALL'
+                          ? 'bg-cyan-950/60 border-cyan-500/40 text-cyan-200 hover:bg-cyan-900/60'
+                          : 'bg-neutral-900/90 border-neutral-700/80 text-neutral-300 hover:text-yellow-200 hover:border-yellow-500/50'
+                      }`}
+                    >
+                      {dept.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Map Instructions, Center-Crosshair Mode Toggle & 4 Map Layers */}
                 <div className="flex flex-wrap items-center justify-between gap-2 text-[10px]">
-                  <span className="text-yellow-300/90 flex items-center gap-1">
-                    <Navigation className="w-3 h-3" />
-                    Haz clic en cualquier punto del territorio nacional o arrastra el marcador amarillo
-                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-yellow-300/95 flex items-center gap-1">
+                      <Navigation className="w-3 h-3 shrink-0" />
+                      {followMapCenter
+                        ? isUnknownPlaceMode
+                          ? 'Mueve el mapa sobre el lugar desconocido: las coordenadas salen en vivo'
+                          : 'Arrastra el mapa, haz zoom o haz clic para obtener coordenadas en vivo'
+                        : 'Haz clic en cualquier punto de Bolivia o arrastra el marcador amarillo'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setFollowMapCenter((prev) => !prev)}
+                      title="Activa la mira central para obtener coordenadas automáticamente al mover el mapa"
+                      className={`px-2 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer ${
+                        followMapCenter
+                          ? 'bg-yellow-500/25 border-yellow-400/70 text-yellow-200'
+                          : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      {followMapCenter ? '⊕ Mira Central: ACTIVA' : '⊕ Activar Mira Central'}
+                    </button>
+                  </div>
+
                   <div className="flex items-center gap-1">
-                    {(['DARK', 'SATELLITE', 'STREETS'] as MapLayerKey[]).map((layerKey) => (
+                    {(['STREETS', 'SATELLITE', 'TOPO', 'DARK'] as MapLayerKey[]).map((layerKey) => (
                       <button
                         key={layerKey}
                         type="button"
@@ -946,15 +1219,63 @@ export const PatrolEditorModal: React.FC<PatrolEditorModalProps> = ({
                             : 'bg-neutral-900 border-neutral-700 text-neutral-400 hover:text-white'
                         }`}
                       >
-                        {layerKey === 'DARK' ? 'Táctico' : layerKey === 'SATELLITE' ? 'Satélite' : 'Calles'}
+                        {layerKey === 'STREETS'
+                          ? 'Calles'
+                          : layerKey === 'SATELLITE'
+                          ? 'Satélite'
+                          : layerKey === 'TOPO'
+                          ? 'Relieve'
+                          : 'Táctico'}
                       </button>
                     ))}
                   </div>
                 </div>
-                <div
-                  ref={mapContainerRef}
-                  className="w-full h-56 rounded-xl border border-yellow-500/40 overflow-hidden bg-[#090b10]"
-                />
+
+                {/* Interactive Map Canvas + Center Crosshair + Floating Live Coordinates Readout */}
+                <div className="relative rounded-xl overflow-hidden border border-yellow-500/50 bg-[#090b10]">
+                  <div
+                    ref={mapContainerRef}
+                    className="w-full h-72 sm:h-80"
+                  />
+
+                  {/* Central Aiming Crosshair Overlay when Mira Central is active */}
+                  {followMapCenter && (
+                    <div className="pointer-events-none absolute inset-0 z-[400] flex items-center justify-center">
+                      <div className="relative w-12 h-12 flex items-center justify-center">
+                        <div className="absolute inset-x-0 top-1/2 h-[1.5px] bg-yellow-400/80 shadow-[0_0_6px_rgba(250,204,21,0.9)]" />
+                        <div className="absolute inset-y-0 left-1/2 w-[1.5px] bg-yellow-400/80 shadow-[0_0_6px_rgba(250,204,21,0.9)]" />
+                        <div className="w-7 h-7 rounded-full border-2 border-yellow-400/90 shadow-[0_0_12px_rgba(250,204,21,0.65)]" />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Floating Live Coordinate HUD Overlay */}
+                  <div className="pointer-events-none absolute bottom-2 left-2 z-[400] bg-black/85 backdrop-blur-md border border-yellow-500/50 rounded-lg px-2.5 py-1.5 shadow-xl">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-yellow-300 font-mono">
+                        {coordinates || 'Mueva el mapa...'}
+                      </span>
+                      {parsedCurrentCoords && (
+                        <span
+                          className={`text-[8px] font-bold px-1.5 py-0.5 rounded border ${
+                            isInsideBolivia(parsedCurrentCoords.lat, parsedCurrentCoords.lon)
+                              ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300'
+                              : 'bg-amber-950/80 border-amber-500/50 text-amber-300'
+                          }`}
+                        >
+                          {isInsideBolivia(parsedCurrentCoords.lat, parsedCurrentCoords.lon)
+                            ? 'BOLIVIA ✓'
+                            : 'FUERA DE LÍMITE'}
+                        </span>
+                      )}
+                    </div>
+                    {decimalLat && decimalLon && (
+                      <div className="text-[9px] text-cyan-300/90 font-mono mt-0.5">
+                        Lat: {decimalLat} &nbsp;|&nbsp; Lon: {decimalLon}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </div>

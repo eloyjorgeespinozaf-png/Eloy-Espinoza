@@ -10,6 +10,8 @@
  */
 
 import { safeStorage } from '../utils/storage';
+import { cloudRealtimeMesh } from './CloudRealtimeMesh';
+import { SUPABASE_CONFIG } from '../lib/supabase';
 
 export interface SyncedDeviceRecord {
   deviceId: string;
@@ -225,7 +227,8 @@ export function normalizeCrossVersionState(state: any): {
 }
 
 /**
- * Fetches connected devices from the server.
+ * Fetches connected devices from both the Express sync server (if active)
+ * and the global Supabase Realtime Cloud Mesh (always active on Vercel & PWAs).
  */
 export async function fetchConnectedDevicesList(): Promise<SyncedDeviceRecord[]> {
   const hubUrl = getActiveSyncHubUrl();
@@ -237,20 +240,27 @@ export async function fetchConnectedDevicesList(): Promise<SyncedDeviceRecord[]>
         'X-Platform': detectDevicePlatform()
       }
     });
-    if (res.ok) {
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && ct.includes('application/json')) {
       const data = await res.json();
-      return Array.isArray(data.devices) ? data.devices : [];
+      if (Array.isArray(data.devices)) {
+        return cloudRealtimeMesh.mergeExpressDevices(data.devices);
+      }
     }
-  } catch (err) {
-    console.warn('[MultiDeviceSync] Failed to fetch connected devices list:', err);
+  } catch {
+    // Express hub unavailable (e.g. static Vercel deploy) — fall back to Cloud Realtime Mesh
   }
-  return [];
+  return cloudRealtimeMesh.getMergedDevices();
 }
 
 /**
  * Triggers a manual full-state network broadcast request across all devices.
  */
 export async function triggerForceBroadcastAcrossAllDevices(): Promise<boolean> {
+  const cloudSent = await cloudRealtimeMesh.broadcastAction('TRIGGER_FORCE_BROADCAST', {
+    requestedAt: Date.now()
+  });
+
   const hubUrl = getActiveSyncHubUrl();
   try {
     const res = await fetch(`${hubUrl}/api/sync/force-broadcast`, {
@@ -260,11 +270,11 @@ export async function triggerForceBroadcastAcrossAllDevices(): Promise<boolean> 
         'X-Device-Id': getOrCreateDeviceId()
       }
     });
-    return res.ok;
-  } catch (err) {
-    console.warn('[MultiDeviceSync] Error triggering force broadcast:', err);
-    return false;
+    if (res.ok) return true;
+  } catch {
+    // Non-blocking on static deployments
   }
+  return cloudSent;
 }
 
 /**
@@ -317,26 +327,37 @@ export async function sendDirectSyncAction(type: string, payload: any): Promise<
 }
 
 /**
- * Measures round-trip time (RTT latency) in milliseconds to the active sync hub.
+ * Measures round-trip time (RTT latency) in milliseconds to the active sync hub or Supabase Cloud.
  */
 export async function measureServerLatency(): Promise<number> {
   const hubUrl = getActiveSyncHubUrl();
-  const start = performance.now();
-  try {
-    const res = await fetch(`${hubUrl}/api/version`, {
-      cache: 'no-store',
-      headers: {
-        'X-Device-Id': getOrCreateDeviceId()
+  const endpoints = [
+    `${hubUrl}/api/version?t=${Date.now()}`,
+    `${hubUrl}/version.json?t=${Date.now()}`,
+    `${SUPABASE_CONFIG.url}/auth/v1/settings`
+  ];
+
+  for (const endpoint of endpoints) {
+    const start = performance.now();
+    try {
+      const headers: Record<string, string> = {};
+      if (endpoint.startsWith(SUPABASE_CONFIG.url)) {
+        headers['apikey'] = SUPABASE_CONFIG.anonKey;
+      } else {
+        headers['X-Device-Id'] = getOrCreateDeviceId();
       }
-    });
-    if (res.ok) {
-      const elapsed = Math.round(performance.now() - start);
-      return elapsed;
+      const res = await fetch(endpoint, {
+        cache: 'no-store',
+        headers
+      });
+      if (res.ok) {
+        return Math.max(1, Math.round(performance.now() - start));
+      }
+    } catch {
+      // try next endpoint
     }
-  } catch {
-    // Network error
   }
-  return 0;
+  return cloudRealtimeMesh.getLastLatencyMs() ?? 0;
 }
 
 /**
@@ -344,7 +365,13 @@ export async function measureServerLatency(): Promise<number> {
  */
 export async function broadcastUnitCoordinatesSync(unitName: string, newCoords: string, unitId?: string): Promise<boolean> {
   broadcastLocalTabSync('UPDATE_UNIT_COORDINATES', { unitName, unitId, newCoords });
-  return sendDirectSyncAction('UPDATE_UNIT_COORDINATES', { unitName, unitId, newCoords });
+  const cloudOk = await cloudRealtimeMesh.broadcastAction('UPDATE_UNIT_COORDINATES', {
+    unitName,
+    unitId,
+    newCoords
+  });
+  const httpOk = await sendDirectSyncAction('UPDATE_UNIT_COORDINATES', { unitName, unitId, newCoords });
+  return cloudOk || httpOk;
 }
 
 /**
@@ -359,9 +386,15 @@ export async function broadcastTacticalCommsSync(message: {
 }): Promise<boolean> {
   const finalMsg = {
     ...message,
+    id: `comms-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     timestamp: message.timestamp || new Date().toISOString()
   };
   broadcastLocalTabSync('TACTICAL_COMMS_BROADCAST', { commsMessage: finalMsg });
-  return sendDirectSyncAction('TACTICAL_RADIO_MESSAGE', { commsMessage: finalMsg });
+  const cloudOk = await cloudRealtimeMesh.broadcastAction('TACTICAL_RADIO_MESSAGE', {
+    commsMessage: finalMsg
+  });
+  const httpOk = await sendDirectSyncAction('TACTICAL_RADIO_MESSAGE', { commsMessage: finalMsg });
+  return cloudOk || httpOk;
 }
+
 
